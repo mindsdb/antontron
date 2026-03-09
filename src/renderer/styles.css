@@ -234,30 +234,30 @@ html, body, #root {
   font-size: 15px;
   font-weight: 600;
   font-family: inherit;
-  border: none;
+  border: 1px solid var(--accent-cyan);
   border-radius: 8px;
   cursor: pointer;
   letter-spacing: 1px;
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  color: var(--bg-primary);
-  transition: all 0.3s ease;
+  background: transparent;
+  color: var(--accent-cyan);
+  transition: all 0.2s ease;
   -webkit-app-region: no-drag;
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--glow-cyan), var(--glow-purple);
+  background: rgba(0, 229, 255, 0.1);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
 }
 
 .btn-primary:active {
-  transform: translateY(0);
+  background: rgba(0, 229, 255, 0.18);
 }
 
 .btn-primary:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
-  transform: none;
   box-shadow: none;
+  background: transparent;
 }
 
 .btn-secondary {
