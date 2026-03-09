@@ -82,6 +82,7 @@ export default function Terminal() {
       lineHeight: 1.3,
       cursorBlink: true,
       cursorStyle: 'bar',
+      rightClickSelectsWord: true,
       theme: {
         background: '#0a0a0f',
         foreground: '#e0e0f0',
@@ -126,6 +127,51 @@ export default function Terminal() {
 
     term.onData((data: string) => {
       window.antontron.sendInput(projectName, data);
+    });
+
+    // Right-click context menu
+    container.addEventListener('contextmenu', (e: MouseEvent) => {
+      e.preventDefault();
+      // Remove any existing menu
+      document.querySelector('.term-context-menu')?.remove();
+
+      const menu = document.createElement('div');
+      menu.className = 'term-context-menu';
+      menu.style.left = `${e.clientX}px`;
+      menu.style.top = `${e.clientY}px`;
+
+      const selection = term.getSelection();
+
+      const copyBtn = document.createElement('button');
+      copyBtn.textContent = 'Copy';
+      copyBtn.disabled = !selection;
+      copyBtn.onclick = () => {
+        navigator.clipboard.writeText(selection);
+        menu.remove();
+      };
+
+      const pasteBtn = document.createElement('button');
+      pasteBtn.textContent = 'Paste';
+      pasteBtn.onclick = async () => {
+        const text = await navigator.clipboard.readText();
+        if (text) window.antontron.sendInput(projectName, text);
+        menu.remove();
+      };
+
+      const selectAllBtn = document.createElement('button');
+      selectAllBtn.textContent = 'Select All';
+      selectAllBtn.onclick = () => {
+        term.selectAll();
+        menu.remove();
+      };
+
+      menu.appendChild(copyBtn);
+      menu.appendChild(pasteBtn);
+      menu.appendChild(selectAllBtn);
+      document.body.appendChild(menu);
+
+      const dismiss = () => { menu.remove(); document.removeEventListener('click', dismiss); };
+      setTimeout(() => document.addEventListener('click', dismiss), 0);
     });
 
     // Image paste handler
