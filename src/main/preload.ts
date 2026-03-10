@@ -56,15 +56,20 @@ contextBridge.exposeInMainWorld('antontron', {
 
   // Minds
   mindsStatus: () => ipcRenderer.invoke(IPC.MINDS_STATUS),
-  mindsList: (url: string, apiKey: string) =>
-    ipcRenderer.invoke(IPC.MINDS_LIST, url, apiKey),
-  mindsGet: (url: string, apiKey: string, mindName: string) =>
-    ipcRenderer.invoke(IPC.MINDS_GET, url, apiKey, mindName),
-  mindsListDatasources: (url: string, apiKey: string) =>
-    ipcRenderer.invoke(IPC.MINDS_LIST_DATASOURCES, url, apiKey),
+  mindsList: (url: string, apiKey: string, sslVerify: boolean) =>
+    ipcRenderer.invoke(IPC.MINDS_LIST, url, apiKey, sslVerify),
+  mindsGet: (url: string, apiKey: string, mindName: string, sslVerify: boolean) =>
+    ipcRenderer.invoke(IPC.MINDS_GET, url, apiKey, mindName, sslVerify),
+  mindsListDatasources: (url: string, apiKey: string, sslVerify: boolean) =>
+    ipcRenderer.invoke(IPC.MINDS_LIST_DATASOURCES, url, apiKey, sslVerify),
   mindsConnect: (url: string, apiKey: string, mindName: string, datasource: string | null, engine: string | null, sslVerify: boolean) =>
     ipcRenderer.invoke(IPC.MINDS_CONNECT, url, apiKey, mindName, datasource, engine, sslVerify),
   mindsDisconnect: () => ipcRenderer.invoke(IPC.MINDS_DISCONNECT),
+  onMindsStatusChanged: (cb: (status: any) => void) => {
+    const listener = (_: any, status: any) => cb(status);
+    ipcRenderer.on(IPC.MINDS_STATUS_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC.MINDS_STATUS_CHANGED, listener);
+  },
 
   // Clipboard
   saveClipboardImage: (base64Data: string) =>
@@ -73,6 +78,7 @@ contextBridge.exposeInMainWorld('antontron', {
   // Projects
   listProjects: () => ipcRenderer.invoke(IPC.PROJECTS_LIST),
   createProject: (name: string) => ipcRenderer.invoke(IPC.PROJECTS_CREATE, name),
+  renameProject: (oldName: string, newName: string) => ipcRenderer.invoke(IPC.PROJECTS_RENAME, oldName, newName),
   deleteProject: (name: string) => ipcRenderer.invoke(IPC.PROJECTS_DELETE, name),
   getActiveProject: () => ipcRenderer.invoke(IPC.PROJECTS_GET_ACTIVE),
   setActiveProject: (name: string) => ipcRenderer.invoke(IPC.PROJECTS_SET_ACTIVE, name),

@@ -356,28 +356,6 @@ html, body, #root {
   white-space: nowrap;
 }
 
-/* Thinking indicator bar */
-.thinking-bar {
-  height: 2px;
-  background: var(--border);
-  border-radius: 1px;
-  overflow: hidden;
-  margin-top: 2px;
-}
-
-.thinking-bar-fill {
-  height: 100%;
-  width: 30%;
-  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
-  border-radius: 1px;
-  animation: thinkSlide 1.2s ease-in-out infinite;
-}
-
-@keyframes thinkSlide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(450%); }
-}
-
 /* Sidebar buttons */
 .sidebar-bottom {
   display: flex;
@@ -544,6 +522,30 @@ html, body, #root {
   margin-top: 4px;
 }
 
+.project-rename-form {
+  flex: 1;
+  padding: 2px 0;
+}
+
+.project-rename-input {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.project-rename-error {
+  font-size: 10px;
+  color: var(--accent-red);
+  padding: 2px 4px 0;
+}
+
 /* ─── Main Area ─── */
 .main-area {
   flex: 1;
@@ -574,6 +576,10 @@ html, body, #root {
   box-shadow: 0 0 8px rgba(105, 240, 174, 0.5);
   flex-shrink: 0;
   transition: all 0.3s ease;
+}
+
+.status-dot.thinking {
+  box-shadow: 0 0 12px rgba(105, 240, 174, 0.7), 0 0 20px rgba(105, 240, 174, 0.3);
 }
 
 .status-dot.disconnected {

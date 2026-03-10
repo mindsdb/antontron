@@ -35,6 +35,10 @@ export default function Terminal() {
     type: 'delete-project' | 'disconnect-mind';
     name: string;
   } | null>(null);
+  const [renamingProject, setRenamingProject] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState('');
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const newProjectInputRef = useRef<HTMLInputElement>(null);
 
   // Per-project terminal instances
@@ -78,7 +82,7 @@ export default function Terminal() {
 
     const term = new Terminal({
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
-      fontSize: 14,
+      fontSize: 13,
       lineHeight: 1.3,
       cursorBlink: true,
       cursorStyle: 'bar',
@@ -302,11 +306,53 @@ export default function Terminal() {
     restartAnton();
   }, [refreshMindsStatus, restartAnton]);
 
+  const startRename = useCallback((name: string) => {
+    setRenamingProject(name);
+    setRenameValue(name);
+    setRenameError('');
+  }, []);
+
+  const commitRename = useCallback(async () => {
+    if (!renamingProject || !renameValue.trim()) {
+      setRenamingProject(null);
+      return;
+    }
+    if (renameValue.trim() === renamingProject) {
+      setRenamingProject(null);
+      return;
+    }
+    const result = await window.antontron.renameProject(renamingProject, renameValue.trim());
+    if ('error' in result) {
+      setRenameError(result.error);
+      return;
+    }
+    // Update terminal instance key
+    const instance = terminalsRef.current.get(renamingProject);
+    if (instance) {
+      terminalsRef.current.delete(renamingProject);
+      terminalsRef.current.set(result.name, instance);
+    }
+    const wasActive = activeProject === renamingProject;
+    setRenamingProject(null);
+    await loadProjects();
+    if (wasActive) {
+      setActiveProject(result.name);
+      showTerminal(result.name);
+    }
+  }, [renamingProject, renameValue, activeProject, loadProjects, showTerminal]);
+
   useEffect(() => {
     if (showNewProject && newProjectInputRef.current) {
       newProjectInputRef.current.focus();
     }
   }, [showNewProject]);
+
+  useEffect(() => {
+    if (renamingProject && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingProject]);
 
   // Set up global IPC listeners for data/exit routed by projectName
   useEffect(() => {
@@ -364,6 +410,14 @@ export default function Terminal() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Listen for external .env changes (e.g. /connect or /disconnect from CLI)
+  useEffect(() => {
+    const unsub = window.antontron.onMindsStatusChanged((status) => {
+      setMindsStatus(status);
+    });
+    return unsub;
+  }, []);
+
   const activeInstance = terminalsRef.current.get(activeProject);
   const connected = activeInstance?.connected ?? false;
   const streaming = activeInstance?.streaming ?? false;
@@ -383,16 +437,11 @@ export default function Terminal() {
           <div className="sidebar-section">
             <div className="sidebar-label">STATUS</div>
             <div className="sidebar-status">
-              <div className={`status-dot ${connected ? '' : 'disconnected'}`} />
+              <div className={`status-dot ${connected ? (streaming ? 'thinking' : '') : 'disconnected'}`} />
               <span className="sidebar-status-text">
-                {connected ? (streaming ? 'Thinking...' : 'Running') : 'Stopped'}
+                {connected ? 'Running' : 'Stopped'}
               </span>
             </div>
-            {connected && streaming && (
-              <div className="thinking-bar">
-                <div className="thinking-bar-fill" />
-              </div>
-            )}
           </div>
 
           <div className="sidebar-divider" />
@@ -406,24 +455,44 @@ export default function Terminal() {
                   key={p.name}
                   className={`project-item ${p.name === activeProject ? 'active' : ''}`}
                 >
-                  <button
-                    className="project-item-btn"
-                    onClick={() => p.name !== activeProject && switchProject(p.name)}
-                  >
-                    <div className={`project-dot ${p.name === activeProject ? '' : 'inactive'}`} />
-                    <span className="project-name">{p.name}</span>
-                  </button>
-                  {p.name !== 'default' && (
-                    <button
-                      className="project-delete"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setConfirmModal({ type: 'delete-project', name: p.name });
-                      }}
-                      title="Delete project"
-                    >
-                      &times;
-                    </button>
+                  {renamingProject === p.name ? (
+                    <div className="project-rename-form">
+                      <input
+                        ref={renameInputRef}
+                        className="project-rename-input"
+                        value={renameValue}
+                        onChange={(e) => { setRenameValue(e.target.value); setRenameError(''); }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitRename();
+                          if (e.key === 'Escape') setRenamingProject(null);
+                        }}
+                        onBlur={commitRename}
+                      />
+                      {renameError && <div className="project-rename-error">{renameError}</div>}
+                    </div>
+                  ) : (
+                    <>
+                      <button
+                        className="project-item-btn"
+                        onClick={() => p.name !== activeProject && switchProject(p.name)}
+                        onDoubleClick={() => p.name !== 'default' && startRename(p.name)}
+                      >
+                        <div className={`project-dot ${p.name === activeProject ? '' : 'inactive'}`} />
+                        <span className="project-name">{p.name}</span>
+                      </button>
+                      {p.name !== 'default' && (
+                        <button
+                          className="project-delete"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConfirmModal({ type: 'delete-project', name: p.name });
+                          }}
+                          title="Delete project"
+                        >
+                          &times;
+                        </button>
+                      )}
+                    </>
                   )}
                 </div>
               ))}
@@ -730,19 +799,16 @@ function MindsPanel({
   const [mindDetails, setMindDetails] = useState<any>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
 
-  // Check if provider is Minds — skip credentials if so
+  // Auto-skip to mind selection if we already have credentials (from previous connect or onboarding)
   useEffect(() => {
     if (!currentStatus.connected) {
       (async () => {
-        const config = await window.antontron.checkConfigured();
-        if (config.provider === 'minds') {
-          // Already have credentials from onboarding, go straight to mind selection
-          const status = await window.antontron.mindsStatus();
-          if (status.apiKey && status.url) {
-            setUrl(status.url);
-            setApiKey(status.apiKey);
-            await fetchMinds(status.url, status.apiKey);
-          }
+        // Check if we already have url+apiKey (e.g. after disconnect or from onboarding)
+        const status = await window.antontron.mindsStatus();
+        if (status.apiKey && status.url) {
+          setUrl(status.url);
+          setApiKey(status.apiKey);
+          await fetchMinds(status.url, status.apiKey);
         }
       })();
     }
@@ -756,7 +822,8 @@ function MindsPanel({
         const res = await window.antontron.mindsGet(
           currentStatus.url || 'https://mdb.ai',
           currentStatus.apiKey || '',
-          currentStatus.mindName!
+          currentStatus.mindName!,
+          sslVerify
         );
         if (res.ok) setMindDetails(res.mind);
         setLoadingDetails(false);
@@ -767,7 +834,7 @@ function MindsPanel({
   const fetchMinds = async (u: string, key: string) => {
     setLoading(true);
     setError('');
-    const res = await window.antontron.mindsList(u, key);
+    const res = await window.antontron.mindsList(u, key, sslVerify);
     setLoading(false);
     if (!res.ok) {
       setError(res.error || 'Failed to connect');
@@ -803,7 +870,7 @@ function MindsPanel({
         const dsName = rawDs.length === 1 ? dsRefName(rawDs[0]) : null;
         let engine: string | null = null;
         if (dsName) {
-          const dsRes = await window.antontron.mindsListDatasources(url, apiKey);
+          const dsRes = await window.antontron.mindsListDatasources(url, apiKey, sslVerify);
           if (dsRes.ok) {
             const match = (dsRes.datasources || []).find((d: any) => d.name === dsName);
             engine = match?.engine || null;
@@ -811,7 +878,7 @@ function MindsPanel({
         }
         await finishConnect(mind.name, dsName, engine);
       } else {
-        const dsRes = await window.antontron.mindsListDatasources(url, apiKey);
+        const dsRes = await window.antontron.mindsListDatasources(url, apiKey, sslVerify);
         if (dsRes.ok) setDatasources(dsRes.datasources || []);
         setStep('select-datasource');
       }
@@ -1014,7 +1081,7 @@ function MindsPanel({
               className="sidebar-btn"
               onClick={() => setStep('credentials')}
             >
-              Back
+              Change Server
             </button>
           )}
           {step === 'select-datasource' && (
