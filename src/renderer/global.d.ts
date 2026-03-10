@@ -22,15 +22,23 @@ interface AntonTronAPI {
     datasource?: string | null;
     engine?: string | null;
   }>;
-  mindsList: (url: string, apiKey: string) =>
+  mindsList: (url: string, apiKey: string, sslVerify: boolean) =>
     Promise<{ ok: boolean; minds?: any[]; error?: string }>;
-  mindsGet: (url: string, apiKey: string, mindName: string) =>
+  mindsGet: (url: string, apiKey: string, mindName: string, sslVerify: boolean) =>
     Promise<{ ok: boolean; mind?: any; error?: string }>;
-  mindsListDatasources: (url: string, apiKey: string) =>
+  mindsListDatasources: (url: string, apiKey: string, sslVerify: boolean) =>
     Promise<{ ok: boolean; datasources?: any[]; error?: string }>;
   mindsConnect: (url: string, apiKey: string, mindName: string, datasource: string | null, engine: string | null, sslVerify: boolean) =>
     Promise<boolean>;
   mindsDisconnect: () => Promise<boolean>;
+  onMindsStatusChanged: (cb: (status: {
+    connected: boolean;
+    url?: string;
+    apiKey?: string;
+    mindName?: string | null;
+    datasource?: string | null;
+    engine?: string | null;
+  }) => void) => () => void;
 
   saveClipboardImage: (base64Data: string) => Promise<string>;
   saveSettings: (content: string) => Promise<boolean>;
@@ -40,6 +48,7 @@ interface AntonTronAPI {
 
   listProjects: () => Promise<{ name: string; path: string }[]>;
   createProject: (name: string) => Promise<{ name: string; path: string } | { error: string }>;
+  renameProject: (oldName: string, newName: string) => Promise<{ name: string; path: string } | { error: string }>;
   deleteProject: (name: string) => Promise<boolean>;
   getActiveProject: () => Promise<string>;
   setActiveProject: (name: string) => Promise<boolean>;

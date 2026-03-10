@@ -24,6 +24,7 @@ export const IPC = {
   // Projects
   PROJECTS_LIST: 'projects:list',
   PROJECTS_CREATE: 'projects:create',
+  PROJECTS_RENAME: 'projects:rename',
   PROJECTS_DELETE: 'projects:delete',
   PROJECTS_GET_ACTIVE: 'projects:get-active',
   PROJECTS_SET_ACTIVE: 'projects:set-active',
@@ -35,6 +36,7 @@ export const IPC = {
   MINDS_LIST_DATASOURCES: 'minds:list-datasources',
   MINDS_CONNECT: 'minds:connect',
   MINDS_DISCONNECT: 'minds:disconnect',
+  MINDS_STATUS_CHANGED: 'minds:status-changed',
 
   // Clipboard
   CLIPBOARD_SAVE_IMAGE: 'clipboard:save-image',

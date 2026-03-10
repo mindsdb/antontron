@@ -234,30 +234,30 @@ html, body, #root {
   font-size: 15px;
   font-weight: 600;
   font-family: inherit;
-  border: none;
+  border: 1px solid var(--accent-cyan);
   border-radius: 8px;
   cursor: pointer;
   letter-spacing: 1px;
-  background: linear-gradient(135deg, var(--accent-cyan), var(--accent-purple));
-  color: var(--bg-primary);
-  transition: all 0.3s ease;
+  background: transparent;
+  color: var(--accent-cyan);
+  transition: all 0.2s ease;
   -webkit-app-region: no-drag;
 }
 
 .btn-primary:hover {
-  transform: translateY(-2px);
-  box-shadow: var(--glow-cyan), var(--glow-purple);
+  background: rgba(0, 229, 255, 0.1);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.15);
 }
 
 .btn-primary:active {
-  transform: translateY(0);
+  background: rgba(0, 229, 255, 0.18);
 }
 
 .btn-primary:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
-  transform: none;
   box-shadow: none;
+  background: transparent;
 }
 
 .btn-secondary {
@@ -354,28 +354,6 @@ html, body, #root {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Thinking indicator bar */
-.thinking-bar {
-  height: 2px;
-  background: var(--border);
-  border-radius: 1px;
-  overflow: hidden;
-  margin-top: 2px;
-}
-
-.thinking-bar-fill {
-  height: 100%;
-  width: 30%;
-  background: linear-gradient(90deg, var(--accent-cyan), var(--accent-purple));
-  border-radius: 1px;
-  animation: thinkSlide 1.2s ease-in-out infinite;
-}
-
-@keyframes thinkSlide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(450%); }
 }
 
 /* Sidebar buttons */
@@ -544,6 +522,30 @@ html, body, #root {
   margin-top: 4px;
 }
 
+.project-rename-form {
+  flex: 1;
+  padding: 2px 0;
+}
+
+.project-rename-input {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--accent-cyan);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  outline: none;
+  box-sizing: border-box;
+}
+
+.project-rename-error {
+  font-size: 10px;
+  color: var(--accent-red);
+  padding: 2px 4px 0;
+}
+
 /* ─── Main Area ─── */
 .main-area {
   flex: 1;
@@ -574,6 +576,10 @@ html, body, #root {
   box-shadow: 0 0 8px rgba(105, 240, 174, 0.5);
   flex-shrink: 0;
   transition: all 0.3s ease;
+}
+
+.status-dot.thinking {
+  box-shadow: 0 0 12px rgba(105, 240, 174, 0.7), 0 0 20px rgba(105, 240, 174, 0.3);
 }
 
 .status-dot.disconnected {
@@ -1222,6 +1228,43 @@ html, body, #root {
 
 .minds-item-sidebar .project-item-btn {
   color: var(--text-primary);
+}
+
+/* ─── Terminal Context Menu ─── */
+.term-context-menu {
+  position: fixed;
+  z-index: 10000;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  min-width: 140px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  animation: fadeInUp 0.1s ease-out;
+}
+
+.term-context-menu button {
+  display: block;
+  width: 100%;
+  padding: 8px 14px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition: background 0.1s ease;
+}
+
+.term-context-menu button:hover:not(:disabled) {
+  background: var(--bg-tertiary);
+}
+
+.term-context-menu button:disabled {
+  color: var(--text-muted);
+  cursor: default;
 }
 
 /* ─── Confirmation Modal ─── */

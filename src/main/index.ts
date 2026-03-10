@@ -41,19 +41,24 @@ function checkConfigured(): { configured: boolean; provider: string } {
 
 function httpRequest(
   url: string,
-  options: { method: string; headers: Record<string, string>; body?: string }
+  options: { method: string; headers: Record<string, string>; body?: string; rejectUnauthorized?: boolean }
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const mod = parsed.protocol === 'https:' ? https : http;
+    const rejectUnauth = options.rejectUnauthorized !== false;
+    const reqOptions: any = {
+      hostname: parsed.hostname,
+      port: parsed.port || undefined,
+      path: parsed.pathname + parsed.search,
+      method: options.method,
+      headers: options.headers,
+    };
+    if (!rejectUnauth && parsed.protocol === 'https:') {
+      reqOptions.agent = new https.Agent({ rejectUnauthorized: false });
+    }
     const req = mod.request(
-      {
-        hostname: parsed.hostname,
-        port: parsed.port,
-        path: parsed.pathname + parsed.search,
-        method: options.method,
-        headers: options.headers,
-      },
+      reqOptions,
       (res) => {
         let data = '';
         res.on('data', (chunk) => (data += chunk));
@@ -344,23 +349,24 @@ function setupIPC() {
   // Minds
   ipcMain.handle(IPC.MINDS_STATUS, async () => {
     const vars = readEnvFile();
-    if (!vars.ANTON_MINDS_API_KEY) return { connected: false };
     return {
-      connected: true,
-      url: vars.ANTON_MINDS_URL || 'https://mdb.ai',
-      apiKey: vars.ANTON_MINDS_API_KEY,
+      connected: !!(vars.ANTON_MINDS_API_KEY && vars.ANTON_MINDS_MIND_NAME),
+      url: vars.ANTON_MINDS_URL || undefined,
+      apiKey: vars.ANTON_MINDS_API_KEY || undefined,
       mindName: vars.ANTON_MINDS_MIND_NAME || null,
       datasource: vars.ANTON_MINDS_DATASOURCE || null,
       engine: vars.ANTON_MINDS_DATASOURCE_ENGINE || null,
     };
   });
 
-  ipcMain.handle(IPC.MINDS_LIST, async (_event, url: string, apiKey: string) => {
+  ipcMain.handle(IPC.MINDS_LIST, async (_event, url: string, apiKey: string, sslVerify: boolean) => {
+    console.log('[MINDS_LIST] sslVerify:', sslVerify, 'type:', typeof sslVerify);
     try {
       const baseUrl = url.replace(/\/+$/, '');
       const res = await httpRequest(`${baseUrl}/api/v1/minds/`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        rejectUnauthorized: sslVerify,
       });
       if (res.status >= 200 && res.status < 300) {
         return { ok: true, minds: JSON.parse(res.body) };
@@ -371,12 +377,13 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle(IPC.MINDS_GET, async (_event, url: string, apiKey: string, mindName: string) => {
+  ipcMain.handle(IPC.MINDS_GET, async (_event, url: string, apiKey: string, mindName: string, sslVerify: boolean) => {
     try {
       const baseUrl = url.replace(/\/+$/, '');
       const res = await httpRequest(`${baseUrl}/api/v1/minds/${encodeURIComponent(mindName)}`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        rejectUnauthorized: sslVerify,
       });
       if (res.status >= 200 && res.status < 300) {
         return { ok: true, mind: JSON.parse(res.body) };
@@ -387,12 +394,13 @@ function setupIPC() {
     }
   });
 
-  ipcMain.handle(IPC.MINDS_LIST_DATASOURCES, async (_event, url: string, apiKey: string) => {
+  ipcMain.handle(IPC.MINDS_LIST_DATASOURCES, async (_event, url: string, apiKey: string, sslVerify: boolean) => {
     try {
       const baseUrl = url.replace(/\/+$/, '');
       const res = await httpRequest(`${baseUrl}/api/v1/datasources`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        rejectUnauthorized: sslVerify,
       });
       if (res.status >= 200 && res.status < 300) {
         return { ok: true, datasources: JSON.parse(res.body) };
@@ -435,6 +443,7 @@ function setupIPC() {
       const res = await httpRequest(`${baseUrl}/api/v1/minds/${encodeURIComponent(mindName)}`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${apiKey}`, Accept: 'application/json' },
+        rejectUnauthorized: sslVerify,
       });
       if (res.status >= 200 && res.status < 300) {
         const mind = JSON.parse(res.body);
@@ -459,8 +468,7 @@ function setupIPC() {
 
   ipcMain.handle(IPC.MINDS_DISCONNECT, async () => {
     const vars = readEnvFile();
-    delete vars.ANTON_MINDS_API_KEY;
-    delete vars.ANTON_MINDS_URL;
+    // Keep URL and API key so user can reconnect to the same server easily
     delete vars.ANTON_MINDS_MIND_NAME;
     delete vars.ANTON_MINDS_DATASOURCE;
     delete vars.ANTON_MINDS_DATASOURCE_ENGINE;
@@ -481,6 +489,28 @@ function setupIPC() {
     return createProject(name);
   });
 
+  ipcMain.handle(IPC.PROJECTS_RENAME, async (_event, oldName: string, newName: string) => {
+    if (oldName === 'default') return { error: 'Cannot rename default project' };
+    const sanitized = newName.replace(/[^a-zA-Z0-9_\-. ]/g, '').trim();
+    if (!sanitized) return { error: 'Invalid project name' };
+    if (sanitized === oldName) return { error: 'Same name' };
+
+    const oldDir = path.join(getProjectsDir(), oldName);
+    const newDir = path.join(getProjectsDir(), sanitized);
+    if (!fs.existsSync(oldDir)) return { error: 'Project not found' };
+    if (fs.existsSync(newDir)) return { error: 'Name already taken' };
+
+    fs.renameSync(oldDir, newDir);
+
+    // Update active project if it was the renamed one
+    const state = readState();
+    if (state.activeProject === oldName) {
+      state.activeProject = sanitized;
+      writeState(state);
+    }
+    return { name: sanitized, path: newDir };
+  });
+
   ipcMain.handle(IPC.PROJECTS_DELETE, async (_event, name: string) => {
     return deleteProject(name);
   });
@@ -492,6 +522,40 @@ function setupIPC() {
   ipcMain.handle(IPC.PROJECTS_SET_ACTIVE, async (_event, name: string) => {
     writeState({ activeProject: name });
     return true;
+  });
+}
+
+// Watch ~/.anton/.env for external changes (e.g. /connect from CLI)
+let lastMindsSnapshot = '';
+function startEnvWatcher() {
+  const envPath = getAntonEnvPath();
+  // Ensure the directory exists so watchFile doesn't error
+  const dir = path.dirname(envPath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+  const getMindsStatus = () => {
+    const vars = readEnvFile();
+    return {
+      connected: !!(vars.ANTON_MINDS_API_KEY && vars.ANTON_MINDS_MIND_NAME),
+      url: vars.ANTON_MINDS_URL || undefined,
+      apiKey: vars.ANTON_MINDS_API_KEY || undefined,
+      mindName: vars.ANTON_MINDS_MIND_NAME || null,
+      datasource: vars.ANTON_MINDS_DATASOURCE || null,
+      engine: vars.ANTON_MINDS_DATASOURCE_ENGINE || null,
+    };
+  };
+
+  lastMindsSnapshot = JSON.stringify(getMindsStatus());
+
+  fs.watchFile(envPath, { interval: 2000 }, () => {
+    const status = getMindsStatus();
+    const snapshot = JSON.stringify(status);
+    if (snapshot !== lastMindsSnapshot) {
+      lastMindsSnapshot = snapshot;
+      BrowserWindow.getAllWindows().forEach((win) => {
+        win.webContents.send(IPC.MINDS_STATUS_CHANGED, status);
+      });
+    }
   });
 }
 
@@ -536,6 +600,7 @@ app.whenReady().then(() => {
 
   ensureDefaultProject();
   setupIPC();
+  startEnvWatcher();
   createWindow();
 
   app.on('activate', () => {
@@ -546,6 +611,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
+  fs.unwatchFile(getAntonEnvPath());
   killAnton();
   app.quit();
 });
