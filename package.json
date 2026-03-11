@@ -18,8 +18,7 @@
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:mac:unsigned": "bash ./scripts/dist-mac-unsigned.sh",
     "dist:mac:dmg-custom": "bash ./scripts/dist-mac-dmg-custom.sh",
-    "dist:win": "npm run build && electron-builder --win",
-    "icons:sync": "bash ./scripts/icons-sync.sh"
+    "dist:win": "npm run build && electron-builder --win"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

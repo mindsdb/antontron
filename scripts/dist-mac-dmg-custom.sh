@@ -8,7 +8,7 @@ VERSION="$(node -p "require('./package.json').version")"
 APP_DIR="release/mac-universal"
 APP_NAME="Anton.app"
 APP_PATH="$APP_DIR/$APP_NAME"
-VOL_NAME="Anton ${VERSION}-universal"
+VOL_NAME="Anton Installer ${VERSION}"
 OUT_DMG="release/Anton-${VERSION}-universal-custom.dmg"
 SPEC_JSON="release/appdmg.json"
 
@@ -16,6 +16,9 @@ export CSC_IDENTITY_AUTO_DISCOVERY=false
 export npm_config_python="${npm_config_python:-/opt/homebrew/bin/python3.11}"
 
 npm run build
+
+# Generate deterministic 1200x800 DMG background from logo.jpg.
+swift ./scripts/generate-dmg-background.swift
 
 # Build the macOS app bundle only (no DMG from electron-builder)
 npx electron-builder --mac --universal --dir -c.afterSign=scripts/after-sign-noop.js
@@ -52,8 +55,7 @@ cat > "$SPEC_JSON" <<EOF
       "x": 900,
       "y": 520,
       "type": "link",
-      "path": "/Applications/",
-      "name": "Applications"
+      "path": "/Applications"
     }
   ]
 }
