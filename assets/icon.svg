@@ -3,22 +3,13 @@
   <rect width="1024" height="1024" fill="#08131d"/>
 
   <g fill="#eef2f6">
-    <rect x="240" y="176" width="144" height="144"/>
-    <rect x="400" y="176" width="144" height="144"/>
-    <rect x="560" y="176" width="144" height="144"/>
+    <rect x="260" y="408" width="130" height="116"/>
+    <rect x="390" y="292" width="130" height="116"/>
+    <rect x="520" y="292" width="130" height="116"/>
+    <rect x="650" y="292" width="130" height="232"/>
 
-    <rect x="80" y="336" width="144" height="144"/>
-    <rect x="240" y="336" width="144" height="144"/>
-    <rect x="560" y="336" width="144" height="144"/>
-    <rect x="720" y="176" width="144" height="304"/>
-
-    <rect x="80" y="560" width="144" height="144"/>
-    <rect x="240" y="560" width="144" height="144"/>
-    <rect x="400" y="560" width="144" height="144"/>
-    <rect x="560" y="560" width="144" height="144"/>
-    <rect x="720" y="560" width="144" height="144"/>
-
-    <rect x="80" y="720" width="144" height="144"/>
-    <rect x="720" y="720" width="144" height="144"/>
+    <rect x="325" y="630" width="325" height="116"/>
+    <rect x="260" y="630" width="130" height="232"/>
+    <rect x="650" y="630" width="130" height="232"/>
   </g>
 </svg>
