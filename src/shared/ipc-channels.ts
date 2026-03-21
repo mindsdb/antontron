@@ -17,6 +17,7 @@ export const IPC = {
   ANTON_KILL: 'anton:kill',
 
   // Settings / Onboarding
+  SETTINGS_READ: 'settings:read',
   SETTINGS_SAVE: 'settings:save',
   SETTINGS_CHECK_CONFIGURED: 'settings:check-configured',
   SETTINGS_VALIDATE: 'settings:validate',

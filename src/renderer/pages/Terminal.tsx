@@ -84,7 +84,7 @@ export default function Terminal() {
       fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace",
       fontSize: 13,
       lineHeight: 1.3,
-      cursorBlink: true,
+      cursorBlink: false,
       cursorStyle: 'bar',
       rightClickSelectsWord: true,
       theme: {
@@ -357,11 +357,28 @@ export default function Terminal() {
   // Set up global IPC listeners for data/exit routed by projectName
   useEffect(() => {
     let streamTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
+    // Buffer PTY data and flush once per animation frame to avoid flicker
+    const dataBuffers: Map<string, string[]> = new Map();
+    const pendingFrames: Map<string, number> = new Map();
 
     const removeData = window.antontron.onAntonData((projectName, data) => {
       const instance = terminalsRef.current.get(projectName);
       if (instance) {
-        instance.term.write(data);
+        let buf = dataBuffers.get(projectName);
+        if (!buf) { buf = []; dataBuffers.set(projectName, buf); }
+        buf.push(data);
+
+        if (!pendingFrames.has(projectName)) {
+          pendingFrames.set(projectName, requestAnimationFrame(() => {
+            pendingFrames.delete(projectName);
+            const chunks = dataBuffers.get(projectName);
+            if (chunks && chunks.length > 0) {
+              instance.term.write(chunks.join(''));
+              chunks.length = 0;
+            }
+          }));
+        }
+
         instance.streaming = true;
         rerender();
 
@@ -388,6 +405,7 @@ export default function Terminal() {
       removeData();
       removeExit();
       for (const t of streamTimeouts.values()) clearTimeout(t);
+      for (const f of pendingFrames.values()) cancelAnimationFrame(f);
     };
 
     return () => {
@@ -671,18 +689,40 @@ export default function Terminal() {
 
 function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [apiKey, setApiKey] = useState('');
+  const [apiKeyPlaceholder, setApiKeyPlaceholder] = useState('sk-ant-...');
   const [planningModel, setPlanningModel] = useState('claude-sonnet-4-6');
   const [codingModel, setCodingModel] = useState('claude-haiku-4-5-20251001');
   const [memoryMode, setMemoryMode] = useState('autopilot');
+  const [proactiveDashboards, setProactiveDashboards] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [existingVars, setExistingVars] = useState<Record<string, string>>({});
+
+  // Load current settings from .env on mount
+  useEffect(() => {
+    (async () => {
+      const vars = await window.antontron.readSettings();
+      setExistingVars(vars);
+      if (vars.ANTON_PLANNING_MODEL) setPlanningModel(vars.ANTON_PLANNING_MODEL);
+      if (vars.ANTON_CODING_MODEL) setCodingModel(vars.ANTON_CODING_MODEL);
+      if (vars.ANTON_MEMORY_MODE) setMemoryMode(vars.ANTON_MEMORY_MODE);
+      if (vars.ANTON_PROACTIVE_DASHBOARDS === 'true') setProactiveDashboards(true);
+      if (vars.ANTON_ANTHROPIC_API_KEY) {
+        setApiKeyPlaceholder('\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (unchanged)');
+      }
+    })();
+  }, []);
 
   const handleSave = () => {
-    const lines: string[] = [];
-    if (apiKey) lines.push(`ANTON_ANTHROPIC_API_KEY=${apiKey}`);
-    lines.push(`ANTON_PLANNING_MODEL=${planningModel}`);
-    lines.push(`ANTON_CODING_MODEL=${codingModel}`);
-    lines.push(`ANTON_MEMORY_MODE=${memoryMode}`);
+    // Merge: start with existing vars, override only what user changed
+    const merged = { ...existingVars };
+    merged.ANTON_PLANNING_MODEL = planningModel;
+    merged.ANTON_CODING_MODEL = codingModel;
+    merged.ANTON_MEMORY_MODE = memoryMode;
+    merged.ANTON_PROACTIVE_DASHBOARDS = proactiveDashboards ? 'true' : 'false';
+    // Only overwrite API key if user typed a new one
+    if (apiKey) merged.ANTON_ANTHROPIC_API_KEY = apiKey;
 
+    const lines = Object.entries(merged).map(([k, v]) => `${k}=${v}`);
     window.antontron.saveSettings(lines.join('\n'));
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
@@ -701,11 +741,11 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           <input
             type="password"
             className="settings-input"
-            placeholder="sk-ant-..."
+            placeholder={apiKeyPlaceholder}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
           />
-          <div className="settings-hint">Stored in ~/.anton/.env</div>
+          <div className="settings-hint">Leave blank to keep current key</div>
         </div>
 
         <div className="settings-group">
@@ -745,6 +785,22 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             <option value="copilot">Copilot</option>
             <option value="off">Off</option>
           </select>
+        </div>
+
+        <div className="settings-group">
+          <label className="settings-label">Proactive Dashboards</label>
+          <label className="minds-ssl-label">
+            <input
+              type="checkbox"
+              checked={proactiveDashboards}
+              onChange={(e) => setProactiveDashboards(e.target.checked)}
+              className="minds-ssl-checkbox"
+            />
+            Build dashboards automatically
+          </label>
+          <div className="settings-hint">
+            When enabled, Anton proactively creates charts and dashboards when data warrants it
+          </div>
         </div>
       </div>
 

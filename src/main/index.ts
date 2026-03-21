@@ -309,6 +309,10 @@ function setupIPC() {
     killAnton(projectName);
   });
 
+  ipcMain.handle(IPC.SETTINGS_READ, async () => {
+    return readEnvFile();
+  });
+
   ipcMain.handle(IPC.SETTINGS_SAVE, async (_event, content: string) => {
     const antonDir = path.join(os.homedir(), '.anton');
     if (!fs.existsSync(antonDir)) {

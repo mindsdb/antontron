@@ -41,6 +41,7 @@ interface AntonTronAPI {
   }) => void) => () => void;
 
   saveClipboardImage: (base64Data: string) => Promise<string>;
+  readSettings: () => Promise<Record<string, string>>;
   saveSettings: (content: string) => Promise<boolean>;
   checkConfigured: () => Promise<{ configured: boolean; provider: string }>;
   validateProvider: (provider: string, apiKey: string, baseUrl?: string) =>

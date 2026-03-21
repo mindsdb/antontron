@@ -49,6 +49,7 @@ contextBridge.exposeInMainWorld('antontron', {
   },
 
   // Settings / Onboarding
+  readSettings: () => ipcRenderer.invoke(IPC.SETTINGS_READ),
   saveSettings: (content: string) => ipcRenderer.invoke(IPC.SETTINGS_SAVE, content),
   checkConfigured: () => ipcRenderer.invoke(IPC.SETTINGS_CHECK_CONFIGURED),
   validateProvider: (provider: string, apiKey: string, baseUrl?: string) =>
