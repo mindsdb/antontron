@@ -1,6 +1,6 @@
 {
   "name": "anton",
-  "version": "0.1.1",
+  "version": "0.9.0",
   "description": "Anton by MindsDB — autonomous AI coworker",
   "author": "MindsDB",
   "main": "dist/main/main/index.js",
@@ -19,7 +19,9 @@
     "dist:mac:unsigned": "bash ./scripts/dist-mac-unsigned.sh",
     "dist:mac:dmg-custom": "bash ./scripts/dist-mac-dmg-custom.sh",
     "release:mac:dmg-custom:notarized": "bash ./scripts/release-mac-custom-notarized.sh",
-    "dist:win": "npm run build && electron-builder --win"
+    "dist:win": "npm run build && electron-builder --win --x64",
+    "dist:win:all": "npm run build && electron-builder --win",
+    "release:win:local": "npm run dist:win"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
