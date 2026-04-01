@@ -40,11 +40,17 @@ interface AntonTronAPI {
     engine?: string | null;
   }) => void) => () => void;
 
+  vaultList: () => Promise<{ engine: string; name: string; created_at: string }[]>;
+  vaultLoad: (engine: string, name: string) => Promise<{ engine: string; name: string; created_at: string; fields: Record<string, string> } | null>;
+  vaultSave: (engine: string, name: string, fields: Record<string, string>) => Promise<boolean>;
+  vaultDelete: (engine: string, name: string) => Promise<boolean>;
+  onVaultChanged: (cb: () => void) => () => void;
+
   saveClipboardImage: (base64Data: string) => Promise<string>;
   readSettings: () => Promise<Record<string, string>>;
   saveSettings: (content: string) => Promise<boolean>;
   checkConfigured: () => Promise<{ configured: boolean; provider: string }>;
-  validateProvider: (provider: string, apiKey: string, baseUrl?: string) =>
+  validateProvider: (provider: string, apiKey: string, baseUrl?: string, model?: string) =>
     Promise<{ ok: boolean; error?: string }>;
 
   listProjects: () => Promise<{ name: string; path: string }[]>;

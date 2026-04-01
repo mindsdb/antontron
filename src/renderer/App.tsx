@@ -7,12 +7,16 @@ import './styles.css';
 
 type Page = 'loading' | 'terms' | 'setup' | 'onboarding' | 'launching' | 'terminal';
 
+const LOGO = `  \u2584\u2580\u2588 \u2588\u2584 \u2588 \u2580\u2588\u2580 \u2588\u2580\u2588 \u2588\u2584 \u2588
+  \u2588\u2580\u2588 \u2588 \u2580\u2588  \u2588  \u2588\u2584\u2588 \u2588 \u2580\u2588`;
+
+const LOGO_PAGES = new Set<Page>(['terms', 'setup', 'onboarding']);
+
 export default function App() {
   const [page, setPage] = useState<Page>('loading');
 
   useEffect(() => {
     async function init() {
-      // Check if terms were already accepted
       const settings = await window.antontron.readSettings();
       if (settings.ANTON_TERMS_CONSENT !== 'true') {
         setPage('terms');
@@ -24,7 +28,6 @@ export default function App() {
         setPage('setup');
         return;
       }
-      // Installed — check if API key is configured
       const { configured } = await window.antontron.checkConfigured();
       if (!configured) {
         setPage('onboarding');
@@ -35,22 +38,16 @@ export default function App() {
     init();
   }, []);
 
-  const handleTermsAccepted = () => {
-    setPage('setup');
-  };
-
-  const handleInstallComplete = () => {
-    // After install, go to onboarding (API key setup)
-    setPage('onboarding');
-  };
-
+  const handleTermsAccepted = () => setPage('setup');
+  const handleInstallComplete = () => setPage('onboarding');
   const handleOnboardingComplete = () => {
-    // Fade transition before terminal
     setPage('launching');
     setTimeout(() => setPage('terminal'), 1200);
   };
 
   const isMac = window.antontron.getPlatform() === 'darwin';
+  const showLogo = LOGO_PAGES.has(page);
+  const isTopPinned = page === 'onboarding';
 
   return (
     <>
@@ -64,14 +61,26 @@ export default function App() {
         </div>
       )}
 
-      {page === 'terms' && <TermsConsent onAccept={handleTermsAccepted} />}
-      {page === 'setup' && <Setup onComplete={handleInstallComplete} />}
-      {page === 'onboarding' && <Onboarding onComplete={handleOnboardingComplete} />}
+      {showLogo && (
+        <div className={`onboard-shell ${isTopPinned ? 'top-pinned' : ''}`}>
+          <div className={`onboard-spacer ${isTopPinned ? 'collapsed' : ''}`} />
+          <div className="logo-section shared-logo">
+            <pre className="logo-ascii">{LOGO}</pre>
+            <div className="logo-subtitle">autonomous coworker</div>
+          </div>
+
+          <div className="onboard-content" key={page}>
+            {page === 'terms' && <TermsConsent onAccept={handleTermsAccepted} />}
+            {page === 'setup' && <Setup onComplete={handleInstallComplete} />}
+            {page === 'onboarding' && <Onboarding onComplete={handleOnboardingComplete} />}
+          </div>
+          <div className={`onboard-spacer ${isTopPinned ? 'collapsed' : ''}`} />
+        </div>
+      )}
 
       {page === 'launching' && (
         <div className="launch-screen">
-          <pre className="logo-ascii">{`  \u2584\u2580\u2588 \u2588\u2584 \u2588 \u2580\u2588\u2580 \u2588\u2580\u2588 \u2588\u2584 \u2588
-  \u2588\u2580\u2588 \u2588 \u2580\u2588  \u2588  \u2588\u2584\u2588 \u2588 \u2580\u2588`}</pre>
+          <pre className="logo-ascii">{LOGO}</pre>
           <div className="launch-text">Starting Anton...</div>
           <div className="launch-bar">
             <div className="launch-bar-fill" />

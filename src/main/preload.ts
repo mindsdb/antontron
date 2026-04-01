@@ -52,8 +52,20 @@ contextBridge.exposeInMainWorld('antontron', {
   readSettings: () => ipcRenderer.invoke(IPC.SETTINGS_READ),
   saveSettings: (content: string) => ipcRenderer.invoke(IPC.SETTINGS_SAVE, content),
   checkConfigured: () => ipcRenderer.invoke(IPC.SETTINGS_CHECK_CONFIGURED),
-  validateProvider: (provider: string, apiKey: string, baseUrl?: string) =>
-    ipcRenderer.invoke(IPC.SETTINGS_VALIDATE, provider, apiKey, baseUrl),
+  validateProvider: (provider: string, apiKey: string, baseUrl?: string, model?: string) =>
+    ipcRenderer.invoke(IPC.SETTINGS_VALIDATE, provider, apiKey, baseUrl, model),
+
+  // Data Vault
+  vaultList: () => ipcRenderer.invoke(IPC.VAULT_LIST),
+  vaultLoad: (engine: string, name: string) => ipcRenderer.invoke(IPC.VAULT_LOAD, engine, name),
+  vaultSave: (engine: string, name: string, fields: Record<string, string>) =>
+    ipcRenderer.invoke(IPC.VAULT_SAVE, engine, name, fields),
+  vaultDelete: (engine: string, name: string) => ipcRenderer.invoke(IPC.VAULT_DELETE, engine, name),
+  onVaultChanged: (cb: () => void) => {
+    const listener = () => cb();
+    ipcRenderer.on(IPC.VAULT_CHANGED, listener);
+    return () => ipcRenderer.removeListener(IPC.VAULT_CHANGED, listener);
+  },
 
   // Minds
   mindsStatus: () => ipcRenderer.invoke(IPC.MINDS_STATUS),

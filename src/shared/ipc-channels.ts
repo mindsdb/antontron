@@ -40,6 +40,13 @@ export const IPC = {
   MINDS_DISCONNECT: 'minds:disconnect',
   MINDS_STATUS_CHANGED: 'minds:status-changed',
 
+  // Data Vault
+  VAULT_LIST: 'vault:list',
+  VAULT_LOAD: 'vault:load',
+  VAULT_SAVE: 'vault:save',
+  VAULT_DELETE: 'vault:delete',
+  VAULT_CHANGED: 'vault:changed',
+
   // Clipboard
   CLIPBOARD_SAVE_IMAGE: 'clipboard:save-image',
 

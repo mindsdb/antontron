@@ -66,13 +66,7 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
   };
 
   return (
-    <div className="setup-container">
-      <div className="logo-section">
-        <pre className="logo-ascii">{`  ▄▀█ █▄ █ ▀█▀ █▀█ █▄ █
-  █▀█ █ ▀█  █  █▄█ █ ▀█`}</pre>
-        <div className="logo-subtitle">autonomous coworker</div>
-      </div>
-
+    <div className="setup-content">
       {phase === 'ready' && (
         <button className="btn-primary" onClick={handleInstall}>
           INSTALL ANTON
@@ -111,6 +105,7 @@ export default function Setup({ onComplete }: { onComplete: () => void }) {
 
       {phase === 'done' && <DoneScreen onComplete={onComplete} />}
     </div>
+
   );
 }
 

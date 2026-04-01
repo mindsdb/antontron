@@ -72,7 +72,7 @@ function httpRequest(
   });
 }
 
-async function validateAnthropic(apiKey: string): Promise<{ ok: boolean; error?: string }> {
+async function validateAnthropic(apiKey: string, model: string): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await httpRequest('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -82,19 +82,22 @@ async function validateAnthropic(apiKey: string): Promise<{ ok: boolean; error?:
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
+        model,
         max_tokens: 1,
-        messages: [{ role: 'user', content: 'hi' }],
+        messages: [{ role: 'user', content: 'ping' }],
       }),
     });
     if (res.status === 200 || res.status === 201) {
       return { ok: true };
     }
-    // 401 = bad key, 403 = no access, anything else parse error
-    const parsed = JSON.parse(res.body).error?.message || `HTTP ${res.status}`;
-    return { ok: false, error: parsed };
+    try {
+      const parsed = JSON.parse(res.body).error?.message || `HTTP ${res.status}`;
+      return { ok: false, error: parsed };
+    } catch {
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
   } catch (err: any) {
-    return { ok: false, error: err.message };
+    return { ok: false, error: `Cannot connect: ${err.message}` };
   }
 }
 
@@ -103,19 +106,21 @@ async function validateMinds(
   baseUrl: string
 ): Promise<{ ok: boolean; error?: string }> {
   try {
-    const url = baseUrl.replace(/\/+$/, '') + '/api/v1/minds/';
-    const res = await httpRequest(url, {
+    // First check the minds API is reachable
+    const base = baseUrl.replace(/\/+$/, '');
+    const mindsUrl = base + '/api/v1/minds/';
+    const res = await httpRequest(mindsUrl, {
       method: 'GET',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
     });
-    if (res.status >= 200 && res.status < 300) {
-      return { ok: true };
-    }
     if (res.status === 401 || res.status === 403) {
       return { ok: false, error: 'Invalid API key' };
+    }
+    if (res.status >= 200 && res.status < 300) {
+      return { ok: true };
     }
     return { ok: false, error: `Server returned HTTP ${res.status}` };
   } catch (err: any) {
@@ -125,27 +130,38 @@ async function validateMinds(
 
 async function validateOpenAICompatible(
   apiKey: string,
-  baseUrl: string
+  baseUrl: string,
+  model?: string
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const normalizedBase = baseUrl.replace(/\/+$/, '');
-    const modelsUrl = normalizedBase.endsWith('/v1')
-      ? `${normalizedBase}/models`
-      : `${normalizedBase}/v1/models`;
-    const res = await httpRequest(modelsUrl, {
-      method: 'GET',
+    const chatUrl = normalizedBase.endsWith('/v1')
+      ? `${normalizedBase}/chat/completions`
+      : `${normalizedBase}/v1/chat/completions`;
+    const res = await httpRequest(chatUrl, {
+      method: 'POST',
       headers: {
         Authorization: `Bearer ${apiKey}`,
         'Content-Type': 'application/json',
       },
+      body: JSON.stringify({
+        model: model || 'gpt-4o',
+        max_tokens: 1,
+        messages: [{ role: 'user', content: 'ping' }],
+      }),
     });
-    if (res.status >= 200 && res.status < 300) {
+    if (res.status === 200 || res.status === 201) {
       return { ok: true };
     }
     if (res.status === 401 || res.status === 403) {
       return { ok: false, error: 'Invalid API key' };
     }
-    return { ok: false, error: `Server returned HTTP ${res.status}` };
+    try {
+      const parsed = JSON.parse(res.body).error?.message || `HTTP ${res.status}`;
+      return { ok: false, error: parsed };
+    } catch {
+      return { ok: false, error: `HTTP ${res.status}` };
+    }
   } catch (err: any) {
     return { ok: false, error: `Cannot connect: ${err.message}` };
   }
@@ -369,17 +385,85 @@ function setupIPC() {
 
   ipcMain.handle(
     IPC.SETTINGS_VALIDATE,
-    async (_event, provider: string, apiKey: string, baseUrl?: string) => {
+    async (_event, provider: string, apiKey: string, baseUrl?: string, model?: string) => {
       if (provider === 'anthropic') {
-        return validateAnthropic(apiKey);
+        return validateAnthropic(apiKey, model || 'claude-sonnet-4-6');
       } else if (provider === 'minds') {
         return validateMinds(apiKey, baseUrl || 'https://mdb.ai');
       } else if (provider === 'openai-compatible') {
-        return validateOpenAICompatible(apiKey, baseUrl || 'https://api.openai.com/v1');
+        return validateOpenAICompatible(apiKey, baseUrl || 'https://api.openai.com/v1', model);
       }
       return { ok: false, error: 'Unknown provider' };
     }
   );
+
+  // Data Vault
+  const vaultDir = path.join(os.homedir(), '.anton', 'data_vault');
+
+  ipcMain.handle(IPC.VAULT_LIST, async () => {
+    if (!fs.existsSync(vaultDir)) return [];
+    const results: { engine: string; name: string; created_at: string }[] = [];
+    for (const fname of fs.readdirSync(vaultDir).sort()) {
+      const fpath = path.join(vaultDir, fname);
+      if (!fs.statSync(fpath).isFile() || fname.endsWith('.tmp')) continue;
+      try {
+        const data = JSON.parse(fs.readFileSync(fpath, 'utf-8'));
+        results.push({
+          engine: data.engine || '',
+          name: data.name || '',
+          created_at: data.created_at || '',
+        });
+      } catch { /* skip corrupt files */ }
+    }
+    return results;
+  });
+
+  ipcMain.handle(IPC.VAULT_LOAD, async (_event, engine: string, name: string) => {
+    const safeName = `${engine.replace(/[^\w-]/g, '_')}-${name.replace(/[^\w-]/g, '_')}`;
+    const fpath = path.join(vaultDir, safeName);
+    if (!fs.existsSync(fpath)) return null;
+    try {
+      return JSON.parse(fs.readFileSync(fpath, 'utf-8'));
+    } catch { return null; }
+  });
+
+  ipcMain.handle(IPC.VAULT_SAVE, async (_event, engine: string, name: string, fields: Record<string, string>) => {
+    if (!fs.existsSync(vaultDir)) fs.mkdirSync(vaultDir, { recursive: true, mode: 0o700 });
+    const safeName = `${engine.replace(/[^\w-]/g, '_')}-${name.replace(/[^\w-]/g, '_')}`;
+    const fpath = path.join(vaultDir, safeName);
+    const data = { engine, name, created_at: new Date().toISOString(), fields };
+    const tmp = fpath + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(data, null, 2), { encoding: 'utf-8', mode: 0o600 });
+    fs.renameSync(tmp, fpath);
+    return true;
+  });
+
+  ipcMain.handle(IPC.VAULT_DELETE, async (_event, engine: string, name: string) => {
+    const safeName = `${engine.replace(/[^\w-]/g, '_')}-${name.replace(/[^\w-]/g, '_')}`;
+    const fpath = path.join(vaultDir, safeName);
+    if (fs.existsSync(fpath)) { fs.unlinkSync(fpath); return true; }
+    return false;
+  });
+
+  // Watch vault directory for external changes (e.g. /connect from CLI)
+  let vaultWatcher: fs.FSWatcher | null = null;
+  let vaultDebounce: ReturnType<typeof setTimeout> | null = null;
+  const startVaultWatcher = () => {
+    try {
+      if (!fs.existsSync(vaultDir)) {
+        fs.mkdirSync(vaultDir, { recursive: true, mode: 0o700 });
+      }
+      vaultWatcher = fs.watch(vaultDir, () => {
+        if (vaultDebounce) clearTimeout(vaultDebounce);
+        vaultDebounce = setTimeout(() => {
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send(IPC.VAULT_CHANGED);
+          }
+        }, 300);
+      });
+    } catch { /* ignore watch errors */ }
+  };
+  startVaultWatcher();
 
   // Clipboard image
   ipcMain.handle(IPC.CLIPBOARD_SAVE_IMAGE, async (_event, base64Data: string) => {

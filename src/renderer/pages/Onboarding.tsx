@@ -65,7 +65,8 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     const result = await window.antontron.validateProvider(
       validationProvider,
       apiKey.trim(),
-      validationBaseUrl || undefined
+      validationBaseUrl || undefined,
+      provider !== 'minds' ? resolvedModel : undefined
     );
 
     if (!result.ok) {
@@ -78,13 +79,16 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     const lines: string[] = [];
     lines.push('ANTON_TERMS_CONSENT=true');
     if (provider === 'minds') {
+      const mindsBase = mindsUrl.trim().replace(/\/+$/, '');
       lines.push(`ANTON_OPENAI_API_KEY=${apiKey.trim()}`);
-      lines.push(`ANTON_OPENAI_BASE_URL=${mindsUrl.trim()}`);
+      lines.push(`ANTON_OPENAI_BASE_URL=${mindsBase}/api/v1`);
       lines.push('ANTON_PLANNING_PROVIDER=openai-compatible');
       lines.push('ANTON_CODING_PROVIDER=openai-compatible');
+      lines.push('ANTON_PLANNING_MODEL=_reason_');
+      lines.push('ANTON_CODING_MODEL=_code_');
       lines.push('ANTON_MINDS_ENABLED=true');
       lines.push(`ANTON_MINDS_API_KEY=${apiKey.trim()}`);
-      lines.push(`ANTON_MINDS_URL=${mindsUrl.trim()}`);
+      lines.push(`ANTON_MINDS_URL=${mindsBase}`);
     } else if (byokProvider === 'anthropic') {
       lines.push(`ANTON_ANTHROPIC_API_KEY=${apiKey.trim()}`);
       lines.push('ANTON_PLANNING_PROVIDER=anthropic');
@@ -108,13 +112,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   };
 
   return (
-    <div className="setup-container top-pinned">
-      <div className="logo-section">
-        <pre className="logo-ascii">{`  \u2584\u2580\u2588 \u2588\u2584 \u2588 \u2580\u2588\u2580 \u2588\u2580\u2588 \u2588\u2584 \u2588
-  \u2588\u2580\u2588 \u2588 \u2580\u2588  \u2588  \u2588\u2584\u2588 \u2588 \u2580\u2588`}</pre>
-        <div className="logo-subtitle">autonomous coworker</div>
-      </div>
-
+    <div className="onboard-content-inner">
       <div className="onboard-heading">Choose your LLM provider</div>
 
       {/* Provider cards */}

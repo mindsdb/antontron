@@ -219,7 +219,7 @@ export default function TermsConsent({ onAccept }: { onAccept: () => void }) {
   if (view === 'terms' || view === 'privacy') {
     const isTerms = view === 'terms';
     return (
-      <div className="setup-container legal-viewer-screen">
+      <div className="legal-viewer-overlay">
         <div className="legal-viewer">
           <div className="legal-viewer-header">
             <button className="legal-back-btn" onClick={() => setView('main')}>
@@ -239,14 +239,7 @@ export default function TermsConsent({ onAccept }: { onAccept: () => void }) {
 
   // ── Main consent screen ──
   return (
-    <div className="setup-container">
-      <div className="logo-section">
-        <pre className="logo-ascii">{`  \u2584\u2580\u2588 \u2588\u2584 \u2588 \u2580\u2588\u2580 \u2588\u2580\u2588 \u2588\u2584 \u2588
-  \u2588\u2580\u2588 \u2588 \u2580\u2588  \u2588  \u2588\u2584\u2588 \u2588 \u2580\u2588`}</pre>
-        <div className="logo-subtitle">autonomous coworker</div>
-      </div>
-
-      <div className="terms-section">
+    <div className="terms-section">
         <div className="terms-subtitle">
           Before we get started, please review and accept our policies.
         </div>
@@ -285,7 +278,6 @@ export default function TermsConsent({ onAccept }: { onAccept: () => void }) {
         >
           CONTINUE
         </button>
-      </div>
     </div>
   );
 }

@@ -31,6 +31,8 @@ export default function Terminal() {
     engine?: string | null;
     url?: string;
   }>({ connected: false });
+  const [vaultConnections, setVaultConnections] = useState<{ engine: string; name: string; created_at: string }[]>([]);
+  const [editingConnection, setEditingConnection] = useState<{ engine: string; name: string } | null>(null);
   const [confirmModal, setConfirmModal] = useState<{
     type: 'delete-project' | 'disconnect-mind';
     name: string;
@@ -53,6 +55,11 @@ export default function Terminal() {
   const refreshMindsStatus = useCallback(async () => {
     const status = await window.antontron.mindsStatus();
     setMindsStatus(status);
+  }, []);
+
+  const refreshVault = useCallback(async () => {
+    const conns = await window.antontron.vaultList();
+    setVaultConnections(conns);
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -425,6 +432,7 @@ export default function Terminal() {
     (async () => {
       const { active } = await loadProjects();
       refreshMindsStatus();
+      refreshVault();
       if (cancelled) return;
       await ensureAntonRunning(active);
       showTerminal(active);
@@ -433,6 +441,14 @@ export default function Terminal() {
       cancelled = true;
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Watch vault directory for changes from CLI (/connect, /disconnect)
+  useEffect(() => {
+    const unsub = window.antontron.onVaultChanged(() => {
+      refreshVault();
+    });
+    return unsub;
+  }, [refreshVault]);
 
   // Listen for external .env changes (e.g. /connect or /disconnect from CLI)
   useEffect(() => {
@@ -553,6 +569,24 @@ export default function Terminal() {
           {/* Data Vault */}
           <div className="sidebar-section">
             <div className="sidebar-label">DATA VAULT</div>
+            {vaultConnections.length > 0 && (
+              <div className="project-list">
+                {vaultConnections.map((c) => (
+                  <div key={`${c.engine}-${c.name}`} className="project-item">
+                    <button
+                      className="project-item-btn"
+                      onClick={() => setEditingConnection({ engine: c.engine, name: c.name })}
+                    >
+                      <div className="vault-engine-dot" />
+                      <span className="vault-conn-name">
+                        <span className="vault-engine">{c.engine}</span>
+                        <span className="vault-name">({c.name})</span>
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <button
               className="sidebar-btn new-project-btn"
               onClick={handleDataVaultConnect}
@@ -620,6 +654,28 @@ export default function Terminal() {
         </div>
       )}
 
+      {/* Vault Connection Editor */}
+      {editingConnection && (
+        <div className="settings-backdrop" onClick={() => setEditingConnection(null)}>
+          <div className="settings-panel" onClick={(e) => e.stopPropagation()}>
+            <VaultEditor
+              engine={editingConnection.engine}
+              name={editingConnection.name}
+              onClose={() => setEditingConnection(null)}
+              onSaved={() => { refreshVault(); setEditingConnection(null); }}
+              onDeleted={() => { refreshVault(); setEditingConnection(null); }}
+              onTest={(slug) => {
+                setEditingConnection(null);
+                ensureAntonRunning(activeProject).then(() => {
+                  showTerminal(activeProject);
+                  window.antontron.sendInput(activeProject, `/test ${slug}\n`);
+                });
+              }}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Confirmation Modal */}
       {confirmModal && (
         <div className="settings-backdrop" onClick={() => setConfirmModal(null)}>
@@ -669,40 +725,123 @@ export default function Terminal() {
   );
 }
 
+type LLMProvider = 'minds' | 'anthropic' | 'openai';
+
+const ANTHROPIC_MODELS_SETTINGS = [
+  { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
+  { id: 'claude-opus-4-6', label: 'Claude Opus 4.6' },
+  { id: 'claude-haiku-4-5-20251001', label: 'Claude Haiku 4.5' },
+];
+
+const OPENAI_MODELS_SETTINGS = [
+  { id: 'gpt-5.4', label: 'GPT-5.4' },
+  { id: 'gpt-5.4-mini', label: 'GPT-5.4 Mini' },
+  { id: 'o3', label: 'o3' },
+  { id: 'o4-mini', label: 'o4 Mini' },
+];
+
+function detectProvider(vars: Record<string, string>): LLMProvider {
+  if (vars.ANTON_MINDS_ENABLED === 'true') return 'minds';
+  if (vars.ANTON_PLANNING_PROVIDER === 'anthropic') return 'anthropic';
+  return 'openai';
+}
+
 function SettingsPanel({ onClose }: { onClose: () => void }) {
+  const [llmProvider, setLlmProvider] = useState<LLMProvider>('minds');
   const [apiKey, setApiKey] = useState('');
-  const [apiKeyPlaceholder, setApiKeyPlaceholder] = useState('sk-ant-...');
-  const [planningModel, setPlanningModel] = useState('claude-sonnet-4-6');
-  const [codingModel, setCodingModel] = useState('claude-haiku-4-5-20251001');
+  const [hasExistingKey, setHasExistingKey] = useState(false);
+  const [mindsUrl, setMindsUrl] = useState('https://mdb.ai');
+  const [model, setModel] = useState('claude-sonnet-4-6');
+  const [customModel, setCustomModel] = useState('');
   const [memoryMode, setMemoryMode] = useState('autopilot');
   const [proactiveDashboards, setProactiveDashboards] = useState(false);
   const [saved, setSaved] = useState(false);
   const [existingVars, setExistingVars] = useState<Record<string, string>>({});
 
-  // Load current settings from .env on mount
+  const models = llmProvider === 'anthropic' ? ANTHROPIC_MODELS_SETTINGS : OPENAI_MODELS_SETTINGS;
+  const resolvedModel = model === '__custom__' ? customModel.trim() : model;
+
   useEffect(() => {
     (async () => {
       const vars = await window.antontron.readSettings();
       setExistingVars(vars);
-      if (vars.ANTON_PLANNING_MODEL) setPlanningModel(vars.ANTON_PLANNING_MODEL);
-      if (vars.ANTON_CODING_MODEL) setCodingModel(vars.ANTON_CODING_MODEL);
+
+      const detected = detectProvider(vars);
+      setLlmProvider(detected);
+
+      if (vars.ANTON_MINDS_URL) setMindsUrl(vars.ANTON_MINDS_URL);
       if (vars.ANTON_MEMORY_MODE) setMemoryMode(vars.ANTON_MEMORY_MODE);
       if (vars.ANTON_PROACTIVE_DASHBOARDS === 'true') setProactiveDashboards(true);
-      if (vars.ANTON_ANTHROPIC_API_KEY) {
-        setApiKeyPlaceholder('\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (unchanged)');
+
+      // Detect existing key
+      if (detected === 'anthropic' && vars.ANTON_ANTHROPIC_API_KEY) setHasExistingKey(true);
+      if (detected === 'openai' && vars.ANTON_OPENAI_API_KEY) setHasExistingKey(true);
+      if (detected === 'minds' && vars.ANTON_MINDS_API_KEY) setHasExistingKey(true);
+
+      // Load model — skip for minds (uses _reason_/_code_)
+      if (detected !== 'minds' && vars.ANTON_PLANNING_MODEL) {
+        const knownModels = detected === 'anthropic' ? ANTHROPIC_MODELS_SETTINGS : OPENAI_MODELS_SETTINGS;
+        if (knownModels.some(m => m.id === vars.ANTON_PLANNING_MODEL)) {
+          setModel(vars.ANTON_PLANNING_MODEL);
+        } else {
+          setModel('__custom__');
+          setCustomModel(vars.ANTON_PLANNING_MODEL);
+        }
       }
     })();
   }, []);
 
+  const handleProviderChange = (p: LLMProvider) => {
+    setLlmProvider(p);
+    setApiKey('');
+    setHasExistingKey(false);
+    if (p === 'anthropic') setModel(ANTHROPIC_MODELS_SETTINGS[0].id);
+    else if (p === 'openai') setModel(OPENAI_MODELS_SETTINGS[0].id);
+    setCustomModel('');
+  };
+
   const handleSave = () => {
-    // Merge: start with existing vars, override only what user changed
     const merged = { ...existingVars };
-    merged.ANTON_PLANNING_MODEL = planningModel;
-    merged.ANTON_CODING_MODEL = codingModel;
+
+    // Clear old provider keys to avoid conflicts
+    delete merged.ANTON_ANTHROPIC_API_KEY;
+    delete merged.ANTON_OPENAI_API_KEY;
+    delete merged.ANTON_OPENAI_BASE_URL;
+    delete merged.ANTON_MINDS_ENABLED;
+    delete merged.ANTON_MINDS_API_KEY;
+    delete merged.ANTON_MINDS_URL;
+
+    if (llmProvider === 'minds') {
+      const mindsBase = mindsUrl.trim().replace(/\/+$/, '');
+      const key = apiKey.trim() || existingVars.ANTON_MINDS_API_KEY || '';
+      merged.ANTON_OPENAI_API_KEY = key;
+      merged.ANTON_OPENAI_BASE_URL = mindsBase + '/api/v1';
+      merged.ANTON_PLANNING_PROVIDER = 'openai-compatible';
+      merged.ANTON_CODING_PROVIDER = 'openai-compatible';
+      merged.ANTON_PLANNING_MODEL = '_reason_';
+      merged.ANTON_CODING_MODEL = '_code_';
+      merged.ANTON_MINDS_ENABLED = 'true';
+      merged.ANTON_MINDS_API_KEY = key;
+      merged.ANTON_MINDS_URL = mindsBase;
+    } else if (llmProvider === 'anthropic') {
+      const key = apiKey.trim() || existingVars.ANTON_ANTHROPIC_API_KEY || '';
+      merged.ANTON_ANTHROPIC_API_KEY = key;
+      merged.ANTON_PLANNING_PROVIDER = 'anthropic';
+      merged.ANTON_CODING_PROVIDER = 'anthropic';
+      merged.ANTON_PLANNING_MODEL = resolvedModel;
+      merged.ANTON_CODING_MODEL = resolvedModel;
+    } else {
+      const key = apiKey.trim() || existingVars.ANTON_OPENAI_API_KEY || '';
+      merged.ANTON_OPENAI_API_KEY = key;
+      merged.ANTON_OPENAI_BASE_URL = 'https://api.openai.com/v1';
+      merged.ANTON_PLANNING_PROVIDER = 'openai-compatible';
+      merged.ANTON_CODING_PROVIDER = 'openai-compatible';
+      merged.ANTON_PLANNING_MODEL = resolvedModel;
+      merged.ANTON_CODING_MODEL = resolvedModel;
+    }
+
     merged.ANTON_MEMORY_MODE = memoryMode;
     merged.ANTON_PROACTIVE_DASHBOARDS = proactiveDashboards ? 'true' : 'false';
-    // Only overwrite API key if user typed a new one
-    if (apiKey) merged.ANTON_ANTHROPIC_API_KEY = apiKey;
 
     const lines = Object.entries(merged).map(([k, v]) => `${k}=${v}`);
     window.antontron.saveSettings(lines.join('\n'));
@@ -719,42 +858,70 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
       <div className="settings-body">
         <div className="settings-group">
-          <label className="settings-label">Anthropic API Key</label>
+          <label className="settings-label">LLM Provider</label>
+          <select
+            className="settings-select"
+            value={llmProvider}
+            onChange={(e) => handleProviderChange(e.target.value as LLMProvider)}
+          >
+            <option value="minds">Minds Cloud</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="openai">OpenAI</option>
+          </select>
+        </div>
+
+        {llmProvider === 'minds' && (
+          <div className="settings-group">
+            <label className="settings-label">Minds URL</label>
+            <input
+              type="text"
+              className="settings-input"
+              placeholder="https://mdb.ai"
+              value={mindsUrl}
+              onChange={(e) => setMindsUrl(e.target.value)}
+            />
+          </div>
+        )}
+
+        <div className="settings-group">
+          <label className="settings-label">
+            {llmProvider === 'minds' ? 'Minds API Key' : llmProvider === 'anthropic' ? 'Anthropic API Key' : 'OpenAI API Key'}
+          </label>
           <input
             type="password"
             className="settings-input"
-            placeholder={apiKeyPlaceholder}
+            placeholder={hasExistingKey ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (unchanged)' : llmProvider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
           />
           <div className="settings-hint">Leave blank to keep current key</div>
         </div>
 
-        <div className="settings-group">
-          <label className="settings-label">Planning Model</label>
-          <select
-            className="settings-select"
-            value={planningModel}
-            onChange={(e) => setPlanningModel(e.target.value)}
-          >
-            <option value="claude-opus-4-6">claude-opus-4-6</option>
-            <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5</option>
-          </select>
-        </div>
-
-        <div className="settings-group">
-          <label className="settings-label">Coding Model</label>
-          <select
-            className="settings-select"
-            value={codingModel}
-            onChange={(e) => setCodingModel(e.target.value)}
-          >
-            <option value="claude-opus-4-6">claude-opus-4-6</option>
-            <option value="claude-sonnet-4-6">claude-sonnet-4-6</option>
-            <option value="claude-haiku-4-5-20251001">claude-haiku-4-5</option>
-          </select>
-        </div>
+        {llmProvider !== 'minds' && (
+          <div className="settings-group">
+            <label className="settings-label">Model</label>
+            <select
+              className="settings-select"
+              value={model}
+              onChange={(e) => setModel(e.target.value)}
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>{m.label}</option>
+              ))}
+              <option value="__custom__">Custom...</option>
+            </select>
+            {model === '__custom__' && (
+              <input
+                type="text"
+                className="settings-input"
+                style={{ marginTop: 6 }}
+                placeholder="Enter model ID..."
+                value={customModel}
+                onChange={(e) => setCustomModel(e.target.value)}
+              />
+            )}
+          </div>
+        )}
 
         <div className="settings-group">
           <label className="settings-label">Memory Mode</label>
@@ -1132,6 +1299,133 @@ function MindsPanel({
           )}
         </div>
       )}
+    </>
+  );
+}
+
+function VaultEditor({
+  engine,
+  name,
+  onClose,
+  onSaved,
+  onDeleted,
+  onTest,
+}: {
+  engine: string;
+  name: string;
+  onClose: () => void;
+  onSaved: () => void;
+  onDeleted: () => void;
+  onTest: (slug: string) => void;
+}) {
+  const [fields, setFields] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const data = await window.antontron.vaultLoad(engine, name);
+      if (data?.fields) setFields(data.fields);
+      setLoading(false);
+    })();
+  }, [engine, name]);
+
+  const handleSave = async () => {
+    await window.antontron.vaultSave(engine, name, fields);
+    setSaved(true);
+    setTimeout(() => {
+      onSaved();
+    }, 600);
+  };
+
+  const handleTest = async () => {
+    await window.antontron.vaultSave(engine, name, fields);
+    onTest(`${engine}-${name}`);
+  };
+
+  const handleDelete = async () => {
+    await window.antontron.vaultDelete(engine, name);
+    onDeleted();
+  };
+
+  const updateField = (key: string, value: string) => {
+    setFields((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const addField = () => {
+    const key = `field_${Object.keys(fields).length + 1}`;
+    setFields((prev) => ({ ...prev, [key]: '' }));
+  };
+
+  if (loading) {
+    return (
+      <>
+        <div className="settings-header">
+          <div className="settings-title">{engine}-{name}</div>
+          <button className="settings-close" onClick={onClose}>&times;</button>
+        </div>
+        <div className="settings-body" style={{ display: 'flex', justifyContent: 'center', padding: 40 }}>
+          <div className="spinner" />
+        </div>
+      </>
+    );
+  }
+
+  const fieldEntries = Object.entries(fields);
+  const secretKeys = new Set(['password', 'secret', 'token', 'api_key', 'apikey', 'private_key', 'ssl_key']);
+  const isSecret = (key: string) => secretKeys.has(key.toLowerCase()) || key.toLowerCase().includes('password') || key.toLowerCase().includes('secret') || key.toLowerCase().includes('token');
+
+  return (
+    <>
+      <div className="settings-header">
+        <div className="settings-title">{engine}-{name}</div>
+        <button className="settings-close" onClick={onClose}>&times;</button>
+      </div>
+
+      <div className="settings-body">
+        {fieldEntries.length === 0 && (
+          <div className="settings-hint" style={{ textAlign: 'center', padding: 16 }}>
+            No fields configured. Use the + button to add fields or use /edit {engine}-{name} in the terminal.
+          </div>
+        )}
+
+        {fieldEntries.map(([key, value]) => (
+          <div className="settings-group" key={key}>
+            <label className="settings-label">{key}</label>
+            <input
+              type={isSecret(key) ? 'password' : 'text'}
+              className="settings-input"
+              value={value}
+              onChange={(e) => updateField(key, e.target.value)}
+              placeholder={isSecret(key) ? '\u2022\u2022\u2022\u2022\u2022\u2022' : `Enter ${key}...`}
+            />
+          </div>
+        ))}
+      </div>
+
+      <div className="settings-footer" style={{ display: 'flex', gap: 8 }}>
+        <button
+          className="btn-primary settings-save"
+          style={{ flex: 1 }}
+          onClick={handleSave}
+        >
+          {saved ? '\u2713 SAVED' : 'SAVE'}
+        </button>
+        <button
+          className="btn-primary settings-save"
+          style={{ flex: 0, background: 'rgba(0,229,255,0.1)', color: 'var(--accent-cyan)', border: '1px solid rgba(0,229,255,0.25)' }}
+          onClick={handleTest}
+        >
+          TEST
+        </button>
+        <button
+          className="btn-primary settings-save"
+          style={{ flex: 0, background: 'rgba(255,82,82,0.15)', color: 'var(--accent-red)', border: '1px solid rgba(255,82,82,0.3)' }}
+          onClick={handleDelete}
+        >
+          DELETE
+        </button>
+      </div>
     </>
   );
 }
