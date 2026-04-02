@@ -19,8 +19,19 @@ if [[ -z "${APPLE_ID:-}" || -z "${APPLE_TEAM_ID:-}" || -z "${APPLE_APP_SPECIFIC_
   exit 1
 fi
 
+# Preserve notarization credentials for manual steps later in this script.
+APPLE_ID_VALUE="${APPLE_ID}"
+APPLE_TEAM_ID_VALUE="${APPLE_TEAM_ID}"
+APPLE_APP_SPECIFIC_PASSWORD_VALUE="${APPLE_APP_SPECIFIC_PASSWORD}"
+APPLE_API_KEY_VALUE="${APPLE_API_KEY:-}"
+APPLE_API_KEY_ID_VALUE="${APPLE_API_KEY_ID:-}"
+APPLE_API_KEY_ISSUER_VALUE="${APPLE_API_KEY_ISSUER:-}"
+
 unset CSC_IDENTITY_AUTO_DISCOVERY CSC_NAME CSC_KEYCHAIN CSC_LINK CSC_KEY_PASSWORD || true
 export npm_config_python="${npm_config_python:-/opt/homebrew/bin/python3.11}"
+
+# Ensure electron-builder does not trigger scripts/notarize.js during build.
+unset APPLE_ID APPLE_TEAM_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_API_KEY APPLE_API_KEY_ID APPLE_API_KEY_ISSUER || true
 
 if ! security find-identity -v -p codesigning | grep -q "Developer ID Application"; then
   echo "Error: no valid 'Developer ID Application' identity found in keychain." >&2
@@ -36,6 +47,9 @@ echo "==> Cleaning previous mac artifacts"
 rm -rf release/mac-* release/*.blockmap
 rm -f release/*.dmg release/*.zip release/*.pkg
 
+echo "==> Building latest app code (main + renderer)"
+npm run build
+
 echo "==> Building signed universal app bundle"
 npx electron-builder --mac --universal --dir -c.afterSign=scripts/after-sign-noop.js
 
@@ -45,9 +59,9 @@ codesign --verify --deep --strict --verbose=2 "$APP_PATH"
 echo "==> Notarizing app zip"
 ditto -c -k --sequesterRsrc --keepParent "$APP_PATH" "$APP_ZIP"
 APP_NOTARY_OUT="$(xcrun notarytool submit "$APP_ZIP" \
-  --apple-id "$APPLE_ID" \
-  --team-id "$APPLE_TEAM_ID" \
-  --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+  --apple-id "$APPLE_ID_VALUE" \
+  --team-id "$APPLE_TEAM_ID_VALUE" \
+  --password "$APPLE_APP_SPECIFIC_PASSWORD_VALUE" \
   --wait)"
 echo "$APP_NOTARY_OUT"
 
@@ -71,9 +85,9 @@ pkgutil --check-signature "$PKG_PATH"
 
 echo "==> Notarizing pkg"
 PKG_NOTARY_OUT="$(xcrun notarytool submit "$PKG_PATH" \
-  --apple-id "$APPLE_ID" \
-  --team-id "$APPLE_TEAM_ID" \
-  --password "$APPLE_APP_SPECIFIC_PASSWORD" \
+  --apple-id "$APPLE_ID_VALUE" \
+  --team-id "$APPLE_TEAM_ID_VALUE" \
+  --password "$APPLE_APP_SPECIFIC_PASSWORD_VALUE" \
   --wait)"
 echo "$PKG_NOTARY_OUT"
 
