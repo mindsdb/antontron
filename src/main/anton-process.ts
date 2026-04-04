@@ -44,7 +44,7 @@ export function startAnton(
   }
 
   const antonBin = getAntonBinary();
-  const env = { ...process.env, PATH: getEnvPath(), TERM: 'xterm-256color', ANTON_SUPPRESS_BANNER: '1' };
+  const env = { ...process.env, PATH: getEnvPath(), TERM: 'xterm-256color', COLORTERM: 'truecolor', ANTON_SUPPRESS_BANNER: '1' };
 
   let spawnCmd: string;
   let spawnArgs: string[];

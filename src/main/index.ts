@@ -8,6 +8,7 @@ import { IPC } from '../shared/ipc-channels';
 import { checkAntonInstalled, runInstaller } from './installer';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
 import { sendEvent } from './analytics';
+import { getRendererPath, checkForUIUpdate } from './ui-updater';
 
 function getAntonEnvPath(): string {
   return path.join(os.homedir(), '.anton', '.env');
@@ -299,12 +300,12 @@ function createWindow() {
     },
   });
 
-  // In dev with Vite running, load from dev server; otherwise load built files
+  // In dev with Vite running, load from dev server; otherwise load built/cached files
   const isDev = !app.isPackaged && process.env.VITE_DEV === '1';
   if (isDev) {
     mainWindow.loadURL('http://localhost:5173');
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', '..', 'renderer', 'index.html'));
+    mainWindow.loadFile(getRendererPath());
   }
 
   mainWindow.once('ready-to-show', () => {
@@ -731,6 +732,11 @@ app.whenReady().then(() => {
   setupIPC();
   startEnvWatcher();
   createWindow();
+
+  // Check for UI updates in the background — downloads for next launch
+  checkForUIUpdate().then((updated) => {
+    if (updated) console.log('[main] UI update downloaded — will apply on next launch');
+  }).catch(() => {});
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

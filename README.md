@@ -48,6 +48,7 @@ src/
     index.ts             # Window creation, IPC handlers, menu, project/minds management
     anton-process.ts     # PTY process manager (Map<projectName, ptyProcess>)
     installer.ts         # Auto-installer for Anton CLI (uv + git + Xcode CLT)
+    ui-updater.ts        # OTA UI update system (fetch, verify, cache, rollback)
     preload.ts           # contextBridge — exposes antontron API to renderer
   renderer/              # React UI (bundled by Vite)
     App.tsx              # App flow: loading -> setup -> onboarding -> terminal
@@ -74,6 +75,8 @@ assets/
 - **Clipboard image paste**: Intercepts paste events on the xterm container, saves image to temp file via IPC, and auto-sends `/image <path>` to the PTY.
 
 - **Minds integration**: The GUI replicates Anton's `/connect` flow — lists minds via REST API, handles datasource selection (normalizes string/object refs), writes the same env vars to `~/.anton/.env`, and auto-restarts Anton to pick up new config.
+
+- **OTA UI updates**: The Electron shell ships rarely, but the React UI updates frequently via GitHub Releases. On every boot, the main process checks a static `latest.json` on GitHub Pages (no API rate limits), downloads new bundles in the background, verifies SHA-256 integrity, and swaps atomically with rollback support. Zero user interaction — updates apply on next launch.
 
 ---
 
@@ -409,9 +412,103 @@ npm run dist:win
 
 ---
 
+## Over-the-Air UI Updates
+
+The desktop shell (Electron main process) handles PTY, IPC, and native OS integration — it changes rarely. The renderer (React UI) is where most iteration happens. Anton Desktop ships with an **OTA update system** that lets you push UI updates to every installed app without shipping a new `.dmg` or `.exe`.
+
+### How It Works
+
+```
+┌──────────────┐    tag: ui-v1.2.0     ┌─────────────────┐
+│  Developer   │ ───────────────────▶   │  GitHub Actions  │
+└──────────────┘                        └────────┬────────┘
+                                                 │
+                                    builds renderer, tars,
+                                    computes SHA-256 hash
+                                                 │
+                              ┌──────────────────┼──────────────────┐
+                              ▼                                     ▼
+                   ┌─────────────────┐                   ┌──────────────────┐
+                   │ GitHub Releases  │                   │  GitHub Pages    │
+                   │ ui-bundle.tar.gz │                   │  latest.json     │
+                   └─────────────────┘                   └──────────────────┘
+                              ▲                                     ▲
+                              │          on every launch            │
+                              │     ┌───────────────────────┐      │
+                              └─────│   Anton Desktop App   │──────┘
+                                    │  (background check)   │
+                                    └───────────────────────┘
+```
+
+1. **Push a tag** → `git tag ui-v1.2.0 && git push origin ui-v1.2.0`
+2. **GitHub Actions** builds only the renderer, tars the output, computes a SHA-256 checksum
+3. **Publishes** the bundle to GitHub Releases and writes `latest.json` to GitHub Pages
+4. **Every Anton Desktop launch**, the main process fetches `latest.json` (static file — no API rate limits)
+5. If a newer version exists, it downloads the bundle, **verifies the SHA-256 checksum**, and caches it
+6. **Next launch** loads the updated UI — zero user interaction required
+
+### Security
+
+- Every bundle is integrity-checked with **SHA-256** before extraction
+- Checksum misses → update is silently discarded, app loads last known good UI
+- Previous version is kept on disk for automatic **rollback** if the new UI fails to load
+- All downloads over HTTPS from GitHub's CDN
+
+### Boot Sequence
+
+```
+App starts
+  ├─ Load cached UI (instant, no network needed)
+  │   └─ Falls back to bundled renderer if no cache exists
+  └─ Background: fetch latest.json from GitHub Pages
+      └─ If new version → download → verify SHA-256 → cache
+          └─ Applied on next launch
+```
+
+The app **never blocks on a network request** — it always loads immediately from cache or bundled files, and downloads updates silently in the background.
+
+### Publishing a UI Update
+
+```bash
+# Tag and push — that's it
+git tag ui-v1.2.0
+git push origin ui-v1.2.0
+```
+
+Or trigger manually from the GitHub Actions tab with a version string.
+
+### One-Time Setup
+
+Before the first publish, **enable GitHub Pages** on the repo:
+
+1. Go to **Settings → Pages** in the GitHub repo
+2. Set **Source** to "Deploy from a branch"
+3. Set **Branch** to `gh-pages` / `/ (root)`
+4. Save
+
+The `publish-ui` workflow handles everything else — creating the `gh-pages` branch, writing `latest.json`, uploading release assets.
+
+### File Layout
+
+```
+{userData}/ui-cache/
+  version.json          # { "version": "1.2.0" }
+  current/              # Active renderer bundle (index.html + assets)
+  previous/             # Rollback copy of the prior version
+```
+
+---
+
 ## CI/CD
 
-### GitHub Actions example
+### Workflows
+
+| Workflow | Trigger | What it does |
+| --- | --- | --- |
+| `publish-ui.yml` | `ui-v*` tag or manual | Builds renderer, publishes bundle to Releases, updates `latest.json` on GitHub Pages |
+| `windows-installer.yml` | `v*` tag or manual | Builds Windows `.exe` installer with code signing |
+
+### GitHub Actions example (full platform builds)
 
 ```yaml
 name: Build & Release
