@@ -25,7 +25,7 @@ jobs:
           node-version: 20
           cache: npm
 
-      - run: npm ci --omit=optional
+      - run: npm ci
 
       - name: Build renderer
         run: npm run build:renderer
