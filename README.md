@@ -469,32 +469,82 @@ The app **never blocks on a network request** — it always loads immediately fr
 
 ### Publishing a UI Update
 
+There are two ways to publish — from the command line or from the GitHub UI. Both do the same thing.
+
+#### Option A: Command Line
+
 ```bash
-# Tag and push — that's it
+# Tag and push — the workflow triggers automatically
 git tag ui-v1.2.0
 git push origin ui-v1.2.0
 ```
 
-Or trigger manually from the GitHub Actions tab with a version string.
+#### Option B: GitHub UI (no git required)
+
+1. Go to [**Actions → Publish UI Bundle**](https://github.com/mindsdb/antontron/actions/workflows/publish-ui.yml)
+2. Click the **"Run workflow"** dropdown (top right)
+3. Make sure **Branch** is set to `main`
+4. Enter the version number (e.g. `1.2.0` — without the `ui-v` prefix, the workflow adds it)
+5. Click the green **"Run workflow"** button
+6. Wait for the run to complete (usually under 2 minutes)
+
+After either method, the workflow:
+- Builds only the renderer (`npm run build:renderer`)
+- Creates a `.tar.gz` bundle with a SHA-256 checksum
+- Publishes the bundle as a **GitHub Release** asset (`ui-v1.2.0`)
+- Updates `latest.json` on **GitHub Pages** at `https://mindsdb.github.io/antontron/latest.json`
+
+Every running Anton Desktop will pick up the new version on its next launch.
+
+#### Verifying a Publish
+
+After the workflow completes, confirm both endpoints:
+
+- **Release**: https://github.com/mindsdb/antontron/releases — should show a new `ui-v1.2.0` release with `ui-bundle.tar.gz` attached
+- **Manifest**: https://mindsdb.github.io/antontron/latest.json — should return JSON with the new version, download URL, and SHA-256 hash
 
 ### One-Time Setup
 
-Before the first publish, **enable GitHub Pages** on the repo:
+This only needs to be done once when setting up the repo. If you're reading this, it's probably already done.
 
-1. Go to **Settings → Pages** in the GitHub repo
-2. Set **Source** to "Deploy from a branch"
+1. Go to [**Settings → Pages**](https://github.com/mindsdb/antontron/settings/pages) in the GitHub repo
+2. Under **Build and deployment**, set **Source** to "Deploy from a branch"
 3. Set **Branch** to `gh-pages` / `/ (root)`
-4. Save
+4. Set **Visibility** to "Public" (the app needs to fetch `latest.json` without authentication)
+5. Type `mindsdb/antontron` to confirm
+6. Save
 
-The `publish-ui` workflow handles everything else — creating the `gh-pages` branch, writing `latest.json`, uploading release assets.
+> **Note**: The `gh-pages` branch is created automatically by the first workflow run. If it doesn't exist yet, either run the workflow first and come back to enable Pages, or create it manually:
+> ```bash
+> git checkout --orphan gh-pages
+> git reset --hard
+> git commit --allow-empty -m "init gh-pages"
+> git push origin gh-pages
+> git checkout main
+> ```
+
+The `publish-ui` workflow handles everything after this — writing `latest.json`, uploading release assets. You never need to touch the `gh-pages` branch manually.
 
 ### File Layout
+
+On disk, the OTA cache lives in the Electron `userData` directory:
 
 ```
 {userData}/ui-cache/
   version.json          # { "version": "1.2.0" }
   current/              # Active renderer bundle (index.html + assets)
   previous/             # Rollback copy of the prior version
+```
+
+On GitHub:
+
+```
+gh-pages branch:
+  latest.json           # { "version": "1.2.0", "url": "...", "sha256": "..." }
+
+GitHub Releases:
+  ui-v1.2.0/
+    ui-bundle.tar.gz    # The renderer build output
 ```
 
 ---
