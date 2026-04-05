@@ -98,4 +98,5 @@ contextBridge.exposeInMainWorld('antontron', {
 
   // App
   getPlatform: () => process.platform,
+  getUIVersion: () => ipcRenderer.invoke(IPC.APP_UI_VERSION),
 });

@@ -8,7 +8,7 @@ import { IPC } from '../shared/ipc-channels';
 import { checkAntonInstalled, runInstaller } from './installer';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
 import { sendEvent } from './analytics';
-import { getRendererPath, checkForUIUpdate } from './ui-updater';
+import { getRendererPath, checkForUIUpdate, getCachedVersion } from './ui-updater';
 
 function getAntonEnvPath(): string {
   return path.join(os.homedir(), '.anton', '.env');
@@ -653,6 +653,14 @@ function setupIPC() {
     writeState({ activeProject: name });
     return true;
   });
+
+  ipcMain.handle(IPC.APP_UI_VERSION, async () => {
+    const uiVersion = getCachedVersion();
+    return {
+      app: app.getVersion(),
+      ui: uiVersion || 'bundled',
+    };
+  });
 }
 
 // Watch ~/.anton/.env for external changes (e.g. /connect from CLI)
@@ -702,9 +710,13 @@ app.whenReady().then(() => {
             label: 'About Anton',
             role: 'about',
             click: () => {
+              const uiVersion = getCachedVersion();
+              const versionStr = uiVersion
+                ? `${app.getVersion()} (UI: ${uiVersion})`
+                : app.getVersion();
               app.setAboutPanelOptions({
                 applicationName: 'Anton',
-                applicationVersion: app.getVersion(),
+                applicationVersion: versionStr,
                 copyright: 'By MindsDB',
                 credits: 'Autonomous AI Coworker\nhttps://mindsdb.com',
               });
@@ -722,7 +734,17 @@ app.whenReady().then(() => {
         ],
       },
       { role: 'editMenu' },
-      { role: 'viewMenu' },
+      {
+        label: 'View',
+        submenu: [
+          { role: 'reload' },
+          { role: 'forceReload' },
+          { role: 'togglefullscreen' },
+          { role: 'zoomIn' },
+          { role: 'zoomOut' },
+          { role: 'resetZoom' },
+        ],
+      },
       { role: 'windowMenu' },
     ];
     Menu.setApplicationMenu(Menu.buildFromTemplate(template));

@@ -61,6 +61,7 @@ interface AntonTronAPI {
   setActiveProject: (name: string) => Promise<boolean>;
 
   getPlatform: () => string;
+  getUIVersion: () => Promise<{ app: string; ui: string }>;
 }
 
 declare global {
