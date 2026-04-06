@@ -755,10 +755,12 @@ app.whenReady().then(() => {
   startEnvWatcher();
   createWindow();
 
-  // Check for UI updates in the background — downloads for next launch
-  checkForUIUpdate().then((updated) => {
-    if (updated) console.log('[main] UI update downloaded — will apply on next launch');
-  }).catch(() => {});
+  // Check for UI updates in the background — only in packaged builds
+  if (app.isPackaged) {
+    checkForUIUpdate().then((updated) => {
+      if (updated) console.log('[main] UI update downloaded — will apply on next launch');
+    }).catch(() => {});
+  }
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
