@@ -557,6 +557,28 @@ GitHub Releases:
 | --- | --- | --- |
 | `publish-ui.yml` | `ui-v*` tag or manual | Builds renderer, publishes bundle to Releases, updates `latest.json` on GitHub Pages |
 | `windows-installer.yml` | `v*` tag or manual | Builds Windows `.exe` installer with code signing |
+| `macos-pkg-release.yml` | `v*` tag or manual | Builds signed + notarized macOS `.pkg`, uploads artifact, optional upload to S3 |
+
+### Required GitHub Secrets (placeholders)
+
+Apple signing/notarization:
+
+- `APPLE_DEV_ID_APP_CERT_B64`
+- `APPLE_DEV_ID_APP_CERT_PASSWORD`
+- `APPLE_DEV_ID_INSTALLER_CERT_B64`
+- `APPLE_DEV_ID_INSTALLER_CERT_PASSWORD`
+- `APPLE_ID`
+- `APPLE_APP_SPECIFIC_PASSWORD`
+- `APPLE_TEAM_ID`
+- `APPLE_INSTALLER_IDENTITY` (example: `Developer ID Installer: Your Org (TEAMID)`)
+
+Optional S3 publish:
+
+- `AWS_ACCESS_KEY_ID`
+- `AWS_SECRET_ACCESS_KEY`
+- `AWS_REGION`
+- `S3_RELEASE_BUCKET`
+- `S3_RELEASE_PREFIX` (example: `desktop/macos`)
 
 ### GitHub Actions example (full platform builds)
 

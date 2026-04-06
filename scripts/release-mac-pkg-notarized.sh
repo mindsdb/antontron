@@ -11,7 +11,7 @@ APP_PATH="release/mac-universal/${PRODUCT_NAME}.app"
 APP_ZIP="release/${ARTIFACT_NAME}.app.zip"
 PKG_PATH="release/${ARTIFACT_NAME}-${VERSION}-universal-signed.pkg"
 
-INSTALLER_IDENTITY="Developer ID Installer: MindsDB Inc (498Y665994)"
+INSTALLER_IDENTITY="${INSTALLER_IDENTITY:-Developer ID Installer: MindsDB Inc (498Y665994)}"
 
 if [[ -z "${APPLE_ID:-}" || -z "${APPLE_TEAM_ID:-}" || -z "${APPLE_APP_SPECIFIC_PASSWORD:-}" ]]; then
   echo "Error: missing Apple notarization env vars." >&2
