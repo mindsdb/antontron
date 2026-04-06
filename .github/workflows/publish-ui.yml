@@ -51,6 +51,7 @@ jobs:
       - name: Publish to antontron-releases
         env:
           RELEASES_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           TAG="${{ steps.version.outputs.tag }}"
@@ -95,5 +96,3 @@ jobs:
           git add latest.json
           git commit -m "UI ${VERSION}" || echo "No changes"
           git push origin gh-pages
-        env:
-          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
