@@ -1,7 +1,7 @@
 import { useState } from 'react';
 
 type Provider = 'minds' | 'byok';
-type ByokProvider = 'anthropic' | 'openai';
+type ByokProvider = 'anthropic' | 'openai' | 'gemini' | 'openai-compatible';
 type Phase = 'choose' | 'validating' | 'success' | 'error';
 
 const ANTHROPIC_MODELS = [
@@ -17,6 +17,14 @@ const OPENAI_MODELS = [
   { id: 'o4-mini', label: 'o4 Mini' },
 ];
 
+const GEMINI_MODELS = [
+  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+];
+
+const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+
 const CUSTOM_MODEL = '__custom__';
 
 export default function Onboarding({ onComplete }: { onComplete: () => void }) {
@@ -26,16 +34,25 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [customModel, setCustomModel] = useState('');
   const [apiKey, setApiKey] = useState('');
   const [mindsUrl, setMindsUrl] = useState('https://mdb.ai');
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
   const [phase, setPhase] = useState<Phase>('choose');
   const [errorMsg, setErrorMsg] = useState('');
 
-  const models = byokProvider === 'anthropic' ? ANTHROPIC_MODELS : OPENAI_MODELS;
+  const models = byokProvider === 'anthropic'
+    ? ANTHROPIC_MODELS
+    : byokProvider === 'gemini'
+      ? GEMINI_MODELS
+      : byokProvider === 'openai'
+        ? OPENAI_MODELS
+        : []; // openai-compatible uses custom model only
   const resolvedModel = selectedModel === CUSTOM_MODEL ? customModel.trim() : selectedModel;
 
   const canConnect =
     provider === 'minds'
       ? apiKey.trim().length > 0 && mindsUrl.trim().length > 0
-      : apiKey.trim().length > 0 && resolvedModel.length > 0;
+      : byokProvider === 'openai-compatible'
+        ? customBaseUrl.trim().length > 0 && resolvedModel.length > 0
+        : apiKey.trim().length > 0 && resolvedModel.length > 0;
 
   const validationProvider = provider === 'minds'
     ? 'minds'
@@ -47,12 +64,20 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
       ? mindsUrl.trim()
       : byokProvider === 'openai'
         ? 'https://api.openai.com/v1'
-        : undefined;
+        : byokProvider === 'gemini'
+          ? GEMINI_BASE_URL
+          : byokProvider === 'openai-compatible'
+            ? customBaseUrl.trim()
+            : undefined;
 
   const handleSwitchByokProvider = (bp: ByokProvider) => {
     setByokProvider(bp);
-    setSelectedModel(bp === 'anthropic' ? ANTHROPIC_MODELS[0].id : OPENAI_MODELS[0].id);
+    if (bp === 'anthropic') setSelectedModel(ANTHROPIC_MODELS[0].id);
+    else if (bp === 'openai') setSelectedModel(OPENAI_MODELS[0].id);
+    else if (bp === 'gemini') setSelectedModel(GEMINI_MODELS[0].id);
+    else setSelectedModel(CUSTOM_MODEL);
     setCustomModel('');
+    setCustomBaseUrl('');
     setPhase('choose');
     setErrorMsg('');
     setApiKey('');
@@ -93,6 +118,21 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
       lines.push(`ANTON_ANTHROPIC_API_KEY=${apiKey.trim()}`);
       lines.push('ANTON_PLANNING_PROVIDER=anthropic');
       lines.push('ANTON_CODING_PROVIDER=anthropic');
+      lines.push(`ANTON_PLANNING_MODEL=${resolvedModel}`);
+      lines.push(`ANTON_CODING_MODEL=${resolvedModel}`);
+    } else if (byokProvider === 'gemini') {
+      lines.push(`ANTON_OPENAI_API_KEY=${apiKey.trim()}`);
+      lines.push(`ANTON_OPENAI_BASE_URL=${GEMINI_BASE_URL}`);
+      lines.push('ANTON_PLANNING_PROVIDER=openai-compatible');
+      lines.push('ANTON_CODING_PROVIDER=openai-compatible');
+      lines.push(`ANTON_PLANNING_MODEL=${resolvedModel}`);
+      lines.push(`ANTON_CODING_MODEL=${resolvedModel}`);
+    } else if (byokProvider === 'openai-compatible') {
+      const key = apiKey.trim() || 'not-needed';
+      lines.push(`ANTON_OPENAI_API_KEY=${key}`);
+      lines.push(`ANTON_OPENAI_BASE_URL=${customBaseUrl.trim()}`);
+      lines.push('ANTON_PLANNING_PROVIDER=openai-compatible');
+      lines.push('ANTON_CODING_PROVIDER=openai-compatible');
       lines.push(`ANTON_PLANNING_MODEL=${resolvedModel}`);
       lines.push(`ANTON_CODING_MODEL=${resolvedModel}`);
     } else {
@@ -136,7 +176,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
           onClick={() => { setProvider('byok'); setPhase('choose'); setErrorMsg(''); setApiKey(''); }}
         >
           <div className="provider-card-name">Bring Your Own Key</div>
-          <div className="provider-card-desc">Anthropic | OpenAI</div>
+          <div className="provider-card-desc">Anthropic | OpenAI | Gemini | Custom</div>
           <div className="byok-icon-area">
             <svg className="byok-key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
               <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
@@ -165,33 +205,75 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               >
                 OpenAI
               </button>
+              <button
+                type="button"
+                className={`byok-provider-btn ${byokProvider === 'gemini' ? 'selected' : ''}`}
+                onClick={() => handleSwitchByokProvider('gemini')}
+              >
+                Gemini
+              </button>
+              <button
+                type="button"
+                className={`byok-provider-btn ${byokProvider === 'openai-compatible' ? 'selected' : ''}`}
+                onClick={() => handleSwitchByokProvider('openai-compatible')}
+              >
+                Custom
+              </button>
             </div>
+          </div>
+        )}
+
+        {provider === 'byok' && byokProvider === 'openai-compatible' && (
+          <div className="onboard-field">
+            <label className="onboard-label">Base URL</label>
+            <input
+              type="text"
+              className="settings-input"
+              placeholder="http://localhost:11434/v1"
+              value={customBaseUrl}
+              onChange={(e) => { setCustomBaseUrl(e.target.value); setPhase('choose'); setErrorMsg(''); }}
+              disabled={phase === 'validating'}
+            />
+            <div className="settings-hint">Ollama, vLLM, Together, Groq, LM Studio, etc.</div>
           </div>
         )}
 
         {provider === 'byok' && (
           <div className="onboard-field">
             <label className="onboard-label">Model</label>
-            <select
-              className="settings-select"
-              value={selectedModel}
-              onChange={(e) => { setSelectedModel(e.target.value); setPhase('choose'); setErrorMsg(''); }}
-              disabled={phase === 'validating'}
-            >
-              {models.map((m) => (
-                <option key={m.id} value={m.id}>{m.label}</option>
-              ))}
-              <option value={CUSTOM_MODEL}>Custom...</option>
-            </select>
-            {selectedModel === CUSTOM_MODEL && (
+            {models.length > 0 ? (
+              <>
+                <select
+                  className="settings-select"
+                  value={selectedModel}
+                  onChange={(e) => { setSelectedModel(e.target.value); setPhase('choose'); setErrorMsg(''); }}
+                  disabled={phase === 'validating'}
+                >
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>{m.label}</option>
+                  ))}
+                  <option value={CUSTOM_MODEL}>Custom...</option>
+                </select>
+                {selectedModel === CUSTOM_MODEL && (
+                  <input
+                    type="text"
+                    className="settings-input model-custom-input"
+                    placeholder="Enter model ID..."
+                    value={customModel}
+                    onChange={(e) => setCustomModel(e.target.value)}
+                    disabled={phase === 'validating'}
+                    autoFocus
+                  />
+                )}
+              </>
+            ) : (
               <input
                 type="text"
-                className="settings-input model-custom-input"
-                placeholder="Enter model ID..."
+                className="settings-input"
+                placeholder="Enter model name..."
                 value={customModel}
-                onChange={(e) => setCustomModel(e.target.value)}
+                onChange={(e) => { setCustomModel(e.target.value); setPhase('choose'); setErrorMsg(''); }}
                 disabled={phase === 'validating'}
-                autoFocus
               />
             )}
           </div>
@@ -217,7 +299,11 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               ? 'Minds API Key'
               : byokProvider === 'anthropic'
                 ? 'Anthropic API Key'
-                : 'OpenAI API Key'}
+                : byokProvider === 'gemini'
+                  ? 'Google AI API Key'
+                  : byokProvider === 'openai-compatible'
+                    ? 'API Key (optional)'
+                    : 'OpenAI API Key'}
           </label>
           <input
             type="password"
@@ -226,7 +312,11 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               ? 'Your Minds API key'
               : byokProvider === 'anthropic'
                 ? 'sk-ant-...'
-                : 'sk-...'}
+                : byokProvider === 'gemini'
+                  ? 'AIza...'
+                  : byokProvider === 'openai-compatible'
+                    ? 'Enter to skip if not needed'
+                    : 'sk-...'}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
             disabled={phase === 'validating'}

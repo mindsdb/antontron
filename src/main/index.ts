@@ -136,7 +136,8 @@ async function validateOpenAICompatible(
 ): Promise<{ ok: boolean; error?: string }> {
   try {
     const normalizedBase = baseUrl.replace(/\/+$/, '');
-    const chatUrl = normalizedBase.endsWith('/v1')
+    // Support endpoints that already include a versioned path (e.g. Gemini's /v1beta/openai)
+    const chatUrl = /\/v\d/.test(normalizedBase)
       ? `${normalizedBase}/chat/completions`
       : `${normalizedBase}/v1/chat/completions`;
     const res = await httpRequest(chatUrl, {

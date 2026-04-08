@@ -248,8 +248,17 @@ export default function Terminal() {
       menu.appendChild(selectAllBtn);
       document.body.appendChild(menu);
 
-      const dismiss = () => { menu.remove(); document.removeEventListener('click', dismiss); };
-      setTimeout(() => document.addEventListener('click', dismiss), 0);
+      const dismiss = () => {
+        menu.remove();
+        document.removeEventListener('mousedown', dismiss, true);
+        document.removeEventListener('contextmenu', dismiss, true);
+        window.removeEventListener('blur', dismiss);
+      };
+      setTimeout(() => {
+        document.addEventListener('mousedown', dismiss, true);
+        document.addEventListener('contextmenu', dismiss, true);
+        window.addEventListener('blur', dismiss);
+      }, 0);
     });
 
     // Image paste handler
@@ -812,7 +821,7 @@ export default function Terminal() {
   );
 }
 
-type LLMProvider = 'minds' | 'anthropic' | 'openai';
+type LLMProvider = 'minds' | 'anthropic' | 'openai' | 'gemini' | 'openai-compatible';
 
 const ANTHROPIC_MODELS_SETTINGS = [
   { id: 'claude-sonnet-4-6', label: 'Claude Sonnet 4.6' },
@@ -827,9 +836,23 @@ const OPENAI_MODELS_SETTINGS = [
   { id: 'o4-mini', label: 'o4 Mini' },
 ];
 
+const GEMINI_MODELS_SETTINGS = [
+  { id: 'gemini-3-flash-preview', label: 'Gemini 3 Flash' },
+  { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash' },
+  { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro' },
+];
+
+const GEMINI_BASE_URL_SETTINGS = 'https://generativelanguage.googleapis.com/v1beta/openai/';
+
 function detectProvider(vars: Record<string, string>): LLMProvider {
   if (vars.ANTON_MINDS_ENABLED === 'true') return 'minds';
   if (vars.ANTON_PLANNING_PROVIDER === 'anthropic') return 'anthropic';
+  // Detect Gemini by base URL
+  if (vars.ANTON_OPENAI_BASE_URL?.includes('generativelanguage.googleapis.com')) return 'gemini';
+  // Detect OpenAI by api.openai.com base URL
+  if (vars.ANTON_OPENAI_BASE_URL?.includes('api.openai.com')) return 'openai';
+  // Anything else with openai-compatible provider is custom
+  if (vars.ANTON_PLANNING_PROVIDER === 'openai-compatible') return 'openai-compatible';
   return 'openai';
 }
 
@@ -838,6 +861,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [apiKey, setApiKey] = useState('');
   const [hasExistingKey, setHasExistingKey] = useState(false);
   const [mindsUrl, setMindsUrl] = useState('https://mdb.ai');
+  const [customBaseUrl, setCustomBaseUrl] = useState('');
   const [model, setModel] = useState('claude-sonnet-4-6');
   const [customModel, setCustomModel] = useState('');
   const [memoryMode, setMemoryMode] = useState('autopilot');
@@ -849,7 +873,13 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [openSection, setOpenSection] = useState<string>('llm');
   const [existingVars, setExistingVars] = useState<Record<string, string>>({});
 
-  const models = llmProvider === 'anthropic' ? ANTHROPIC_MODELS_SETTINGS : OPENAI_MODELS_SETTINGS;
+  const models = llmProvider === 'anthropic'
+    ? ANTHROPIC_MODELS_SETTINGS
+    : llmProvider === 'gemini'
+      ? GEMINI_MODELS_SETTINGS
+      : llmProvider === 'openai'
+        ? OPENAI_MODELS_SETTINGS
+        : [];
   const resolvedModel = model === '__custom__' ? customModel.trim() : model;
 
   useEffect(() => {
@@ -865,15 +895,26 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
       if (vars.ANTON_PROACTIVE_DASHBOARDS === 'true') setProactiveDashboards(true);
       if (vars.ANTON_ANALYTICS_ENABLED === 'false') setAnalyticsEnabled(false);
 
+      // Load custom base URL for openai-compatible
+      if (detected === 'openai-compatible' && vars.ANTON_OPENAI_BASE_URL) {
+        setCustomBaseUrl(vars.ANTON_OPENAI_BASE_URL);
+      }
+
       // Detect existing key
       if (detected === 'anthropic' && vars.ANTON_ANTHROPIC_API_KEY) setHasExistingKey(true);
-      if (detected === 'openai' && vars.ANTON_OPENAI_API_KEY) setHasExistingKey(true);
+      if ((detected === 'openai' || detected === 'gemini' || detected === 'openai-compatible') && vars.ANTON_OPENAI_API_KEY) setHasExistingKey(true);
       if (detected === 'minds' && vars.ANTON_MINDS_API_KEY) setHasExistingKey(true);
 
       // Load model — skip for minds (uses _reason_/_code_)
       if (detected !== 'minds' && vars.ANTON_PLANNING_MODEL) {
-        const knownModels = detected === 'anthropic' ? ANTHROPIC_MODELS_SETTINGS : OPENAI_MODELS_SETTINGS;
-        if (knownModels.some(m => m.id === vars.ANTON_PLANNING_MODEL)) {
+        const knownModels = detected === 'anthropic'
+          ? ANTHROPIC_MODELS_SETTINGS
+          : detected === 'gemini'
+            ? GEMINI_MODELS_SETTINGS
+            : detected === 'openai'
+              ? OPENAI_MODELS_SETTINGS
+              : [];
+        if (knownModels.length > 0 && knownModels.some(m => m.id === vars.ANTON_PLANNING_MODEL)) {
           setModel(vars.ANTON_PLANNING_MODEL);
         } else {
           setModel('__custom__');
@@ -887,8 +928,11 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     setLlmProvider(p);
     setApiKey('');
     setHasExistingKey(false);
+    setCustomBaseUrl('');
     if (p === 'anthropic') setModel(ANTHROPIC_MODELS_SETTINGS[0].id);
     else if (p === 'openai') setModel(OPENAI_MODELS_SETTINGS[0].id);
+    else if (p === 'gemini') setModel(GEMINI_MODELS_SETTINGS[0].id);
+    else if (p === 'openai-compatible') setModel('__custom__');
     setCustomModel('');
   };
 
@@ -910,6 +954,16 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
     } else if (llmProvider === 'anthropic') {
       validationProvider = 'anthropic';
       validationKey = apiKey.trim() || existingVars.ANTON_ANTHROPIC_API_KEY || '';
+      validationModel = resolvedModel;
+    } else if (llmProvider === 'gemini') {
+      validationProvider = 'openai-compatible';
+      validationKey = apiKey.trim() || existingVars.ANTON_OPENAI_API_KEY || '';
+      validationBaseUrl = GEMINI_BASE_URL_SETTINGS;
+      validationModel = resolvedModel;
+    } else if (llmProvider === 'openai-compatible') {
+      validationProvider = 'openai-compatible';
+      validationKey = apiKey.trim() || existingVars.ANTON_OPENAI_API_KEY || 'not-needed';
+      validationBaseUrl = customBaseUrl.trim();
       validationModel = resolvedModel;
     } else {
       validationProvider = 'openai-compatible';
@@ -960,6 +1014,20 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
       merged.ANTON_CODING_PROVIDER = 'anthropic';
       merged.ANTON_PLANNING_MODEL = resolvedModel;
       merged.ANTON_CODING_MODEL = resolvedModel;
+    } else if (llmProvider === 'gemini') {
+      merged.ANTON_OPENAI_API_KEY = validationKey;
+      merged.ANTON_OPENAI_BASE_URL = GEMINI_BASE_URL_SETTINGS;
+      merged.ANTON_PLANNING_PROVIDER = 'openai-compatible';
+      merged.ANTON_CODING_PROVIDER = 'openai-compatible';
+      merged.ANTON_PLANNING_MODEL = resolvedModel;
+      merged.ANTON_CODING_MODEL = resolvedModel;
+    } else if (llmProvider === 'openai-compatible') {
+      merged.ANTON_OPENAI_API_KEY = validationKey;
+      merged.ANTON_OPENAI_BASE_URL = customBaseUrl.trim();
+      merged.ANTON_PLANNING_PROVIDER = 'openai-compatible';
+      merged.ANTON_CODING_PROVIDER = 'openai-compatible';
+      merged.ANTON_PLANNING_MODEL = resolvedModel;
+      merged.ANTON_CODING_MODEL = resolvedModel;
     } else {
       merged.ANTON_OPENAI_API_KEY = validationKey;
       merged.ANTON_OPENAI_BASE_URL = 'https://api.openai.com/v1';
@@ -1006,6 +1074,8 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                   <option value="minds">Minds Cloud</option>
                   <option value="anthropic">Anthropic</option>
                   <option value="openai">OpenAI</option>
+                  <option value="gemini">Google Gemini</option>
+                  <option value="openai-compatible">Custom (OpenAI-compatible)</option>
                 </select>
               </div>
 
@@ -1022,14 +1092,37 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
                 </div>
               )}
 
+              {llmProvider === 'openai-compatible' && (
+                <div className="settings-group">
+                  <label className="settings-label">Base URL</label>
+                  <input
+                    type="text"
+                    className="settings-input"
+                    placeholder="http://localhost:11434/v1"
+                    value={customBaseUrl}
+                    onChange={(e) => setCustomBaseUrl(e.target.value)}
+                  />
+                  <div className="settings-hint">Ollama, vLLM, Together, Groq, LM Studio, etc.</div>
+                </div>
+              )}
+
               <div className="settings-group">
                 <label className="settings-label">
-                  {llmProvider === 'minds' ? 'Minds API Key' : llmProvider === 'anthropic' ? 'Anthropic API Key' : 'OpenAI API Key'}
+                  {llmProvider === 'minds' ? 'Minds API Key'
+                    : llmProvider === 'anthropic' ? 'Anthropic API Key'
+                    : llmProvider === 'gemini' ? 'Google AI API Key'
+                    : llmProvider === 'openai-compatible' ? 'API Key (optional)'
+                    : 'OpenAI API Key'}
                 </label>
                 <input
                   type="password"
                   className="settings-input"
-                  placeholder={hasExistingKey ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (unchanged)' : llmProvider === 'anthropic' ? 'sk-ant-...' : 'sk-...'}
+                  placeholder={hasExistingKey
+                    ? '\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022 (unchanged)'
+                    : llmProvider === 'anthropic' ? 'sk-ant-...'
+                    : llmProvider === 'gemini' ? 'AIza...'
+                    : llmProvider === 'openai-compatible' ? 'Enter to skip if not needed'
+                    : 'sk-...'}
                   value={apiKey}
                   onChange={(e) => setApiKey(e.target.value)}
                 />
@@ -1039,22 +1132,34 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
               {llmProvider !== 'minds' && (
                 <div className="settings-group">
                   <label className="settings-label">Model</label>
-                  <select
-                    className="settings-select"
-                    value={model}
-                    onChange={(e) => setModel(e.target.value)}
-                  >
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id}>{m.label}</option>
-                    ))}
-                    <option value="__custom__">Custom...</option>
-                  </select>
-                  {model === '__custom__' && (
+                  {models.length > 0 ? (
+                    <>
+                      <select
+                        className="settings-select"
+                        value={model}
+                        onChange={(e) => setModel(e.target.value)}
+                      >
+                        {models.map((m) => (
+                          <option key={m.id} value={m.id}>{m.label}</option>
+                        ))}
+                        <option value="__custom__">Custom...</option>
+                      </select>
+                      {model === '__custom__' && (
+                        <input
+                          type="text"
+                          className="settings-input"
+                          style={{ marginTop: 6 }}
+                          placeholder="Enter model ID..."
+                          value={customModel}
+                          onChange={(e) => setCustomModel(e.target.value)}
+                        />
+                      )}
+                    </>
+                  ) : (
                     <input
                       type="text"
                       className="settings-input"
-                      style={{ marginTop: 6 }}
-                      placeholder="Enter model ID..."
+                      placeholder="Enter model name..."
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
                     />
