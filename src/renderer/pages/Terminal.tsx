@@ -95,6 +95,11 @@ export default function Terminal() {
       cursorBlink: false,
       cursorStyle: 'bar',
       rightClickSelectsWord: true,
+      linkHandler: {
+        activate: (_event, url) => {
+          window.antontron.openExternal(url);
+        },
+      },
       theme: {
         background: '#0a0a0f',
         foreground: '#e0e0f0',
