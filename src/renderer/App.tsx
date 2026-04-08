@@ -17,28 +17,47 @@ export default function App() {
 
   useEffect(() => {
     async function init() {
-      const settings = await window.antontron.readSettings();
-      if (settings.ANTON_TERMS_CONSENT !== 'true') {
-        setPage('terms');
-        return;
-      }
+      try {
+        const settings = await window.antontron.readSettings();
+        if (settings.ANTON_TERMS_CONSENT !== 'true') {
+          setPage('terms');
+          return;
+        }
 
-      const installed = await window.antontron.checkInstall();
-      if (!installed) {
-        setPage('setup');
-        return;
+        const installed = await window.antontron.checkInstall();
+        if (!installed) {
+          setPage('setup');
+          return;
+        }
+        const { configured } = await window.antontron.checkConfigured();
+        if (!configured) {
+          setPage('onboarding');
+          return;
+        }
+        setPage('terminal');
+      } catch {
+        setPage('terms');
       }
-      const { configured } = await window.antontron.checkConfigured();
-      if (!configured) {
-        setPage('onboarding');
-        return;
-      }
-      setPage('terminal');
     }
     init();
   }, []);
 
-  const handleTermsAccepted = () => setPage('setup');
+  const advanceFromTerms = async () => {
+    const installed = await window.antontron.checkInstall();
+    if (!installed) {
+      setPage('setup');
+      return;
+    }
+    const { configured } = await window.antontron.checkConfigured();
+    if (!configured) {
+      setPage('onboarding');
+      return;
+    }
+    setPage('launching');
+    setTimeout(() => setPage('terminal'), 1200);
+  };
+
+  const handleTermsAccepted = () => { advanceFromTerms(); };
   const handleInstallComplete = () => setPage('onboarding');
   const handleOnboardingComplete = () => {
     setPage('launching');
