@@ -842,6 +842,17 @@ html, body, #root {
   padding: 8px;
 }
 
+.terminal-drop-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.terminal-drop-overlay.active {
+  pointer-events: all;
+}
+
 .terminal-body.drag-over {
   outline: 2px solid var(--cyan);
   outline-offset: -2px;

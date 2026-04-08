@@ -134,24 +134,56 @@ export default function Terminal() {
     term.open(container);
 
     // Drag-and-drop files → paste path into terminal
-    container.addEventListener('dragover', (e) => {
+    // Use an invisible overlay that appears during drag — xterm's canvas
+    // swallows pointer events, so we need a sibling on top to catch drops.
+    const dropOverlay = document.createElement('div');
+    dropOverlay.className = 'terminal-drop-overlay';
+    container.style.position = 'relative';
+    container.appendChild(dropOverlay);
+
+    // Show overlay when dragging over the document (any file drag)
+    let dragCounter = 0;
+    const onDocDragEnter = (e: DragEvent) => {
+      if (e.dataTransfer?.types.includes('Files')) {
+        dragCounter++;
+        dropOverlay.classList.add('active');
+      }
+    };
+    const onDocDragLeave = () => {
+      dragCounter--;
+      if (dragCounter <= 0) {
+        dragCounter = 0;
+        dropOverlay.classList.remove('active');
+      }
+    };
+    const onDocDrop = () => {
+      dragCounter = 0;
+      dropOverlay.classList.remove('active');
+    };
+    document.addEventListener('dragenter', onDocDragEnter);
+    document.addEventListener('dragleave', onDocDragLeave);
+    document.addEventListener('drop', onDocDrop);
+
+    dropOverlay.addEventListener('dragover', (e) => {
       e.preventDefault();
       e.stopPropagation();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy';
       container.classList.add('drag-over');
     });
-    container.addEventListener('dragleave', (e) => {
-      e.preventDefault();
+    dropOverlay.addEventListener('dragleave', (e) => {
       e.stopPropagation();
       container.classList.remove('drag-over');
     });
-    container.addEventListener('drop', (e) => {
+    dropOverlay.addEventListener('drop', (e) => {
       e.preventDefault();
       e.stopPropagation();
       container.classList.remove('drag-over');
+      dropOverlay.classList.remove('active');
+      dragCounter = 0;
       const files = e.dataTransfer?.files;
       if (files && files.length > 0) {
         const paths = Array.from(files)
-          .map((f: any) => f.path as string)
+          .map((f) => window.antontron.getPathForFile(f))
           .filter(Boolean)
           .map((p) => (p.includes(' ') ? `'${p}'` : p));
         if (paths.length > 0) {
@@ -405,6 +437,19 @@ export default function Terminal() {
     }
   }, [renamingProject]);
 
+  // Prevent Electron's default file-drop behavior (navigating to file://)
+  // Using capture phase so this runs first, but only calls preventDefault —
+  // the event still propagates to terminal drop handlers.
+  useEffect(() => {
+    const preventNav = (e: DragEvent) => { e.preventDefault(); };
+    document.addEventListener('dragover', preventNav, true);
+    document.addEventListener('drop', preventNav, true);
+    return () => {
+      document.removeEventListener('dragover', preventNav, true);
+      document.removeEventListener('drop', preventNav, true);
+    };
+  }, []);
+
   // Set up global IPC listeners for data/exit routed by projectName
   useEffect(() => {
     let streamTimeouts: Map<string, ReturnType<typeof setTimeout>> = new Map();
@@ -531,6 +576,38 @@ export default function Terminal() {
 
           <div className="sidebar-divider" />
 
+          {/* Data Vault */}
+          <div className="sidebar-section">
+            <div className="sidebar-label">DATA VAULT</div>
+            {vaultConnections.length > 0 && (
+              <div className="project-list">
+                {vaultConnections.map((c) => (
+                  <div key={`${c.engine}-${c.name}`} className="project-item">
+                    <button
+                      className="project-item-btn"
+                      onClick={() => setEditingConnection({ engine: c.engine, name: c.name })}
+                    >
+                      <div className="vault-engine-dot" />
+                      <span className="vault-conn-name">
+                        <span className="vault-engine">{c.engine}</span>
+                        <span className="vault-name">({c.name})</span>
+                      </span>
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            <button
+              className="sidebar-btn new-project-btn"
+              onClick={handleDataVaultConnect}
+            >
+              <span className="sidebar-btn-icon">+</span>
+              Add Datasource
+            </button>
+          </div>
+
+          <div className="sidebar-divider" />
+
           {/* Projects */}
           <div className="sidebar-section">
             <div className="sidebar-label">PROJECTS</div>
@@ -607,38 +684,6 @@ export default function Terminal() {
                 New Project
               </button>
             )}
-          </div>
-
-          <div className="sidebar-divider" />
-
-          {/* Data Vault */}
-          <div className="sidebar-section">
-            <div className="sidebar-label">DATA VAULT</div>
-            {vaultConnections.length > 0 && (
-              <div className="project-list">
-                {vaultConnections.map((c) => (
-                  <div key={`${c.engine}-${c.name}`} className="project-item">
-                    <button
-                      className="project-item-btn"
-                      onClick={() => setEditingConnection({ engine: c.engine, name: c.name })}
-                    >
-                      <div className="vault-engine-dot" />
-                      <span className="vault-conn-name">
-                        <span className="vault-engine">{c.engine}</span>
-                        <span className="vault-name">({c.name})</span>
-                      </span>
-                    </button>
-                  </div>
-                ))}
-              </div>
-            )}
-            <button
-              className="sidebar-btn new-project-btn"
-              onClick={handleDataVaultConnect}
-            >
-              <span className="sidebar-btn-icon">+</span>
-              Add Datasource
-            </button>
           </div>
         </div>
 

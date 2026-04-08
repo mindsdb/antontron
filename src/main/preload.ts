@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron';
+import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { IPC } from '../shared/ipc-channels';
 
 contextBridge.exposeInMainWorld('antontron', {
@@ -106,4 +106,5 @@ contextBridge.exposeInMainWorld('antontron', {
   getPlatform: () => process.platform,
   getUIVersion: () => ipcRenderer.invoke(IPC.APP_UI_VERSION),
   openExternal: (url: string) => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
 });

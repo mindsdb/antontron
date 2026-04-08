@@ -65,6 +65,7 @@ interface AntonTronAPI {
   getPlatform: () => string;
   getUIVersion: () => Promise<{ app: string; ui: string }>;
   openExternal: (url: string) => Promise<void>;
+  getPathForFile: (file: File) => string;
 }
 
 declare global {
