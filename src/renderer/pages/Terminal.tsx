@@ -121,7 +121,9 @@ export default function Terminal() {
     });
 
     const fitAddon = new FitAddon();
-    const webLinksAddon = new WebLinksAddon();
+    const webLinksAddon = new WebLinksAddon((_event, url) => {
+      window.antontron.openExternal(url);
+    });
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     term.open(container);
