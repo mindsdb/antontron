@@ -133,6 +133,33 @@ export default function Terminal() {
     term.loadAddon(webLinksAddon);
     term.open(container);
 
+    // Drag-and-drop files → paste path into terminal
+    container.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      container.classList.add('drag-over');
+    });
+    container.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      container.classList.remove('drag-over');
+    });
+    container.addEventListener('drop', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      container.classList.remove('drag-over');
+      const files = e.dataTransfer?.files;
+      if (files && files.length > 0) {
+        const paths = Array.from(files)
+          .map((f: any) => f.path as string)
+          .filter(Boolean)
+          .map((p) => (p.includes(' ') ? `'${p}'` : p));
+        if (paths.length > 0) {
+          window.antontron.sendInput(projectName, paths.join(' '));
+        }
+      }
+    });
+
     const instance: TerminalInstance = {
       term,
       fitAddon,
