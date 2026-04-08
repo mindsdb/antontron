@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, Menu, nativeImage, net } from 'electron';
+import { app, BrowserWindow, ipcMain, Menu, nativeImage, net, shell } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -307,6 +307,24 @@ function createWindow() {
   } else {
     mainWindow.loadFile(getRendererPath());
   }
+
+  // Open external links in the OS default browser instead of navigating Electron
+  mainWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+    }
+    return { action: 'deny' };
+  });
+
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    // Allow dev server reloads
+    if (!app.isPackaged && url.startsWith('http://localhost')) return;
+    // Block navigation and open in OS browser
+    event.preventDefault();
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      shell.openExternal(url);
+    }
+  });
 
   mainWindow.once('ready-to-show', () => {
     mainWindow?.show();
@@ -652,6 +670,12 @@ function setupIPC() {
   ipcMain.handle(IPC.PROJECTS_SET_ACTIVE, async (_event, name: string) => {
     writeState({ activeProject: name });
     return true;
+  });
+
+  ipcMain.handle(IPC.OPEN_EXTERNAL, async (_event, url: string) => {
+    if (url.startsWith('http://') || url.startsWith('https://')) {
+      await shell.openExternal(url);
+    }
   });
 
   ipcMain.handle(IPC.APP_UI_VERSION, async () => {

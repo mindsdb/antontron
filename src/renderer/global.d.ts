@@ -62,6 +62,7 @@ interface AntonTronAPI {
 
   getPlatform: () => string;
   getUIVersion: () => Promise<{ app: string; ui: string }>;
+  openExternal: (url: string) => Promise<void>;
 }
 
 declare global {
