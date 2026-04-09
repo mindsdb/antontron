@@ -571,13 +571,85 @@ html, body, #root {
   gap: 6px;
 }
 
+.sidebar-version-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .sidebar-version {
   font-size: 10px;
   color: var(--text-muted);
   text-align: center;
-  padding: 4px 0 2px;
+  padding: 2px 0;
   letter-spacing: 1px;
   opacity: 0.6;
+}
+
+/* CLI Update Banner */
+.cli-update-banner {
+  position: absolute;
+  top: 38px;
+  left: var(--sidebar-width);
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--accent-yellow);
+  z-index: 50;
+  gap: 12px;
+}
+
+.cli-update-text {
+  font-size: 12px;
+  color: var(--accent-yellow);
+  font-weight: 500;
+}
+
+.cli-update-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.cli-update-btn {
+  padding: 4px 14px;
+  border: 1px solid var(--accent-cyan);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--accent-cyan);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.cli-update-btn:hover:not(:disabled) {
+  background: var(--accent-cyan);
+  color: var(--bg-primary);
+}
+
+.cli-update-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.cli-update-dismiss {
+  padding: 2px 6px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.cli-update-dismiss:hover {
+  color: var(--text-primary);
 }
 
 .sidebar-btn {

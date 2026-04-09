@@ -9,6 +9,7 @@ import { checkAntonInstalled, runInstaller } from './installer';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
 import { sendEvent } from './analytics';
 import { getRendererPath, checkForUIUpdate, getCachedVersion } from './ui-updater';
+import { checkAntonVersion } from './anton-version-check';
 
 function getAntonEnvPath(): string {
   return path.join(os.homedir(), '.anton', '.env');
@@ -702,6 +703,24 @@ function setupIPC() {
       ui: uiVersion || 'bundled',
     };
   });
+
+  ipcMain.handle(IPC.ANTON_VERSION_CHECK, async () => {
+    return checkAntonVersion();
+  });
+
+  ipcMain.handle(IPC.ANTON_VERSION_UPDATE, async () => {
+    if (!mainWindow) return false;
+    if (activeInstall) return false;
+    const state = { cancelled: false };
+    activeInstall = state;
+    try {
+      return await runInstaller(mainWindow, { shouldAbort: () => state.cancelled });
+    } finally {
+      if (activeInstall === state) {
+        activeInstall = null;
+      }
+    }
+  });
 }
 
 // Watch ~/.anton/.env for external changes (e.g. /connect from CLI)
@@ -750,11 +769,15 @@ app.whenReady().then(() => {
           {
             label: 'About Anton',
             role: 'about',
-            click: () => {
+            click: async () => {
               const uiVersion = getCachedVersion();
-              const versionStr = uiVersion
-                ? `${app.getVersion()} (UI: ${uiVersion})`
-                : app.getVersion();
+              const cliStatus = await checkAntonVersion().catch(() => null);
+              const parts = [app.getVersion()];
+              if (uiVersion) parts.push(`UI: ${uiVersion}`);
+              if (cliStatus?.installed) parts.push(`CLI: ${cliStatus.installed}`);
+              const versionStr = parts.length > 1
+                ? `${parts[0]} (${parts.slice(1).join(', ')})`
+                : parts[0];
               app.setAboutPanelOptions({
                 applicationName: 'Anton',
                 applicationVersion: versionStr,
@@ -802,6 +825,16 @@ app.whenReady().then(() => {
       if (updated) console.log('[main] UI update downloaded — will apply on next launch');
     }).catch(() => {});
   }
+
+  // Check Anton CLI version and notify the renderer
+  checkAntonVersion().then((status) => {
+    console.log(`[main] Anton CLI: installed=${status.installed}, required=${status.required}, updateAvailable=${status.updateAvailable}`);
+    BrowserWindow.getAllWindows().forEach((win) => {
+      if (!win.isDestroyed()) {
+        win.webContents.send(IPC.ANTON_VERSION_STATUS, status);
+      }
+    });
+  }).catch(() => {});
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

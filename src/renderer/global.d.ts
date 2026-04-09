@@ -66,6 +66,10 @@ interface AntonTronAPI {
   getUIVersion: () => Promise<{ app: string; ui: string }>;
   openExternal: (url: string) => Promise<void>;
   getPathForFile: (file: File) => string;
+
+  checkAntonVersion: () => Promise<{ installed: string | null; required: string; updateAvailable: boolean }>;
+  updateAntonCLI: () => Promise<boolean>;
+  onAntonVersionStatus: (cb: (status: { installed: string | null; required: string; updateAvailable: boolean }) => void) => () => void;
 }
 
 declare global {

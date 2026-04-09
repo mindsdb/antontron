@@ -4,6 +4,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import { IPC } from '../shared/ipc-channels';
+import { REQUIRED_ANTON_VERSION } from '../shared/anton-version';
 import { sendEvent } from './analytics';
 
 interface InstallStep {
@@ -381,7 +382,7 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     const uvBin = fileExists(getUvBinary()) ? getUvBinary() : 'uv';
     const installResult = await runCommand(
       uvBin,
-      ['tool', 'install', 'git+https://github.com/mindsdb/anton.git', '--force'],
+      ['tool', 'install', `git+https://github.com/mindsdb/anton.git@v${REQUIRED_ANTON_VERSION}`, '--force'],
       win,
       { shouldAbort }
     );

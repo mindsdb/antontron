@@ -107,4 +107,13 @@ contextBridge.exposeInMainWorld('antontron', {
   getUIVersion: () => ipcRenderer.invoke(IPC.APP_UI_VERSION),
   openExternal: (url: string) => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+
+  // Anton CLI version
+  checkAntonVersion: () => ipcRenderer.invoke(IPC.ANTON_VERSION_CHECK),
+  updateAntonCLI: () => ipcRenderer.invoke(IPC.ANTON_VERSION_UPDATE),
+  onAntonVersionStatus: (cb: (status: { installed: string | null; required: string; updateAvailable: boolean }) => void) => {
+    const listener = (_: any, status: any) => cb(status);
+    ipcRenderer.on(IPC.ANTON_VERSION_STATUS, listener);
+    return () => ipcRenderer.removeListener(IPC.ANTON_VERSION_STATUS, listener);
+  },
 });

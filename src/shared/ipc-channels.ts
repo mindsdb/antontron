@@ -57,4 +57,9 @@ export const IPC = {
   APP_GET_PLATFORM: 'app:get-platform',
   APP_UI_VERSION: 'app:ui-version',
   OPEN_EXTERNAL: 'app:open-external',
+
+  // Anton CLI version
+  ANTON_VERSION_CHECK: 'anton:version-check',
+  ANTON_VERSION_UPDATE: 'anton:version-update',
+  ANTON_VERSION_STATUS: 'anton:version-status',
 } as const;

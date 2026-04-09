@@ -21,6 +21,11 @@ export default function Terminal() {
   const [activeProject, setActiveProject] = useState('default');
   const [showNewProject, setShowNewProject] = useState(false);
   const [uiVersion, setUIVersion] = useState<string | null>(null);
+  const [cliVersion, setCLIVersion] = useState<string | null>(null);
+  const [cliUpdateAvailable, setCLIUpdateAvailable] = useState(false);
+  const [cliUpdateRequired, setCLIUpdateRequired] = useState<string | null>(null);
+  const [cliUpdating, setCLIUpdating] = useState(false);
+  const [cliUpdateDismissed, setCLIUpdateDismissed] = useState(false);
   const [newProjectName, setNewProjectName] = useState('');
   const [projectError, setProjectError] = useState('');
   const [showSettings, setShowSettings] = useState(false);
@@ -356,6 +361,20 @@ export default function Terminal() {
     }, 100);
   }, [activeProject, rerender]);
 
+  const handleCLIUpdate = useCallback(async () => {
+    setCLIUpdating(true);
+    try {
+      const ok = await window.antontron.updateAntonCLI();
+      if (ok) {
+        const status = await window.antontron.checkAntonVersion();
+        setCLIVersion(status.installed);
+        setCLIUpdateAvailable(status.updateAvailable);
+        if (!status.updateAvailable) setCLIUpdateRequired(null);
+      }
+    } catch {}
+    setCLIUpdating(false);
+  }, []);
+
   const handleCreateProject = useCallback(async () => {
     if (!newProjectName.trim()) return;
     setProjectError('');
@@ -557,6 +576,21 @@ export default function Terminal() {
     }).catch(() => {});
   }, []);
 
+  // Check Anton CLI version on mount and listen for push updates
+  useEffect(() => {
+    window.antontron.checkAntonVersion().then((status) => {
+      setCLIVersion(status.installed);
+      setCLIUpdateAvailable(status.updateAvailable);
+      if (status.updateAvailable) setCLIUpdateRequired(status.required);
+    }).catch(() => {});
+    const unsub = window.antontron.onAntonVersionStatus((status) => {
+      setCLIVersion(status.installed);
+      setCLIUpdateAvailable(status.updateAvailable);
+      if (status.updateAvailable) setCLIUpdateRequired(status.required);
+    });
+    return unsub;
+  }, []);
+
   const activeInstance = terminalsRef.current.get(activeProject);
   const connected = activeInstance?.connected ?? false;
   const streaming = activeInstance?.streaming ?? false;
@@ -709,11 +743,41 @@ export default function Terminal() {
             <span className="sidebar-btn-icon">&#x2699;</span>
             Settings
           </button>
-          {uiVersion && uiVersion !== 'bundled' && (
-            <div className="sidebar-version">UI {uiVersion}</div>
-          )}
+          <div className="sidebar-version-block">
+            {cliVersion && (
+              <div className="sidebar-version">CLI {cliVersion}</div>
+            )}
+            {uiVersion && uiVersion !== 'bundled' && (
+              <div className="sidebar-version">UI {uiVersion}</div>
+            )}
+          </div>
         </div>
       </div>
+
+      {/* CLI Update Banner */}
+      {cliUpdateAvailable && !cliUpdateDismissed && (
+        <div className="cli-update-banner">
+          <span className="cli-update-text">
+            Anton CLI update available{cliUpdateRequired ? ` (v${cliUpdateRequired})` : ''}
+          </span>
+          <div className="cli-update-actions">
+            <button
+              className="cli-update-btn"
+              onClick={handleCLIUpdate}
+              disabled={cliUpdating}
+            >
+              {cliUpdating ? 'Updating…' : 'Update'}
+            </button>
+            <button
+              className="cli-update-dismiss"
+              onClick={() => setCLIUpdateDismissed(true)}
+              title="Dismiss"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Terminal Area */}
       <div className="main-area" ref={mainAreaRef}>
