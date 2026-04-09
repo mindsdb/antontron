@@ -15,23 +15,6 @@ interface TerminalInstance {
   exitCode: number | null;
 }
 
-interface ExplainabilityRecord {
-  turn: number;
-  created_at: string;
-  user_message: string;
-  answer_text: string;
-  summary: string;
-  data_sources: { name: string; engine?: string | null }[];
-  sql_queries: {
-    datasource: string;
-    sql: string;
-    engine?: string | null;
-    status: string;
-    error_message?: string | null;
-  }[];
-  scratchpad_steps: string[];
-}
-
 export default function Terminal() {
   const mainAreaRef = useRef<HTMLDivElement>(null);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -43,7 +26,8 @@ export default function Terminal() {
   const [showSettings, setShowSettings] = useState(false);
   const [showMinds, setShowMinds] = useState(false);
   const [showExplainability, setShowExplainability] = useState(false);
-  const [latestExplainability, setLatestExplainability] = useState<ExplainabilityRecord | null>(null);
+  const [explainabilityHistoryByProject, setExplainabilityHistoryByProject] = useState<Record<string, ExplainabilityRecord[]>>({});
+  const [explainabilityIndexByProject, setExplainabilityIndexByProject] = useState<Record<string, number>>({});
   const [mindsStatus, setMindsStatus] = useState<{
     connected: boolean;
     mindName?: string | null;
@@ -84,7 +68,32 @@ export default function Terminal() {
 
   const refreshExplainability = useCallback(async (projectName: string) => {
     const explainability = await window.antontron.getLatestExplainability(projectName);
-    setLatestExplainability(explainability);
+    if (!explainability) {
+      return;
+    }
+    let appended = false;
+    let nextIndex = 0;
+    setExplainabilityHistoryByProject((current) => {
+      const history = current[projectName] ?? [];
+      const lastRecord = history[history.length - 1];
+      if (
+        lastRecord
+        && lastRecord.turn === explainability.turn
+        && lastRecord.created_at === explainability.created_at
+      ) {
+        return current;
+      }
+      const nextHistory = [...history, explainability].slice(-50);
+      appended = true;
+      nextIndex = nextHistory.length - 1;
+      return { ...current, [projectName]: nextHistory };
+    });
+    if (appended) {
+      setExplainabilityIndexByProject((current) => ({
+        ...current,
+        [projectName]: nextIndex,
+      }));
+    }
   }, []);
 
   const loadProjects = useCallback(async () => {
@@ -369,7 +378,6 @@ export default function Terminal() {
     window.antontron.killAnton(activeProject);
     instance.connected = false;
     instance.exitCode = null;
-    setLatestExplainability(null);
 
     // Full reset and restart
     instance.term.reset();
@@ -406,6 +414,16 @@ export default function Terminal() {
       instance.container.remove();
       terminalsRef.current.delete(name);
     }
+    setExplainabilityHistoryByProject((current) => {
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
+    setExplainabilityIndexByProject((current) => {
+      const next = { ...current };
+      delete next[name];
+      return next;
+    });
     await window.antontron.deleteProject(name);
     await loadProjects();
     if (activeProject === name) {
@@ -451,6 +469,22 @@ export default function Terminal() {
       terminalsRef.current.delete(renamingProject);
       terminalsRef.current.set(result.name, instance);
     }
+    setExplainabilityHistoryByProject((current) => {
+      if (!(renamingProject in current)) {
+        return current;
+      }
+      const next = { ...current, [result.name]: current[renamingProject] };
+      delete next[renamingProject];
+      return next;
+    });
+    setExplainabilityIndexByProject((current) => {
+      if (!(renamingProject in current)) {
+        return current;
+      }
+      const next = { ...current, [result.name]: current[renamingProject] };
+      delete next[renamingProject];
+      return next;
+    });
     const wasActive = activeProject === renamingProject;
     setRenamingProject(null);
     await loadProjects();
@@ -588,6 +622,14 @@ export default function Terminal() {
   }, []);
 
   const activeInstance = terminalsRef.current.get(activeProject);
+  const activeExplainabilityHistory = explainabilityHistoryByProject[activeProject] ?? [];
+  const latestExplainability = activeExplainabilityHistory.length > 0
+    ? activeExplainabilityHistory[activeExplainabilityHistory.length - 1]
+    : null;
+  const activeExplainabilityIndex = explainabilityIndexByProject[activeProject] ?? (activeExplainabilityHistory.length > 0 ? activeExplainabilityHistory.length - 1 : -1);
+  const selectedExplainability = activeExplainabilityHistory.length > 0 && activeExplainabilityIndex >= 0
+    ? activeExplainabilityHistory[Math.min(activeExplainabilityIndex, activeExplainabilityHistory.length - 1)]
+    : latestExplainability;
   const connected = activeInstance?.connected ?? false;
   const streaming = activeInstance?.streaming ?? false;
   const exitCode = activeInstance?.exitCode ?? null;
@@ -751,8 +793,14 @@ export default function Terminal() {
           <div className="explainability-bar">
             <button
               className="explainability-btn"
-              onClick={() => setShowExplainability(true)}
-              disabled={streaming}
+              onClick={() => {
+                setExplainabilityIndexByProject((current) => ({
+                  ...current,
+                  [activeProject]: activeExplainabilityHistory.length - 1,
+                }));
+                setShowExplainability(true);
+              }}
+              disabled={streaming || activeExplainabilityHistory.length === 0}
               title="Inspect the latest answer"
             >
               Explain this answer
@@ -801,11 +849,25 @@ export default function Terminal() {
         </div>
       )}
 
-      {showExplainability && latestExplainability && (
+      {showExplainability && selectedExplainability && (
         <div className="settings-backdrop" onClick={() => setShowExplainability(false)}>
           <div className="settings-panel explainability-panel" onClick={(e) => e.stopPropagation()}>
             <ExplainabilityPanel
-              record={latestExplainability}
+              record={selectedExplainability}
+              currentIndex={activeExplainabilityIndex}
+              total={activeExplainabilityHistory.length}
+              onPrevious={activeExplainabilityIndex > 0
+                ? () => setExplainabilityIndexByProject((current) => ({
+                    ...current,
+                    [activeProject]: activeExplainabilityIndex - 1,
+                  }))
+                : undefined}
+              onNext={activeExplainabilityIndex < activeExplainabilityHistory.length - 1
+                ? () => setExplainabilityIndexByProject((current) => ({
+                    ...current,
+                    [activeProject]: activeExplainabilityIndex + 1,
+                  }))
+                : undefined}
               onClose={() => setShowExplainability(false)}
             />
           </div>
@@ -881,9 +943,17 @@ type LLMProvider = 'minds' | 'anthropic' | 'openai' | 'gemini' | 'openai-compati
 
 function ExplainabilityPanel({
   record,
+  currentIndex,
+  total,
+  onPrevious,
+  onNext,
   onClose,
 }: {
   record: ExplainabilityRecord;
+  currentIndex: number;
+  total: number;
+  onPrevious?: () => void;
+  onNext?: () => void;
   onClose: () => void;
 }) {
   const [copiedSqlIndex, setCopiedSqlIndex] = useState<number | null>(null);
@@ -898,7 +968,20 @@ function ExplainabilityPanel({
     <>
       <div className="settings-header">
         <div className="settings-title">Explain This Answer</div>
-        <button className="settings-close" onClick={onClose}>&times;</button>
+        <div className="explainability-header-actions">
+          <div className="explainability-nav">
+            <button className="sidebar-btn explainability-nav-btn" onClick={onPrevious} disabled={!onPrevious}>
+              Previous
+            </button>
+            <div className="explainability-nav-meta">
+              {currentIndex + 1} / {total}
+            </div>
+            <button className="sidebar-btn explainability-nav-btn" onClick={onNext} disabled={!onNext}>
+              Next
+            </button>
+          </div>
+          <button className="settings-close" onClick={onClose}>&times;</button>
+        </div>
       </div>
 
       <div className="settings-body explainability-body">

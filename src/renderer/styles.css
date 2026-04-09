@@ -997,6 +997,12 @@ html, body, #root {
   width: min(540px, 100vw);
 }
 
+.explainability-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
 @keyframes slideInRight {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
@@ -1056,6 +1062,24 @@ html, body, #root {
 
 .explainability-body {
   gap: 24px;
+}
+
+.explainability-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.explainability-nav-btn {
+  min-width: auto;
+  padding: 8px 10px;
+}
+
+.explainability-nav-meta {
+  min-width: 44px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .explainability-section {
