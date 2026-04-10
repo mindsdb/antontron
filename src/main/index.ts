@@ -271,6 +271,120 @@ function getActiveProjectPath(): string {
   return projectDir;
 }
 
+function getProjectPath(projectName: string): string {
+  return path.join(getProjectsDir(), projectName);
+}
+
+type ExplainabilityRecord = {
+  turn: number;
+  created_at: string;
+  user_message: string;
+  answer_text: string;
+  summary: string;
+  data_sources: { name: string; engine?: string | null }[];
+  sql_queries: {
+    datasource: string;
+    sql: string;
+    engine?: string | null;
+    status: string;
+    error_message?: string | null;
+  }[];
+  scratchpad_steps: string[];
+};
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null;
+}
+
+function asString(value: unknown, fallback = ''): string {
+  return typeof value === 'string' ? value : fallback;
+}
+
+function asNullableString(value: unknown): string | null | undefined {
+  return typeof value === 'string' ? value : value == null ? null : undefined;
+}
+
+function asNumber(value: unknown, fallback = 0): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeExplainabilityRecord(value: unknown): ExplainabilityRecord | null {
+  if (!isObject(value)) {
+    return null;
+  }
+
+  const dataSources = Array.isArray(value.data_sources)
+    ? value.data_sources
+        .filter(isObject)
+        .map((source) => ({
+          name: asString(source.name),
+          engine: asNullableString(source.engine) ?? null,
+        }))
+        .filter((source) => source.name.length > 0)
+    : [];
+
+  const sqlQueries = Array.isArray(value.sql_queries)
+    ? value.sql_queries
+        .filter(isObject)
+        .map((query) => ({
+          datasource: asString(query.datasource),
+          sql: asString(query.sql),
+          engine: asNullableString(query.engine) ?? null,
+          status: asString(query.status),
+          error_message: asNullableString(query.error_message) ?? null,
+        }))
+        .filter((query) => query.datasource.length > 0 || query.sql.length > 0)
+    : [];
+
+  const scratchpadSteps = Array.isArray(value.scratchpad_steps)
+    ? value.scratchpad_steps.filter((step): step is string => typeof step === 'string')
+    : [];
+
+  return {
+    turn: asNumber(value.turn),
+    created_at: asString(value.created_at),
+    user_message: asString(value.user_message),
+    answer_text: asString(value.answer_text),
+    summary: asString(value.summary),
+    data_sources: dataSources,
+    sql_queries: sqlQueries,
+    scratchpad_steps: scratchpadSteps,
+  };
+}
+
+function clearLatestExplainability(projectName: string) {
+  const explainabilityPath = path.join(
+    getProjectPath(projectName),
+    '.anton',
+    'explainability',
+    'latest.json'
+  );
+  try {
+    if (fs.existsSync(explainabilityPath)) {
+      fs.unlinkSync(explainabilityPath);
+    }
+  } catch {
+    // ignore – file may already be gone
+  }
+}
+
+function readLatestExplainability(projectName: string) {
+  const explainabilityPath = path.join(
+    getProjectPath(projectName),
+    '.anton',
+    'explainability',
+    'latest.json'
+  );
+  if (!fs.existsSync(explainabilityPath)) {
+    return null;
+  }
+  try {
+    return normalizeExplainabilityRecord(JSON.parse(fs.readFileSync(explainabilityPath, 'utf-8')));
+  } catch {
+    return null;
+  }
+}
+
 // ─── Icons ───────────────────────────────────────────────────
 function getIconPath(): string {
   if (app.isPackaged) {
@@ -370,11 +484,16 @@ function setupIPC() {
     if (!fs.existsSync(projectDir)) {
       ensureDefaultProject();
     }
+    clearLatestExplainability(projectName);
     startAnton(mainWindow, cols, rows, projectName, projectDir);
   });
 
   ipcMain.handle(IPC.ANTON_IS_RUNNING, async (_event, projectName: string) => {
     return isAntonRunning(projectName);
+  });
+
+  ipcMain.handle(IPC.EXPLAINABILITY_LATEST, async (_event, projectName: string) => {
+    return readLatestExplainability(projectName);
   });
 
   ipcMain.on(IPC.ANTON_INPUT, (_event, projectName: string, data: string) => {
