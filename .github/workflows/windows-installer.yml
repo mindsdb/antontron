@@ -22,7 +22,7 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci --omit=optional
+        run: npm ci --include=optional
 
       - name: Rebuild native modules for Electron
         run: npx electron-rebuild -f -w node-pty
