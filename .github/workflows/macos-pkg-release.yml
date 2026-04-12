@@ -8,6 +8,12 @@ on:
         type: boolean
         default: false
   pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
   push:
     tags:
       - "v*"
@@ -41,7 +47,7 @@ jobs:
         run: npx electron-rebuild -f -w node-pty
 
       - name: Import Apple signing certificates
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-macos-pkg') && github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           APPLE_DEV_ID_APP_CERT_B64: ${{ secrets.APPLE_DEV_ID_APP_CERT_B64 }}
           APPLE_DEV_ID_APP_CERT_PASSWORD: ${{ secrets.APPLE_DEV_ID_APP_CERT_PASSWORD }}
@@ -69,13 +75,13 @@ jobs:
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - name: Build unsigned test pkg
-        if: ${{ github.event_name == 'pull_request' }}
+        if: ${{ github.event_name == 'pull_request' && !(contains(github.event.pull_request.labels.*.name, 'signed-macos-pkg') && github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           MAC_PKG_UNSIGNED: "true"
         run: npm run release:mac:pkg:notarized
 
       - name: Build, sign and notarize pkg
-        if: ${{ github.event_name != 'pull_request' }}
+        if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-macos-pkg') && github.event.pull_request.head.repo.full_name == github.repository) }}
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
