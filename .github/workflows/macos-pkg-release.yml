@@ -26,6 +26,14 @@ jobs:
           node-version: 20
           cache: npm
 
+      - name: Setup Python for node-gyp
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Export python path for npm/node-gyp
+        run: echo "npm_config_python=$(python -c 'import sys; print(sys.executable)')" >> "$GITHUB_ENV"
+
       - name: Install dependencies
         run: npm ci --omit=optional
 
