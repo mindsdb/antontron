@@ -66,7 +66,19 @@ jobs:
           credential_id: ${{ secrets.SSL_CREDENTIAL_ID }}
           totp_secret: ${{ secrets.SSL_TOTP_SECRET }}
           file_path: ${{ steps.installer.outputs.exe_path }}
-          output_path: ${{ github.workspace }}\release
+          output_path: ${{ github.workspace }}\signed
+
+      - name: Replace unsigned installer with signed output
+        if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
+        shell: pwsh
+        run: |
+          $unsignedPath = "${{ steps.installer.outputs.exe_path }}"
+          $fileName = Split-Path $unsignedPath -Leaf
+          $signedPath = Join-Path "$env:GITHUB_WORKSPACE\signed" $fileName
+          if (!(Test-Path $signedPath)) {
+            throw "Signed file not found at $signedPath"
+          }
+          Copy-Item $signedPath $unsignedPath -Force
 
       - name: Verify installer signature
         if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
