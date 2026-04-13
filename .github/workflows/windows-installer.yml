@@ -58,7 +58,7 @@ jobs:
 
       - name: Sign installer with SSL.com eSigner
         if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
-        uses: sslcom/actions-codesigner@develop
+        uses: sslcom/esigner-codesign@develop
         with:
           command: sign
           username: ${{ secrets.SSL_USERNAME }}
