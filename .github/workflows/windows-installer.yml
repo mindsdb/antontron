@@ -87,15 +87,64 @@ jobs:
           $exe = "${{ steps.installer.outputs.exe_path }}"
           $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName
           if ($signtool) {
-            & $signtool verify /pa /v "$exe"
+            & $signtool verify /pa /all /v "$exe"
             if ($LASTEXITCODE -ne 0) { throw "signtool verify failed with exit code $LASTEXITCODE" }
           } else {
             Write-Host "signtool.exe not found in Windows SDK path, using Get-AuthenticodeSignature fallback"
-            $signature = Get-AuthenticodeSignature -FilePath $exe
-            if ($signature.Status -ne 'Valid') {
-              throw "Signature verification failed. Status: $($signature.Status) - $($signature.StatusMessage)"
-            }
           }
+
+          $signature = Get-AuthenticodeSignature -FilePath $exe
+          if ($signature.Status -ne 'Valid') {
+            throw "Signature verification failed. Status: $($signature.Status) - $($signature.StatusMessage)"
+          }
+          if (-not $signature.TimeStamperCertificate) {
+            throw "Timestamp verification failed: signature does not include a timestamp certificate."
+          }
+
+      - name: Generate installer signing report
+        shell: pwsh
+        run: |
+          $exe = "${{ steps.installer.outputs.exe_path }}"
+          $reportDir = Join-Path "$env:GITHUB_WORKSPACE\release" "signing-report"
+          New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
+
+          $signature = Get-AuthenticodeSignature -FilePath $exe
+          $hash = (Get-FileHash -Path $exe -Algorithm SHA256).Hash
+          $fileName = Split-Path $exe -Leaf
+
+          $report = [ordered]@{
+            file = $fileName
+            filePath = $exe
+            sha256 = $hash
+            status = "$($signature.Status)"
+            statusMessage = "$($signature.StatusMessage)"
+            signerSubject = "$($signature.SignerCertificate.Subject)"
+            signerThumbprint = "$($signature.SignerCertificate.Thumbprint)"
+            signerNotBefore = "$($signature.SignerCertificate.NotBefore)"
+            signerNotAfter = "$($signature.SignerCertificate.NotAfter)"
+            timestampSubject = "$($signature.TimeStamperCertificate.Subject)"
+            timestampThumbprint = "$($signature.TimeStamperCertificate.Thumbprint)"
+            timestampNotAfter = "$($signature.TimeStamperCertificate.NotAfter)"
+            eventName = "${{ github.event_name }}"
+          }
+
+          $jsonPath = Join-Path $reportDir "installer-signature-report.json"
+          $txtPath = Join-Path $reportDir "installer-signature-report.txt"
+
+          $report | ConvertTo-Json -Depth 5 | Set-Content -Path $jsonPath -Encoding UTF8
+          @(
+            "file: $($report.file)"
+            "sha256: $($report.sha256)"
+            "status: $($report.status)"
+            "statusMessage: $($report.statusMessage)"
+            "signerSubject: $($report.signerSubject)"
+            "signerThumbprint: $($report.signerThumbprint)"
+            "signerNotAfter: $($report.signerNotAfter)"
+            "timestampSubject: $($report.timestampSubject)"
+            "timestampThumbprint: $($report.timestampThumbprint)"
+            "timestampNotAfter: $($report.timestampNotAfter)"
+            "eventName: $($report.eventName)"
+          ) | Set-Content -Path $txtPath -Encoding UTF8
 
       - name: Upload installer artifacts
         uses: actions/upload-artifact@v4
@@ -104,3 +153,5 @@ jobs:
           path: |
             release/*.exe
             release/*.blockmap
+            release/signing-report/*.json
+            release/signing-report/*.txt
