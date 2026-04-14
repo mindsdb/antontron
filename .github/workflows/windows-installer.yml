@@ -56,6 +56,20 @@ jobs:
           if (-not $exe) { throw "No installer .exe found in release/" }
           "exe_path=$($exe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Resolve app executable path
+        id: app_exe
+        shell: pwsh
+        run: |
+          $appExe = Get-ChildItem release\win-unpacked\*.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -notmatch 'Uninstall' } |
+            Select-Object -First 1
+          if ($appExe) {
+            "has_app_exe=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "app_exe_path=$($appExe.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            "has_app_exe=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
       - name: Sign installer with SSL.com eSigner
         if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: sslcom/esigner-codesign@develop
@@ -68,6 +82,18 @@ jobs:
           file_path: ${{ steps.installer.outputs.exe_path }}
           output_path: ${{ github.workspace }}\signed
 
+      - name: Sign app executable with SSL.com eSigner
+        if: ${{ (github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository)) && steps.app_exe.outputs.has_app_exe == 'true' }}
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.SSL_USERNAME }}
+          password: ${{ secrets.SSL_PASSWORD }}
+          credential_id: ${{ secrets.SSL_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.SSL_TOTP_SECRET }}
+          file_path: ${{ steps.app_exe.outputs.app_exe_path }}
+          output_path: ${{ github.workspace }}\signed
+
       - name: Replace unsigned installer with signed output
         if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
         shell: pwsh
@@ -77,6 +103,18 @@ jobs:
           $signedPath = Join-Path "$env:GITHUB_WORKSPACE\signed" $fileName
           if (!(Test-Path $signedPath)) {
             throw "Signed file not found at $signedPath"
+          }
+          Copy-Item $signedPath $unsignedPath -Force
+
+      - name: Replace unsigned app executable with signed output
+        if: ${{ (github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository)) && steps.app_exe.outputs.has_app_exe == 'true' }}
+        shell: pwsh
+        run: |
+          $unsignedPath = "${{ steps.app_exe.outputs.app_exe_path }}"
+          $fileName = Split-Path $unsignedPath -Leaf
+          $signedPath = Join-Path "$env:GITHUB_WORKSPACE\signed" $fileName
+          if (!(Test-Path $signedPath)) {
+            throw "Signed app executable not found at $signedPath"
           }
           Copy-Item $signedPath $unsignedPath -Force
 
@@ -99,6 +137,21 @@ jobs:
           }
           if (-not $signature.TimeStamperCertificate) {
             throw "Timestamp verification failed: signature does not include a timestamp certificate."
+          }
+
+      - name: Verify app executable signature
+        if: ${{ (github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository)) && steps.app_exe.outputs.has_app_exe == 'true' }}
+        shell: pwsh
+        run: |
+          $exe = "${{ steps.app_exe.outputs.app_exe_path }}"
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          if ($signtool) {
+            & $signtool verify /pa /all /v "$exe"
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for app executable with exit code $LASTEXITCODE" }
+          }
+          $signature = Get-AuthenticodeSignature -FilePath $exe
+          if ($signature.Status -ne 'Valid') {
+            throw "App executable signature verification failed. Status: $($signature.Status) - $($signature.StatusMessage)"
           }
 
       - name: Generate installer signing report
