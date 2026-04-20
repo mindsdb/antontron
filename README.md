@@ -573,7 +573,7 @@ s3://anton-installer/
       snapshots/anton-{version}-stable-{sha}.exe
 ```
 
-Each installer is accompanied by a `.sha256` file with the same prefix.
+No sidecar `.sha256` files are published — the `.pkg` is notarized by Apple and the `.exe` is EV-signed via SSL.com, so OS-level signature verification is the integrity guarantee.
 
 > **Lifecycle tip**: set bucket lifecycle rules to auto-expire objects under `previews/` (e.g. 14 days) and `snapshots/` (e.g. 60 days) to keep costs bounded. Prod objects have no expiration.
 

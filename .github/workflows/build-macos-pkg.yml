@@ -113,14 +113,12 @@ jobs:
           echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
           echo "Computed artifact name: ${NAME}"
 
-      - name: Rename pkg and generate checksum
+      - name: Rename pkg
         run: |
           set -euo pipefail
           mkdir -p out
           NAME="${{ steps.name.outputs.artifact_name }}"
           mv release/*.pkg "out/${NAME}"
-          shasum -a 256 "out/${NAME}" > "out/${NAME}.sha256"
-          cat "out/${NAME}.sha256"
 
       - name: Upload pkg artifact
         uses: actions/upload-artifact@v4

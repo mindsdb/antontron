@@ -53,7 +53,8 @@ jobs:
         run: |
           set -euo pipefail
           BUCKET="anton-installer"
-          BASE="s3://${BUCKET}/anton/${PLATFORM}"
+          PREFIX="anton/${PLATFORM}"
+          BASE="s3://${BUCKET}/${PREFIX}"
           EXT="${NAME##*.}"
           SRC="out/${NAME}"
 
@@ -63,30 +64,56 @@ jobs:
             exit 1
           fi
 
+          REGION=$(aws s3api get-bucket-location --bucket "$BUCKET" --query LocationConstraint --output text 2>/dev/null || echo "")
+          if [ -z "$REGION" ] || [ "$REGION" = "None" ] || [ "$REGION" = "null" ]; then
+            REGION="us-east-1"
+          fi
+          HTTPS_BASE="https://${BUCKET}.s3.${REGION}.amazonaws.com"
+
+          UPLOADED_KEYS=()
+
+          upload() {
+            local src="$1" key="$2"
+            aws s3 cp "$src" "s3://${BUCKET}/${key}"
+            UPLOADED_KEYS+=("$key")
+          }
+
           case "$KIND" in
             preview)
-              aws s3 cp "$SRC" "${BASE}/previews/${NAME}"
-              if [ -f "${SRC}.sha256" ]; then
-                aws s3 cp "${SRC}.sha256" "${BASE}/previews/${NAME}.sha256"
-              fi
+              upload "$SRC" "${PREFIX}/previews/${NAME}"
               ;;
             stable)
-              aws s3 cp "$SRC" "${BASE}/snapshots/${NAME}"
-              if [ -f "${SRC}.sha256" ]; then
-                aws s3 cp "${SRC}.sha256" "${BASE}/snapshots/${NAME}.sha256"
-              fi
+              upload "$SRC" "${PREFIX}/snapshots/${NAME}"
               ;;
             prod)
               VERSION=$(node -p "require('./package.json').version")
-              aws s3 cp "$SRC" "${BASE}/anton-${VERSION}.${EXT}"
-              aws s3 cp "$SRC" "${BASE}/anton-latest.${EXT}"
-              if [ -f "${SRC}.sha256" ]; then
-                aws s3 cp "${SRC}.sha256" "${BASE}/anton-${VERSION}.${EXT}.sha256"
-                aws s3 cp "${SRC}.sha256" "${BASE}/anton-latest.${EXT}.sha256"
-              fi
+              upload "$SRC" "${PREFIX}/anton-${VERSION}.${EXT}"
+              upload "$SRC" "${PREFIX}/anton-latest.${EXT}"
               ;;
             *)
               echo "::error::Unknown build_kind: $KIND"
               exit 1
               ;;
           esac
+
+          echo ""
+          echo "Uploaded ${#UPLOADED_KEYS[@]} object(s) to s3://${BUCKET} (region: ${REGION})"
+          echo ""
+          {
+            echo "### Installer uploaded to S3"
+            echo ""
+            echo "- **Platform**: \`${PLATFORM}\`"
+            echo "- **Build kind**: \`${KIND}\`"
+            echo "- **Bucket**: \`${BUCKET}\` (\`${REGION}\`)"
+            echo ""
+            echo "| S3 URI | Object URL |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for KEY in "${UPLOADED_KEYS[@]}"; do
+            S3_URI="s3://${BUCKET}/${KEY}"
+            OBJECT_URL="${HTTPS_BASE}/${KEY}"
+            echo "  ${S3_URI}"
+            echo "  ${OBJECT_URL}"
+            echo "| \`${S3_URI}\` | ${OBJECT_URL} |" >> "$GITHUB_STEP_SUMMARY"
+          done

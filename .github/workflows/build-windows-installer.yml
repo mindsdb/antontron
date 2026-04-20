@@ -185,8 +185,6 @@ jobs:
           $src = "${{ steps.installer.outputs.exe_path }}"
           $dest = Join-Path $out $name
           Move-Item $src $dest -Force
-          $hash = (Get-FileHash -Path $dest -Algorithm SHA256).Hash
-          "$hash  $name" | Set-Content -Path (Join-Path $out "$name.sha256") -Encoding UTF8
 
       - name: Generate installer signing report
         shell: pwsh
