@@ -1,0 +1,45 @@
+name: Dev - Build installer on PR
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+
+jobs:
+  build-macos:
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'signed-macos-pkg') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/build-macos-pkg.yml
+    with:
+      build_kind: preview
+    secrets: inherit
+
+  upload-macos:
+    needs: build-macos
+    uses: ./.github/workflows/upload-installer-to-s3.yml
+    with:
+      platform: mac
+      build_kind: preview
+      artifact_name: ${{ needs.build-macos.outputs.artifact_name }}
+
+  build-windows:
+    if: >-
+      contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/build-windows-installer.yml
+    with:
+      build_kind: preview
+    secrets: inherit
+
+  upload-windows:
+    needs: build-windows
+    uses: ./.github/workflows/upload-installer-to-s3.yml
+    with:
+      platform: windows
+      build_kind: preview
+      artifact_name: ${{ needs.build-windows.outputs.artifact_name }}

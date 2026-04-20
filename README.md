@@ -540,27 +540,64 @@ GitHub Releases:
 
 ## CI/CD
 
-### Workflows
+### Installer release flow
 
-| Workflow | Repo | Trigger | What it does |
+The macOS (`.pkg`) and Windows (`.exe`) installers are built on GitHub-hosted runners (needed for Apple notarization / SSL.com signing) and then uploaded to S3 from the self-hosted `mdb-prod` pod. There are three flavors of build — **preview**, **stable**, and **prod** — distinguished only by when they run and the S3 path they land on.
+
+| Flavor | Trigger | What builds | S3 destination |
 | --- | --- | --- | --- |
-| `publish-ui.yml` | `antontron` (private) | Push to `main` (renderer changes), `ui-v*` tag, or manual | Builds renderer, publishes to `antontron-releases` |
-| `windows-installer.yml` | `antontron` (private) | `v*` tag or manual | Builds Windows `.exe` installer with code signing |
+| **preview** | PR with `signed-macos-pkg` label → macOS only. PR with `signed-windows-ev` label → Windows only. | `anton-{version}-preview-{sha}.pkg` / `.exe` | `s3://anton-installer/anton/{mac,windows}/previews/` |
+| **stable** | Push to `main` | Both platforms, `anton-{version}-stable-{sha}.pkg` / `.exe` | `s3://anton-installer/anton/{mac,windows}/snapshots/` |
+| **prod** | Push tag `v*` | Both platforms, `anton-{version}.pkg` / `.exe` | `s3://anton-installer/anton/{mac,windows}/anton-{version}.{pkg,exe}` and `anton-latest.{pkg,exe}` |
 
-### Required Secrets
+A PR without the matching `signed-*` label does nothing — no build, no upload.
 
-These must be configured in [**antontron → Settings → Secrets → Repository secrets**](https://github.com/mindsdb/antontron/settings/secrets/actions):
+Prod is gated by a version check: the first thing the upload job does when `build_kind == prod` is assert that `package.json` version equals the release tag (with the leading `v` stripped). Mismatch → workflow fails before anything reaches S3.
 
-| Secret | Purpose | How to create |
-| --- | --- | --- |
-<<<<<<< workflow/macOS-release
-| `publish-ui.yml` | `ui-v*` tag or manual | Builds renderer, publishes bundle to Releases, updates `latest.json` on GitHub Pages |
-| `windows-installer.yml` | `v*` tag or manual | Builds Windows `.exe` installer with code signing |
-| `macos-pkg-release.yml` | `v*` tag or manual | Builds signed + notarized macOS `.pkg`, uploads artifact, optional upload to S3 |
+### S3 layout
 
-### Required GitHub Secrets (placeholders)
+The bucket is **`anton-installer`** and lives in the `mdb-prod` region (separate from the other `anton` bucket, which is in `us-east-2`). AWS credentials are **not** configured as GitHub secrets — they come from the `mdb-prod` pod's IAM role, the same way [`release-gui-to-production.yml`](release-gui-to-production.yml) works in the GUI repo.
 
-Apple signing/notarization:
+```
+s3://anton-installer/
+  anton/
+    mac/
+      anton-{version}.pkg            # prod — versioned
+      anton-latest.pkg               # prod — always points at the most recent release
+      previews/anton-{version}-preview-{sha}.pkg
+      snapshots/anton-{version}-stable-{sha}.pkg
+    windows/
+      anton-{version}.exe
+      anton-latest.exe
+      previews/anton-{version}-preview-{sha}.exe
+      snapshots/anton-{version}-stable-{sha}.exe
+```
+
+Each installer is accompanied by a `.sha256` file with the same prefix.
+
+> **Lifecycle tip**: set bucket lifecycle rules to auto-expire objects under `previews/` (e.g. 14 days) and `snapshots/` (e.g. 60 days) to keep costs bounded. Prod objects have no expiration.
+
+### Workflow files
+
+The layout mirrors the MindsDB `dev-/staging-/prod-` pattern: one small top-level file per trigger, shared work in `workflow_call` files.
+
+| Workflow | Kind | Trigger | What it does |
+| --- | --- | --- | --- |
+| [`dev-build-installer.yml`](.github/workflows/dev-build-installer.yml) | Instance | `pull_request` | Label-gates per platform and wires to the build + upload called workflows with `build_kind: preview` |
+| [`staging-build-installer.yml`](.github/workflows/staging-build-installer.yml) | Instance | Push to `main` | Builds both platforms with `build_kind: stable` |
+| [`prod-build-installer.yml`](.github/workflows/prod-build-installer.yml) | Instance | Push tag `v*` | Builds both platforms with `build_kind: prod` (upload does the version vs tag check) |
+| [`build-macos-pkg.yml`](.github/workflows/build-macos-pkg.yml) | Called (`workflow_call`) | — | Builds + signs + notarizes the `.pkg` on `macos-latest`, renames to the final artifact name, uploads as GitHub artifact |
+| [`build-windows-installer.yml`](.github/workflows/build-windows-installer.yml) | Called (`workflow_call`) | — | Builds + SSL.com-signs + verifies the `.exe` on `windows-latest`, renames, uploads as GitHub artifact |
+| [`upload-installer-to-s3.yml`](.github/workflows/upload-installer-to-s3.yml) | Called (`workflow_call`) | — | Runs on `mdb-prod`, downloads the GitHub artifact, runs the prod version check, `aws s3 cp` to the correct path |
+| [`publish-ui.yml`](.github/workflows/publish-ui.yml) | Standalone | Push to `main` (renderer changes), `ui-v*` tag, manual | Publishes the renderer bundle to `mindsdb/antontron-releases` (unrelated to installer flow) |
+
+The build workflows expose an `artifact_name` output; the instance workflows pass it through to the upload workflow so the artifact name is the single source of truth and no filename is computed twice.
+
+### Required GitHub Secrets
+
+Configured in [**antontron → Settings → Secrets → Repository secrets**](https://github.com/mindsdb/antontron/settings/secrets/actions).
+
+Apple signing / notarization (used by `build-macos-pkg.yml`):
 
 - `APPLE_DEV_ID_APP_CERT_B64`
 - `APPLE_DEV_ID_APP_CERT_PASSWORD`
@@ -571,106 +608,35 @@ Apple signing/notarization:
 - `APPLE_TEAM_ID`
 - `APPLE_INSTALLER_IDENTITY` (example: `Developer ID Installer: Your Org (TEAMID)`)
 
-Optional S3 publish:
+Windows signing via SSL.com eSigner (used by `build-windows-installer.yml`):
 
-- `AWS_ACCESS_KEY_ID`
-- `AWS_SECRET_ACCESS_KEY`
-- `AWS_REGION`
-- `S3_RELEASE_BUCKET`
-- `S3_RELEASE_PREFIX` (example: `desktop/macos`)
-=======
-| `RELEASES_TOKEN` | GitHub PAT that can push releases and pages to `mindsdb/antontron-releases` | [Fine-grained token](https://github.com/settings/tokens?type=beta) scoped to `mindsdb/antontron-releases` with **Contents** (read/write) + **Metadata** (read) permissions |
-| `APPLE_ID` | Apple ID email for macOS notarization | Your Apple Developer account email |
-| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password for notarization | Generate at [appleid.apple.com](https://appleid.apple.com) → Security → App-Specific Passwords |
-| `APPLE_TEAM_ID` | Apple Developer Team ID | Found in Apple Developer portal → Membership |
-| `CSC_LINK` | Windows code signing certificate (base64 `.pfx`) | Export from your EV certificate |
-| `CSC_KEY_PASSWORD` | Password for the Windows signing certificate | Set when exporting the `.pfx` |
+- `SSL_USERNAME`
+- `SSL_PASSWORD`
+- `SSL_CREDENTIAL_ID`
+- `SSL_TOTP_SECRET`
 
-> **Note**: Only `RELEASES_TOKEN` is required for OTA UI updates. The Apple and Windows signing secrets are only needed for building signed installers.
+OTA UI publishing (used by `publish-ui.yml`):
 
-### One-Time Setup
+- `RELEASES_TOKEN` — fine-grained PAT scoped to `mindsdb/antontron-releases` with **Contents** (read/write) + **Metadata** (read)
 
-This only needs to be done once. If you're reading this, it's probably already done.
+> **No AWS secrets.** The upload job runs on `mdb-prod` and picks up AWS credentials from the pod's IAM role. The role must have `s3:PutObject` on `arn:aws:s3:::anton-installer/anton/*`.
 
-#### 1. Create the public releases repo
+### OTA UI publishing setup
 
-Create [`mindsdb/antontron-releases`](https://github.com/mindsdb/antontron-releases) as a **public** repo. It only holds release assets and `latest.json` — no source code.
+This section covers the one-time setup for [`publish-ui.yml`](.github/workflows/publish-ui.yml) only — it's independent of the installer flow above.
 
-#### 2. Create the `RELEASES_TOKEN`
-
-1. Go to [**GitHub → Settings → Developer settings → Fine-grained tokens**](https://github.com/settings/tokens?type=beta)
-2. Create a new token:
-   - **Name**: `antontron-releases-deploy`
-   - **Repository access**: Only select repositories → `mindsdb/antontron-releases`
-   - **Permissions**: Contents (read/write), Metadata (read)
-3. Copy the token
-4. Go to [**antontron → Settings → Secrets → Actions**](https://github.com/mindsdb/antontron/settings/secrets/actions)
-5. Add new repository secret: **Name** = `RELEASES_TOKEN`, **Value** = the token
-
-#### 3. Enable GitHub Pages on `antontron-releases`
-
-1. Go to [**antontron-releases → Settings → Pages**](https://github.com/mindsdb/antontron-releases/settings/pages)
-2. **Source**: "Deploy from a branch"
-3. **Branch**: `gh-pages` / `/ (root)`
-4. **Visibility**: Public
-5. Save
-
-> The `gh-pages` branch is created automatically by the first workflow run. If it doesn't exist yet, run the workflow first, then come back to enable Pages.
-
-#### 4. Test
-
-Trigger the workflow manually from [Actions → Publish UI Bundle](https://github.com/mindsdb/antontron/actions/workflows/publish-ui.yml), then verify:
+1. Create [`mindsdb/antontron-releases`](https://github.com/mindsdb/antontron-releases) as a **public** repo. It only holds release assets and `latest.json` — no source code.
+2. Create the `RELEASES_TOKEN`:
+   - [**GitHub → Settings → Developer settings → Fine-grained tokens**](https://github.com/settings/tokens?type=beta)
+   - Name: `antontron-releases-deploy`
+   - Repository access: only `mindsdb/antontron-releases`
+   - Permissions: Contents (read/write), Metadata (read)
+   - Save the token as `RELEASES_TOKEN` in [antontron → Settings → Secrets → Actions](https://github.com/mindsdb/antontron/settings/secrets/actions).
+3. Enable GitHub Pages on `antontron-releases`: Settings → Pages → Source "Deploy from a branch" → Branch `gh-pages` / `/ (root)`. The `gh-pages` branch is created automatically by the first workflow run.
+4. Verify with:
 
 ```bash
-# Should return JSON with version, url, sha256
 curl https://mindsdb.github.io/antontron-releases/latest.json
-```
->>>>>>> main
-
-### GitHub Actions example (full platform builds)
-
-```yaml
-name: Build & Release
-
-on:
-  push:
-    tags: ["v*"]
-
-jobs:
-  build-mac:
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm ci
-      - run: npx electron-rebuild -f -w node-pty
-      - run: npm run dist:mac
-        env:
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: mac-build
-          path: release/*.dmg
-
-  build-win:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with: { node-version: 20 }
-      - run: npm ci
-      - run: npx electron-rebuild -f -w node-pty
-      - run: npm run dist:win
-        env:
-          CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-      - uses: actions/upload-artifact@v4
-        with:
-          name: win-build
-          path: release/*.exe
 ```
 
 ---

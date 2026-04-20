@@ -1,22 +1,31 @@
-name: Windows Installer
+name: Build Windows installer
 
 on:
-  workflow_dispatch:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - labeled
-      - unlabeled
-  push:
-    tags:
-      - "v*"
+  workflow_call:
+    inputs:
+      build_kind:
+        description: preview | stable | prod
+        required: true
+        type: string
+    outputs:
+      artifact_name:
+        description: Final exe file name (uploaded as the artifact name)
+        value: ${{ jobs.build.outputs.artifact_name }}
+    secrets:
+      SSL_USERNAME:
+        required: true
+      SSL_PASSWORD:
+        required: true
+      SSL_CREDENTIAL_ID:
+        required: true
+      SSL_TOTP_SECRET:
+        required: true
 
 jobs:
-  build-win-installer:
+  build:
     runs-on: windows-latest
-
+    outputs:
+      artifact_name: ${{ steps.name.outputs.artifact_name }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -71,7 +80,6 @@ jobs:
           }
 
       - name: Sign installer with SSL.com eSigner
-        if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
         uses: sslcom/esigner-codesign@develop
         with:
           command: sign
@@ -83,7 +91,7 @@ jobs:
           output_path: ${{ github.workspace }}\signed
 
       - name: Sign app executable with SSL.com eSigner
-        if: ${{ (github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository)) && steps.app_exe.outputs.has_app_exe == 'true' }}
+        if: steps.app_exe.outputs.has_app_exe == 'true'
         uses: sslcom/esigner-codesign@develop
         with:
           command: sign
@@ -95,7 +103,6 @@ jobs:
           output_path: ${{ github.workspace }}\signed
 
       - name: Replace unsigned installer with signed output
-        if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
         shell: pwsh
         run: |
           $unsignedPath = "${{ steps.installer.outputs.exe_path }}"
@@ -107,7 +114,7 @@ jobs:
           Copy-Item $signedPath $unsignedPath -Force
 
       - name: Replace unsigned app executable with signed output
-        if: ${{ (github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository)) && steps.app_exe.outputs.has_app_exe == 'true' }}
+        if: steps.app_exe.outputs.has_app_exe == 'true'
         shell: pwsh
         run: |
           $unsignedPath = "${{ steps.app_exe.outputs.app_exe_path }}"
@@ -119,7 +126,6 @@ jobs:
           Copy-Item $signedPath $unsignedPath -Force
 
       - name: Verify installer signature
-        if: ${{ github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository) }}
         shell: pwsh
         run: |
           $exe = "${{ steps.installer.outputs.exe_path }}"
@@ -140,7 +146,7 @@ jobs:
           }
 
       - name: Verify app executable signature
-        if: ${{ (github.event_name != 'pull_request' || (github.event_name == 'pull_request' && contains(github.event.pull_request.labels.*.name, 'signed-windows-ev') && github.event.pull_request.head.repo.full_name == github.repository)) && steps.app_exe.outputs.has_app_exe == 'true' }}
+        if: steps.app_exe.outputs.has_app_exe == 'true'
         shell: pwsh
         run: |
           $exe = "${{ steps.app_exe.outputs.app_exe_path }}"
@@ -154,11 +160,39 @@ jobs:
             throw "App executable signature verification failed. Status: $($signature.Status) - $($signature.StatusMessage)"
           }
 
+      - name: Compute artifact name
+        id: name
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          SHA="${GITHUB_SHA::7}"
+          case "${{ inputs.build_kind }}" in
+            preview) NAME="anton-${VERSION}-preview-${SHA}.exe" ;;
+            stable)  NAME="anton-${VERSION}-stable-${SHA}.exe"  ;;
+            prod)    NAME="anton-${VERSION}.exe" ;;
+            *) echo "Unknown build_kind: ${{ inputs.build_kind }}"; exit 1 ;;
+          esac
+          echo "artifact_name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "Computed artifact name: ${NAME}"
+
+      - name: Rename exe
+        shell: pwsh
+        run: |
+          $name = "${{ steps.name.outputs.artifact_name }}"
+          $out = Join-Path $env:GITHUB_WORKSPACE "out"
+          New-Item -ItemType Directory -Path $out -Force | Out-Null
+          $src = "${{ steps.installer.outputs.exe_path }}"
+          $dest = Join-Path $out $name
+          Move-Item $src $dest -Force
+          $hash = (Get-FileHash -Path $dest -Algorithm SHA256).Hash
+          "$hash  $name" | Set-Content -Path (Join-Path $out "$name.sha256") -Encoding UTF8
+
       - name: Generate installer signing report
         shell: pwsh
         run: |
-          $exe = "${{ steps.installer.outputs.exe_path }}"
-          $reportDir = Join-Path "$env:GITHUB_WORKSPACE\release" "signing-report"
+          $exe = Join-Path $env:GITHUB_WORKSPACE "out\${{ steps.name.outputs.artifact_name }}"
+          $reportDir = Join-Path $env:GITHUB_WORKSPACE "out\signing-report"
           New-Item -ItemType Directory -Path $reportDir -Force | Out-Null
 
           $signature = Get-AuthenticodeSignature -FilePath $exe
@@ -178,7 +212,7 @@ jobs:
             timestampSubject = "$($signature.TimeStamperCertificate.Subject)"
             timestampThumbprint = "$($signature.TimeStamperCertificate.Thumbprint)"
             timestampNotAfter = "$($signature.TimeStamperCertificate.NotAfter)"
-            eventName = "${{ github.event_name }}"
+            buildKind = "${{ inputs.build_kind }}"
           }
 
           $jsonPath = Join-Path $reportDir "installer-signature-report.json"
@@ -196,15 +230,12 @@ jobs:
             "timestampSubject: $($report.timestampSubject)"
             "timestampThumbprint: $($report.timestampThumbprint)"
             "timestampNotAfter: $($report.timestampNotAfter)"
-            "eventName: $($report.eventName)"
+            "buildKind: $($report.buildKind)"
           ) | Set-Content -Path $txtPath -Encoding UTF8
 
-      - name: Upload installer artifacts
+      - name: Upload installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-installer
-          path: |
-            release/*.exe
-            release/*.blockmap
-            release/signing-report/*.json
-            release/signing-report/*.txt
+          name: ${{ steps.name.outputs.artifact_name }}
+          path: out/
+          if-no-files-found: error

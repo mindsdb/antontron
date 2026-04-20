@@ -1,0 +1,92 @@
+name: Upload installer to S3
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: mac | windows
+        required: true
+        type: string
+      build_kind:
+        description: preview | stable | prod
+        required: true
+        type: string
+      artifact_name:
+        description: Artifact name produced by the build workflow (also the final file name)
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  upload:
+    runs-on: mdb-prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: out
+
+      - name: Verify package.json version matches tag (prod only)
+        if: inputs.build_kind == 'prod'
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match release tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version check passed: $PKG_VERSION"
+
+      - name: Upload to S3
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          KIND: ${{ inputs.build_kind }}
+          NAME: ${{ inputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          BUCKET="anton-installer"
+          BASE="s3://${BUCKET}/anton/${PLATFORM}"
+          EXT="${NAME##*.}"
+          SRC="out/${NAME}"
+
+          if [ ! -f "$SRC" ]; then
+            echo "::error::Expected file $SRC not found in downloaded artifact"
+            ls -la out || true
+            exit 1
+          fi
+
+          case "$KIND" in
+            preview)
+              aws s3 cp "$SRC" "${BASE}/previews/${NAME}"
+              if [ -f "${SRC}.sha256" ]; then
+                aws s3 cp "${SRC}.sha256" "${BASE}/previews/${NAME}.sha256"
+              fi
+              ;;
+            stable)
+              aws s3 cp "$SRC" "${BASE}/snapshots/${NAME}"
+              if [ -f "${SRC}.sha256" ]; then
+                aws s3 cp "${SRC}.sha256" "${BASE}/snapshots/${NAME}.sha256"
+              fi
+              ;;
+            prod)
+              VERSION=$(node -p "require('./package.json').version")
+              aws s3 cp "$SRC" "${BASE}/anton-${VERSION}.${EXT}"
+              aws s3 cp "$SRC" "${BASE}/anton-latest.${EXT}"
+              if [ -f "${SRC}.sha256" ]; then
+                aws s3 cp "${SRC}.sha256" "${BASE}/anton-${VERSION}.${EXT}.sha256"
+                aws s3 cp "${SRC}.sha256" "${BASE}/anton-latest.${EXT}.sha256"
+              fi
+              ;;
+            *)
+              echo "::error::Unknown build_kind: $KIND"
+              exit 1
+              ;;
+          esac

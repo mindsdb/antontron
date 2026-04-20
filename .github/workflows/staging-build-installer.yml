@@ -1,0 +1,35 @@
+name: Staging - Build installer on main
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-macos:
+    uses: ./.github/workflows/build-macos-pkg.yml
+    with:
+      build_kind: stable
+    secrets: inherit
+
+  upload-macos:
+    needs: build-macos
+    uses: ./.github/workflows/upload-installer-to-s3.yml
+    with:
+      platform: mac
+      build_kind: stable
+      artifact_name: ${{ needs.build-macos.outputs.artifact_name }}
+
+  build-windows:
+    uses: ./.github/workflows/build-windows-installer.yml
+    with:
+      build_kind: stable
+    secrets: inherit
+
+  upload-windows:
+    needs: build-windows
+    uses: ./.github/workflows/upload-installer-to-s3.yml
+    with:
+      platform: windows
+      build_kind: stable
+      artifact_name: ${{ needs.build-windows.outputs.artifact_name }}
