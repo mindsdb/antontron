@@ -1,0 +1,35 @@
+name: Prod - Build installer on release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build-macos:
+    uses: ./.github/workflows/build-macos-pkg.yml
+    with:
+      build_kind: prod
+    secrets: inherit
+
+  upload-macos:
+    needs: build-macos
+    uses: ./.github/workflows/upload-installer-to-s3.yml
+    with:
+      platform: mac
+      build_kind: prod
+      artifact_name: ${{ needs.build-macos.outputs.artifact_name }}
+
+  build-windows:
+    uses: ./.github/workflows/build-windows-installer.yml
+    with:
+      build_kind: prod
+    secrets: inherit
+
+  upload-windows:
+    needs: build-windows
+    uses: ./.github/workflows/upload-installer-to-s3.yml
+    with:
+      platform: windows
+      build_kind: prod
+      artifact_name: ${{ needs.build-windows.outputs.artifact_name }}

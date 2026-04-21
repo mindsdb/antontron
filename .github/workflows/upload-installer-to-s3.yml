@@ -1,0 +1,119 @@
+name: Upload installer to S3
+
+on:
+  workflow_call:
+    inputs:
+      platform:
+        description: mac | windows
+        required: true
+        type: string
+      build_kind:
+        description: preview | stable | prod
+        required: true
+        type: string
+      artifact_name:
+        description: Artifact name produced by the build workflow (also the final file name)
+        required: true
+        type: string
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  upload:
+    runs-on: mdb-prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download installer artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ inputs.artifact_name }}
+          path: out
+
+      - name: Verify package.json version matches tag (prod only)
+        if: inputs.build_kind == 'prod'
+        run: |
+          set -euo pipefail
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::package.json version ($PKG_VERSION) does not match release tag ($TAG_VERSION)"
+            exit 1
+          fi
+          echo "Version check passed: $PKG_VERSION"
+
+      - name: Upload to S3
+        env:
+          PLATFORM: ${{ inputs.platform }}
+          KIND: ${{ inputs.build_kind }}
+          NAME: ${{ inputs.artifact_name }}
+        run: |
+          set -euo pipefail
+          BUCKET="anton-installer"
+          PREFIX="anton/${PLATFORM}"
+          BASE="s3://${BUCKET}/${PREFIX}"
+          EXT="${NAME##*.}"
+          SRC="out/${NAME}"
+
+          if [ ! -f "$SRC" ]; then
+            echo "::error::Expected file $SRC not found in downloaded artifact"
+            ls -la out || true
+            exit 1
+          fi
+
+          REGION=$(aws s3api get-bucket-location --bucket "$BUCKET" --query LocationConstraint --output text 2>/dev/null || echo "")
+          if [ -z "$REGION" ] || [ "$REGION" = "None" ] || [ "$REGION" = "null" ]; then
+            REGION="us-east-1"
+          fi
+          HTTPS_BASE="https://${BUCKET}.s3.${REGION}.amazonaws.com"
+
+          UPLOADED_KEYS=()
+
+          upload() {
+            local src="$1" key="$2"
+            aws s3 cp "$src" "s3://${BUCKET}/${key}"
+            UPLOADED_KEYS+=("$key")
+          }
+
+          case "$KIND" in
+            preview)
+              upload "$SRC" "${PREFIX}/previews/${NAME}"
+              ;;
+            stable)
+              upload "$SRC" "${PREFIX}/snapshots/${NAME}"
+              ;;
+            prod)
+              VERSION=$(node -p "require('./package.json').version")
+              upload "$SRC" "${PREFIX}/anton-${VERSION}.${EXT}"
+              upload "$SRC" "${PREFIX}/anton-latest.${EXT}"
+              ;;
+            *)
+              echo "::error::Unknown build_kind: $KIND"
+              exit 1
+              ;;
+          esac
+
+          echo ""
+          echo "Uploaded ${#UPLOADED_KEYS[@]} object(s) to s3://${BUCKET} (region: ${REGION})"
+          echo ""
+          {
+            echo "### Installer uploaded to S3"
+            echo ""
+            echo "- **Platform**: \`${PLATFORM}\`"
+            echo "- **Build kind**: \`${KIND}\`"
+            echo "- **Bucket**: \`${BUCKET}\` (\`${REGION}\`)"
+            echo ""
+            echo "| S3 URI | Object URL |"
+            echo "| --- | --- |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for KEY in "${UPLOADED_KEYS[@]}"; do
+            S3_URI="s3://${BUCKET}/${KEY}"
+            OBJECT_URL="${HTTPS_BASE}/${KEY}"
+            echo "  ${S3_URI}"
+            echo "  ${OBJECT_URL}"
+            echo "| \`${S3_URI}\` | ${OBJECT_URL} |" >> "$GITHUB_STEP_SUMMARY"
+          done
