@@ -38,6 +38,34 @@ jobs:
           name: ${{ inputs.artifact_name }}
           path: out
 
+      - name: Validate Windows signing report before upload
+        if: inputs.platform == 'windows'
+        run: |
+          set -euo pipefail
+          REPORT_JSON="out/signing-report/installer-signature-report.json"
+          if [ ! -f "$REPORT_JSON" ]; then
+            echo "::error::Missing signing report: $REPORT_JSON"
+            ls -la out || true
+            exit 1
+          fi
+          node -e '
+            const fs = require("fs");
+            const p = process.argv[1];
+            const r = JSON.parse(fs.readFileSync(p, "utf8"));
+            const required = ["status", "signerSubject", "timestampSubject", "sha256"];
+            for (const k of required) {
+              if (!r[k]) {
+                console.error(`::error::signing-report missing field: ${k}`);
+                process.exit(1);
+              }
+            }
+            if (r.status !== "Valid") {
+              console.error(`::error::Invalid signature status: ${r.status} (${r.statusMessage || ""})`);
+              process.exit(1);
+            }
+            console.log(`Windows signing report OK: ${r.file} sha256=${r.sha256}`);
+          ' "$REPORT_JSON"
+
       - name: Verify package.json version matches tag (prod only)
         if: inputs.build_kind == 'prod'
         run: |
@@ -68,6 +96,7 @@ jobs:
             ls -la out || true
             exit 1
           fi
+          LOCAL_SHA=$(sha256sum "$SRC" | awk '{print $1}')
 
           REGION=$(aws s3api get-bucket-location --bucket "$BUCKET" --query LocationConstraint --output text 2>/dev/null || echo "")
           if [ -z "$REGION" ] || [ "$REGION" = "None" ] || [ "$REGION" = "null" ]; then
@@ -121,4 +150,14 @@ jobs:
             echo "  ${S3_URI}"
             echo "  ${OBJECT_URL}"
             echo "| \`${S3_URI}\` | ${OBJECT_URL} |" >> "$GITHUB_STEP_SUMMARY"
+
+            TMP_FILE="$(mktemp)"
+            aws s3 cp "${S3_URI}" "$TMP_FILE" >/dev/null
+            REMOTE_SHA=$(sha256sum "$TMP_FILE" | awk '{print $1}')
+            rm -f "$TMP_FILE"
+            if [ "$REMOTE_SHA" != "$LOCAL_SHA" ]; then
+              echo "::error::SHA256 mismatch for ${S3_URI}. local=${LOCAL_SHA} remote=${REMOTE_SHA}"
+              exit 1
+            fi
+            echo "| \`${S3_URI}\` | ✅ sha256 verified (\`${REMOTE_SHA}\`) |" >> "$GITHUB_STEP_SUMMARY"
           done

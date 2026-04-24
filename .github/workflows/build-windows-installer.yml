@@ -79,6 +79,20 @@ jobs:
             "has_app_exe=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           }
 
+      - name: Resolve uninstaller path
+        id: uninstaller
+        shell: pwsh
+        run: |
+          $uninstaller = Get-ChildItem release\win-unpacked\*.exe -ErrorAction SilentlyContinue |
+            Where-Object { $_.Name -match 'Uninstall' } |
+            Select-Object -First 1
+          if ($uninstaller) {
+            "has_uninstaller=true" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+            "uninstaller_path=$($uninstaller.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          } else {
+            "has_uninstaller=false" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
       - name: Sign installer with SSL.com eSigner
         uses: sslcom/esigner-codesign@develop
         with:
@@ -102,6 +116,18 @@ jobs:
           file_path: ${{ steps.app_exe.outputs.app_exe_path }}
           output_path: ${{ github.workspace }}\signed
 
+      - name: Sign uninstaller with SSL.com eSigner
+        if: steps.uninstaller.outputs.has_uninstaller == 'true'
+        uses: sslcom/esigner-codesign@develop
+        with:
+          command: sign
+          username: ${{ secrets.SSL_USERNAME }}
+          password: ${{ secrets.SSL_PASSWORD }}
+          credential_id: ${{ secrets.SSL_CREDENTIAL_ID }}
+          totp_secret: ${{ secrets.SSL_TOTP_SECRET }}
+          file_path: ${{ steps.uninstaller.outputs.uninstaller_path }}
+          output_path: ${{ github.workspace }}\signed
+
       - name: Replace unsigned installer with signed output
         shell: pwsh
         run: |
@@ -122,6 +148,18 @@ jobs:
           $signedPath = Join-Path "$env:GITHUB_WORKSPACE\signed" $fileName
           if (!(Test-Path $signedPath)) {
             throw "Signed app executable not found at $signedPath"
+          }
+          Copy-Item $signedPath $unsignedPath -Force
+
+      - name: Replace unsigned uninstaller with signed output
+        if: steps.uninstaller.outputs.has_uninstaller == 'true'
+        shell: pwsh
+        run: |
+          $unsignedPath = "${{ steps.uninstaller.outputs.uninstaller_path }}"
+          $fileName = Split-Path $unsignedPath -Leaf
+          $signedPath = Join-Path "$env:GITHUB_WORKSPACE\signed" $fileName
+          if (!(Test-Path $signedPath)) {
+            throw "Signed uninstaller not found at $signedPath"
           }
           Copy-Item $signedPath $unsignedPath -Force
 
@@ -158,6 +196,27 @@ jobs:
           $signature = Get-AuthenticodeSignature -FilePath $exe
           if ($signature.Status -ne 'Valid') {
             throw "App executable signature verification failed. Status: $($signature.Status) - $($signature.StatusMessage)"
+          }
+          if (-not $signature.TimeStamperCertificate) {
+            throw "App executable timestamp verification failed: no timestamp certificate."
+          }
+
+      - name: Verify uninstaller signature
+        if: steps.uninstaller.outputs.has_uninstaller == 'true'
+        shell: pwsh
+        run: |
+          $exe = "${{ steps.uninstaller.outputs.uninstaller_path }}"
+          $signtool = (Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Recurse -Filter signtool.exe -ErrorAction SilentlyContinue | Sort-Object FullName -Descending | Select-Object -First 1).FullName
+          if ($signtool) {
+            & $signtool verify /pa /all /v "$exe"
+            if ($LASTEXITCODE -ne 0) { throw "signtool verify failed for uninstaller with exit code $LASTEXITCODE" }
+          }
+          $signature = Get-AuthenticodeSignature -FilePath $exe
+          if ($signature.Status -ne 'Valid') {
+            throw "Uninstaller signature verification failed. Status: $($signature.Status) - $($signature.StatusMessage)"
+          }
+          if (-not $signature.TimeStamperCertificate) {
+            throw "Uninstaller timestamp verification failed: no timestamp certificate."
           }
 
       - name: Compute artifact name
