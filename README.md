@@ -542,7 +542,7 @@ GitHub Releases:
 
 ### Installer release flow
 
-The macOS (`.pkg`) and Windows (`.exe`) installers are built on GitHub-hosted runners (needed for Apple notarization / SSL.com signing) and then uploaded to S3 from the self-hosted `mdb-prod` pod. There are three flavors of build — **preview**, **stable**, and **prod** — distinguished only by when they run and the S3 path they land on.
+The macOS (`.pkg`) and Windows (`.exe`) installers are built on GitHub-hosted runners (needed for Apple notarization / SSL.com signing) and then uploaded to S3 from the self-hosted `mdb-prod` pod. There are three flavors of build — **preview**, **stable**, and **prod** — distinguished only by when they run and the S3 path (and therefore the public `downloads.mindsdb.com` path) they land on.
 
 | Flavor | Trigger | What builds | S3 destination |
 | --- | --- | --- | --- |
@@ -556,7 +556,7 @@ Prod is gated by a version check: the first thing the upload job does when `buil
 
 ### S3 layout
 
-The bucket is **`anton-installer`** and lives in the `mdb-prod` region (separate from the other `anton` bucket, which is in `us-east-2`). AWS credentials are **not** configured as GitHub secrets — they come from the `mdb-prod` pod's IAM role, the same way [`release-gui-to-production.yml`](release-gui-to-production.yml) works in the GUI repo.
+The bucket is **`anton-installer`** in `us-east-1` (separate from the other `anton` bucket, which is in `us-east-2`). It is **private** — no public reads, no public ACLs, no presigned URLs for regular downloads. Everything is served through the CloudFront distribution described below. AWS credentials are **not** configured as GitHub secrets — they come from the `mdb-prod` pod's IAM role, the same way [`release-gui-to-production.yml`](release-gui-to-production.yml) works in the GUI repo. The role must have `s3:PutObject` on `arn:aws:s3:::anton-installer/anton/*`.
 
 ```
 s3://anton-installer/
@@ -576,6 +576,51 @@ s3://anton-installer/
 No sidecar `.sha256` files are published — the `.pkg` is notarized by Apple and the `.exe` is EV-signed via SSL.com, so OS-level signature verification is the integrity guarantee.
 
 > **Lifecycle tip**: set bucket lifecycle rules to auto-expire objects under `previews/` (e.g. 14 days) and `snapshots/` (e.g. 60 days) to keep costs bounded. Prod objects have no expiration.
+
+### Public downloads at `downloads.mindsdb.com`
+
+End users never hit S3 directly. The `anton-installer` bucket is fronted by a CloudFront distribution aliased to **`https://downloads.mindsdb.com`**, which is how all installers are distributed publicly.
+
+Infrastructure:
+
+- **CloudFront + ACM + S3 OAC** live in [`terraform/newprod/us-east-1/anton/cloudfront.tf`](../terraform/newprod/us-east-1/anton/cloudfront.tf), which also defines the bucket policy / public-access-block that keep the bucket itself private and reachable only via CloudFront's Origin Access Control.
+- The bucket resource is in [`terraform/newprod/us-east-1/anton/s3.tf`](../terraform/newprod/us-east-1/anton/s3.tf).
+- The CloudFront domain name is published via [`terraform/newprod/us-east-1/anton/outputs.tf`](../terraform/newprod/us-east-1/anton/outputs.tf) (`cloudfront_downloads_domain_name`) and consumed by the Cloudflare stack.
+- DNS — the `downloads.mindsdb.com` CNAME and the ACM validation records — is managed in [`terraform/newprod/global/cloudflare/downloads.mindsdb.com-domain.tf`](../terraform/newprod/global/cloudflare/downloads.mindsdb.com-domain.tf).
+
+CloudFront behavior:
+
+- Path mapping is **1:1** — CloudFront does not rewrite the key, so the S3 key `anton/mac/anton-latest.pkg` is reachable at `https://downloads.mindsdb.com/anton/mac/anton-latest.pkg`.
+- Viewer-protocol policy is `redirect-to-https`.
+- `GET /` is rewritten to a 302 redirect to `https://mindsdb.com` by the `downloads-root-redirect` CloudFront Function (viewer-request).
+- `GET /<missing key>` (S3 403/404) is rewritten to a 302 redirect to `https://mindsdb.com` by the `downloads-error-redirect` CloudFront Function (viewer-response). In other words, the bucket never leaks its existence — unknown paths bounce to the marketing site instead of returning an XML error.
+- Default cache TTL is 1 hour, max 24 hours. Compression is enabled. No query strings or cookies are forwarded.
+
+Public URL layout:
+
+```
+https://downloads.mindsdb.com/
+  anton/
+    mac/
+      anton-{version}.pkg                              # prod — versioned
+      anton-latest.pkg                                 # prod — always the newest release
+      previews/anton-{version}-preview-{sha}.pkg
+      snapshots/anton-{version}-stable-{sha}.pkg
+    windows/
+      anton-{version}.exe
+      anton-latest.exe
+      previews/anton-{version}-preview-{sha}.exe
+      snapshots/anton-{version}-stable-{sha}.exe
+```
+
+Stable download links to share externally:
+
+- macOS latest: https://downloads.mindsdb.com/anton/mac/anton-latest.pkg
+- Windows latest: https://downloads.mindsdb.com/anton/windows/anton-latest.exe
+
+The [`upload-installer-to-s3.yml`](.github/workflows/upload-installer-to-s3.yml) workflow prints both the `s3://` URI and the `https://downloads.mindsdb.com/...` URL for every object it uploads in its GitHub step summary, so PRs and releases have a clickable public URL in the Actions run.
+
+> **Cache invalidations**: because `anton-latest.{pkg,exe}` is overwritten on every prod release, CloudFront may serve the stale copy for up to the `default_ttl` (currently 1 hour). If a release needs to be visible immediately, create an invalidation for `/anton/mac/anton-latest.pkg` and/or `/anton/windows/anton-latest.exe`. Versioned URLs (`anton-{version}.pkg`) are immutable and never need invalidation.
 
 ### Workflow files
 

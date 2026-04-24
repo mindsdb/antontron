@@ -103,6 +103,7 @@ jobs:
             REGION="us-east-1"
           fi
           HTTPS_BASE="https://${BUCKET}.s3.${REGION}.amazonaws.com"
+          CDN_BASE="https://downloads.mindsdb.com"
 
           UPLOADED_KEYS=()
 
@@ -140,16 +141,20 @@ jobs:
             echo "- **Build kind**: \`${KIND}\`"
             echo "- **Bucket**: \`${BUCKET}\` (\`${REGION}\`)"
             echo ""
-            echo "| S3 URI | Object URL |"
-            echo "| --- | --- |"
+            echo "| S3 URI | Object URL | Public download URL |"
+            echo "| --- | --- | --- |"
           } >> "$GITHUB_STEP_SUMMARY"
 
           for KEY in "${UPLOADED_KEYS[@]}"; do
             S3_URI="s3://${BUCKET}/${KEY}"
             OBJECT_URL="${HTTPS_BASE}/${KEY}"
+            # CloudFront (downloads.mindsdb.com) fronts the bucket root with no
+            # path rewriting, so the public URL preserves the full object key.
+            CDN_URL="${CDN_BASE}/${KEY}"
             echo "  ${S3_URI}"
             echo "  ${OBJECT_URL}"
-            echo "| \`${S3_URI}\` | ${OBJECT_URL} |" >> "$GITHUB_STEP_SUMMARY"
+            echo "  ${CDN_URL}"
+            echo "| \`${S3_URI}\` | ${OBJECT_URL} | ${CDN_URL} |" >> "$GITHUB_STEP_SUMMARY"
 
             TMP_FILE="$(mktemp)"
             aws s3 cp "${S3_URI}" "$TMP_FILE" >/dev/null
@@ -159,5 +164,16 @@ jobs:
               echo "::error::SHA256 mismatch for ${S3_URI}. local=${LOCAL_SHA} remote=${REMOTE_SHA}"
               exit 1
             fi
-            echo "| \`${S3_URI}\` | ✅ sha256 verified (\`${REMOTE_SHA}\`) |" >> "$GITHUB_STEP_SUMMARY"
+            echo "| \`${S3_URI}\` | ✅ sha256 verified (\`${REMOTE_SHA}\`) | ${CDN_URL} |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+          {
+            echo ""
+            echo "### Public download URLs"
+            echo ""
+            echo "These installers are served via CloudFront at https://downloads.mindsdb.com (see \`terraform/newprod/us-east-1/anton/cloudfront.tf\`):"
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
+          for KEY in "${UPLOADED_KEYS[@]}"; do
+            echo "- ${CDN_BASE}/${KEY}" >> "$GITHUB_STEP_SUMMARY"
           done
