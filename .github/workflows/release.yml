@@ -10,6 +10,10 @@ on:
       - 'package.json'
   workflow_dispatch:
 
+concurrency:
+  group: auto-release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   auto-release:
     runs-on: ubuntu-latest
@@ -49,7 +53,6 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
         run: |
           gh release create "${TAG}" \
             --target "${GITHUB_SHA}" \
@@ -59,10 +62,7 @@ jobs:
   build-deploy-prod:
     needs: auto-release
     if: needs.auto-release.outputs.created == 'true'
-    uses: ./.github/workflows/build-deploy-prod.yml
+    uses: ./.github/workflows/prod-build-installer.yml
     with:
       tag: ${{ needs.auto-release.outputs.tag }}
     secrets: inherit
-
-
-            
