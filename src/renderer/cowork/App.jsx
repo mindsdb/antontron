@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import Ico from './components/Icons';
 // OnboardingShell removed — antontron's renderer handles terms/install/
 // provider setup. The cowork app is mounted by CoworkApp.tsx only after
 // those gates pass, so AppCore renders unconditionally here.
@@ -529,7 +530,35 @@ function AppCore() {
     : models;
 
   return (
-    <div style={{ ...appStyle, ...accentCss, display: 'flex', gap: 4, padding: 4 }}>
+    <div style={{ ...appStyle, ...accentCss, display: 'flex', gap: 4, padding: 4, position: 'relative' }}>
+      {/*
+        Floating hamburger — visible when the sidebar is collapsed. Sits
+        right of the macOS traffic lights (window-x=14, so left=88 clears
+        them). Always mounted so it can fade in/out instead of popping —
+        opacity + a small translate matched to the sidebar's spring easing
+        produces a single coordinated transition across both elements.
+      */}
+      <button
+        onClick={() => setSidebarCollapsed(false)}
+        title="Open sidebar"
+        className="icon-btn"
+        style={{
+          position: 'absolute',
+          top: 12, left: 88,
+          zIndex: 10,
+          WebkitAppRegion: 'no-drag',
+          opacity: sidebarCollapsed ? 1 : 0,
+          transform: sidebarCollapsed ? 'translateX(0)' : 'translateX(-8px)',
+          pointerEvents: sidebarCollapsed ? 'auto' : 'none',
+          transition:
+            'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1) ' +
+              `${sidebarCollapsed ? '120ms' : '0ms'}, ` +
+            'transform 360ms cubic-bezier(0.32, 0.72, 0, 1) ' +
+              `${sidebarCollapsed ? '80ms' : '0ms'}`,
+        }}
+      >
+        {Ico.menu(15)}
+      </button>
       <Sidebar
         tasks={tasks}
         pins={pins}

@@ -79,14 +79,22 @@ export default function Sidebar({
       style={{
         flexShrink: 0, height: '100%',
         background: 'var(--stone-50)',
-        // Floating "bubble" — rounded on all four corners + soft shadow.
-        // Width animates between 320 (open) and 156 (collapsed) so the
-        // chrome row (traffic lights + toggle + search) stays visible while
-        // nav content slides out of view.
+        // Floating "bubble". Collapsed state animates width, opacity, and
+        // a small translateX together with the same Apple-style spring
+        // easing + duration so the bubble feels like one continuous motion
+        // rather than three separate transitions resolving at different
+        // moments. willChange hints at GPU acceleration.
         borderRadius: 14,
         boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.05)',
-        width: collapsed ? 156 : 'clamp(280px, 26vw, 320px)',
-        transition: 'width 240ms cubic-bezier(.2,.7,.2,1)',
+        width: collapsed ? 0 : 'clamp(280px, 26vw, 320px)',
+        opacity: collapsed ? 0 : 1,
+        transform: collapsed ? 'translateX(-16px)' : 'translateX(0)',
+        transition:
+          'width 360ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+          'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+          'transform 360ms cubic-bezier(0.32, 0.72, 0, 1)',
+        willChange: 'width, opacity, transform',
+        pointerEvents: collapsed ? 'none' : 'auto',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
       }}
@@ -105,11 +113,11 @@ export default function Sidebar({
         style={{
           display: 'flex', alignItems: 'center',
           height: 56,
-          // Asymmetric vertical padding: 6px bottom > 0px top shifts the
-          // button row ~3px upward so it visually centers with the macOS
+          // Asymmetric vertical padding: 10px bottom > 0px top shifts the
+          // button row ~5px upward so it visually centers with the macOS
           // traffic lights (which sit slightly above the row's natural
           // midpoint).
-          padding: '0 14px 6px 88px',
+          padding: '0 14px 10px 88px',
           gap: 4,
           flexShrink: 0,
         }}
@@ -143,7 +151,9 @@ export default function Sidebar({
           display: 'flex', flexDirection: 'column',
           opacity: collapsed ? 0 : 1,
           pointerEvents: collapsed ? 'none' : 'auto',
-          transition: 'opacity 160ms ease',
+          // Match the bubble's easing so inner content fades in concert
+          // with the slide instead of finishing earlier and feeling abrupt.
+          transition: 'opacity 240ms cubic-bezier(0.32, 0.72, 0, 1)',
         }}
       >
 

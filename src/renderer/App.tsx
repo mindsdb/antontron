@@ -70,7 +70,14 @@ export default function App() {
 
   return (
     <>
-      {isMac && <div className="titlebar-drag" />}
+      {/* Top-of-window drag overlay only matters for the onboarding pages
+          (terms / setup / onboarding) which don't have their own draggable
+          chrome. The cowork page provides drag via its sidebar header, so
+          we skip this overlay there — otherwise it sits on top of the
+          sidebar's icon buttons at z-index:1000 and blocks pointer events
+          for the upper ~38px (causing the icons to feel "broken / only
+          hoverable at the bottom"). */}
+      {isMac && page !== 'terminal' && <div className="titlebar-drag" />}
 
       {page === 'loading' && (
         <div className="setup-container">
