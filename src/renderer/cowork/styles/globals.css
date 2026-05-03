@@ -2416,6 +2416,15 @@ body[data-theme="dark"] .floating-theme-toggle:hover {
    :focus-visible keeps the ring for true keyboard navigation. */
 button:focus:not(:focus-visible) { outline: none; }
 
+/* OrbitMorph indicator — only the dark-theme accent glow lives here;
+   the rest of the visual is rendered procedurally by the component. */
+.orbit-morph { display: inline-block; line-height: 0; }
+body[data-theme="dark"] .orbit-morph[data-state="thinking"],
+body[data-theme="dark"] .orbit-morph[data-state="done"] {
+  filter: drop-shadow(0 0 calc(var(--om-size, 18px) * 0.18) rgba(34, 211, 238, 0.55));
+}
+.orbit-morph[data-state="idle"] svg { opacity: 0.7; }
+
 @media (max-width: 700px) {
   .app-sidebar {
     width: 104px !important;

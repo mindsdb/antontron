@@ -1,0 +1,420 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Orbit · Morph — Implementation Guide</title>
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+<style>
+  /* ───────────── Page chrome (the guide itself) ───────────── */
+  :root { color-scheme: light; }
+  html, body { margin: 0; padding: 0; background: #ECECEA; color: #0E0F10; font-family: 'Inter', sans-serif; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 64px 32px 120px; }
+  h1 { font-family: 'JetBrains Mono', monospace; font-weight: 600; font-size: 14px; letter-spacing: 0.12em; text-transform: uppercase; color: #6B6F73; margin: 0 0 8px; }
+  h2 { font-size: 28px; font-weight: 600; letter-spacing: -0.01em; margin: 56px 0 12px; }
+  h3 { font-size: 14px; font-weight: 600; letter-spacing: 0.04em; text-transform: uppercase; color: #6B6F73; margin: 32px 0 12px; font-family: 'JetBrains Mono', monospace; }
+  p  { font-size: 15px; line-height: 1.6; color: #2A2C2F; max-width: 640px; }
+  hr { border: none; border-top: 1px solid #D8D8D4; margin: 56px 0; }
+  code { font-family: 'JetBrains Mono', monospace; font-size: 13px; background: #DDDDD8; padding: 1px 6px; border-radius: 4px; }
+  pre { background: #0E0F10; color: #F2F6FF; padding: 20px 24px; border-radius: 10px; overflow-x: auto;
+        font-family: 'JetBrains Mono', monospace; font-size: 12.5px; line-height: 1.55; }
+  pre .kw  { color: #C792EA; } pre .str { color: #C3E88D; } pre .num { color: #F78C6C; }
+  pre .com { color: #6B6F73; font-style: italic; } pre .tag { color: #82AAFF; } pre .att { color: #FFCB6B; }
+  .pill { display: inline-block; font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.06em;
+          text-transform: uppercase; padding: 3px 8px; background: #DDDDD8; border-radius: 999px; color: #6B6F73; }
+
+  /* ───────────── Live previews ───────────── */
+  .preview-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 20px 0 8px; }
+  .preview { display: grid; place-items: center; padding: 56px 0; border-radius: 14px; position: relative; }
+  .preview.light { background: #ECECEA; border: 1px solid #D8D8D4; }
+  .preview.dark  { background: #0B0E14; border: 1px solid #1A1F2E; }
+  .preview .label { position: absolute; top: 12px; left: 14px; font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+                    letter-spacing: 0.08em; text-transform: uppercase; }
+  .preview.light .label { color: #6B6F73; }
+  .preview.dark  .label { color: #8A97AE; }
+
+  .scale-row { display: flex; gap: 32px; align-items: center; padding: 32px 24px; border: 1px solid #D8D8D4; border-radius: 14px; background: #fff; flex-wrap: wrap; }
+  .scale-cell { display: grid; place-items: center; gap: 10px; }
+  .scale-cell span { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: #6B6F73; letter-spacing: 0.06em; }
+
+  .state-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 14px 0; }
+  .state-cell { display: grid; place-items: center; gap: 10px; padding: 36px 0; border: 1px solid #D8D8D4; border-radius: 14px; background: #fff; }
+  .state-cell span { font-family: 'JetBrains Mono', monospace; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: #6B6F73; }
+  .state-row.dark .state-cell { background: #0B0E14; border-color: #1A1F2E; }
+  .state-row.dark .state-cell span { color: #8A97AE; }
+
+  .swatch-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px; }
+  .swatch { padding: 16px; border-radius: 10px; border: 1px solid #D8D8D4; background: #fff;
+            font-family: 'JetBrains Mono', monospace; font-size: 12px; }
+  .swatch .name { color: #6B6F73; font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; display: block; }
+  .swatch ul { list-style: none; padding: 0; margin: 0; display: grid; gap: 6px; }
+  .swatch li { display: flex; align-items: center; gap: 10px; }
+  .swatch .chip { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(0,0,0,0.12); }
+
+  /* ───────────── The component itself ─────────────
+     This is the only block you need to copy into your app. */
+  .orbit-morph { display: inline-block; }
+  .orbit-morph[data-theme="dark"][data-state="thinking"],
+  .orbit-morph[data-theme="dark"][data-state="done"] {
+    filter: drop-shadow(0 0 calc(var(--om-size, 18px) * 0.18) rgba(34,211,238,0.55));
+  }
+  .orbit-morph[data-state="idle"] svg { opacity: 0.7; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <h1>Anton Indicator</h1>
+  <h2 style="margin-top: 4px;">Orbit · Morph — Implementation Guide</h2>
+  <p>A single-component thinking indicator: a satellite orbits a center that morphs through chaos → pyramid → dot → cube while the AI is working, then resolves to a futurist <em>A</em> when done. Vanilla HTML, CSS, and a small JS animator. No frameworks, no build step.</p>
+
+  <hr />
+
+  <!-- ─────────────  PREVIEW  ───────────── -->
+  <h3>Preview</h3>
+  <div class="preview-row">
+    <div class="preview light">
+      <span class="label">Light · thinking</span>
+      <span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 200px"></span>
+    </div>
+    <div class="preview dark">
+      <span class="label">Dark · thinking</span>
+      <span class="orbit-morph" data-theme="dark" data-state="thinking" style="--om-size: 200px"></span>
+    </div>
+  </div>
+
+  <!-- ─────────────  STATES  ───────────── -->
+  <h3>States</h3>
+  <p>The component takes one of three states: <code>idle</code>, <code>thinking</code>, <code>done</code>. Idle shows just the moon orbiting a faded ring (use it as a presence cue when Anton is awake but waiting). Thinking runs the full morph cycle. Done freezes into the futurist <em>A</em> with a confirming ring.</p>
+  <div class="state-row">
+    <div class="state-cell"><span>idle</span>     <span class="orbit-morph" data-theme="light" data-state="idle"     style="--om-size: 96px"></span></div>
+    <div class="state-cell"><span>thinking</span> <span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 96px"></span></div>
+    <div class="state-cell"><span>done</span>     <span class="orbit-morph" data-theme="light" data-state="done"     style="--om-size: 96px"></span></div>
+  </div>
+  <div class="state-row dark">
+    <div class="state-cell"><span>idle</span>     <span class="orbit-morph" data-theme="dark" data-state="idle"     style="--om-size: 96px"></span></div>
+    <div class="state-cell"><span>thinking</span> <span class="orbit-morph" data-theme="dark" data-state="thinking" style="--om-size: 96px"></span></div>
+    <div class="state-cell"><span>done</span>     <span class="orbit-morph" data-theme="dark" data-state="done"     style="--om-size: 96px"></span></div>
+  </div>
+
+  <!-- ─────────────  SCALES  ───────────── -->
+  <h3>Sizes</h3>
+  <p>The indicator is a scalable SVG. Set its rendered size with the <code>--om-size</code> CSS variable (defaults to <code>18px</code>). Recommended sizes: <strong>16–18px</strong> inline next to text, <strong>24–32px</strong> in compact UI affordances, <strong>72–200px+</strong> for hero/loading states.</p>
+  <div class="scale-row">
+    <div class="scale-cell"><span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 16px"></span><span>16px</span></div>
+    <div class="scale-cell"><span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 18px"></span><span>18px</span></div>
+    <div class="scale-cell"><span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 24px"></span><span>24px</span></div>
+    <div class="scale-cell"><span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 32px"></span><span>32px</span></div>
+    <div class="scale-cell"><span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 48px"></span><span>48px</span></div>
+    <div class="scale-cell"><span class="orbit-morph" data-theme="light" data-state="thinking" style="--om-size: 72px"></span><span>72px</span></div>
+  </div>
+
+  <hr />
+
+  <!-- ─────────────  TOKENS  ───────────── -->
+  <h2>Color tokens</h2>
+  <p>Two themes only. The accent is the only animated color; the orbit ring sits at low opacity in the faded color.</p>
+  <div class="swatch-row">
+    <div class="swatch">
+      <span class="name">Light</span>
+      <ul>
+        <li><span class="chip" style="background: #0E0F10"></span> ink &nbsp; <code>#0E0F10</code></li>
+        <li><span class="chip" style="background: #6B6F73"></span> faded &nbsp; <code>#6B6F73</code></li>
+        <li><span class="chip" style="background: #1F9CB0"></span> accent &nbsp; <code>#1F9CB0</code></li>
+      </ul>
+    </div>
+    <div class="swatch" style="background: #0B0E14; color: #F2F6FF; border-color: #1A1F2E;">
+      <span class="name" style="color: #8A97AE;">Dark</span>
+      <ul>
+        <li><span class="chip" style="background: #F2F6FF"></span> ink &nbsp; <code style="background: #1A1F2E; color: #F2F6FF">#F2F6FF</code></li>
+        <li><span class="chip" style="background: #8A97AE"></span> faded &nbsp; <code style="background: #1A1F2E; color: #F2F6FF">#8A97AE</code></li>
+        <li><span class="chip" style="background: rgb(34,211,238)"></span> accent &nbsp; <code style="background: #1A1F2E; color: #F2F6FF">rgb(34 211 238)</code></li>
+      </ul>
+    </div>
+  </div>
+
+  <hr />
+
+  <!-- ─────────────  ANIMATION SPEC  ───────────── -->
+  <h2>Animation spec</h2>
+  <h3>Cycle</h3>
+  <p>The thinking state runs two clocks in lockstep:</p>
+  <ul style="font-size: 15px; line-height: 1.7; color: #2A2C2F;">
+    <li><strong>Orbit:</strong> the satellite circles the center every <code>1400ms</code> (idle: <code>4500ms</code>).</li>
+    <li><strong>Morph:</strong> the center cycles four stages over <code>4800ms</code> total — <span class="pill">chaos</span> → <span class="pill">pyramid</span> → <span class="pill">dot</span> → <span class="pill">cube</span> — each stage grows in then shrinks out (<code>easeInOutQuad</code>) before the next appears.</li>
+    <li><strong>Done:</strong> the morph stops and a futurist <em>A</em> draws on (<code>stroke-dasharray 0→50</code> over 450ms), and the orbit ring locks at 35% opacity.</li>
+  </ul>
+
+  <h3>Geometry</h3>
+  <p>All paths are authored in a <code>0 0 24 24</code> viewBox so the indicator scales cleanly to any size. Center is <code>(12, 12)</code>. Orbit radius is <code>8.5</code>. Pyramid + cube rotate to "face" the satellite — they share the orbit angle so the composition feels physically connected.</p>
+
+  <hr />
+
+  <!-- ─────────────  CODE: HTML  ───────────── -->
+  <h2>HTML</h2>
+  <p>Drop a span anywhere. Set theme + state via data attributes; size via the <code>--om-size</code> CSS variable. The animator script (below) will fill in the SVG on load and on attribute changes.</p>
+<pre><span class="tag">&lt;span</span> <span class="att">class</span>=<span class="str">"orbit-morph"</span>
+      <span class="att">data-theme</span>=<span class="str">"light"</span>     <span class="com">&lt;!-- light | dark --&gt;</span>
+      <span class="att">data-state</span>=<span class="str">"thinking"</span>  <span class="com">&lt;!-- idle | thinking | done --&gt;</span>
+      <span class="att">style</span>=<span class="str">"--om-size: 24px"</span><span class="tag">&gt;&lt;/span&gt;</span></pre>
+
+  <p>To switch states at runtime, just toggle the attribute:</p>
+<pre><span class="kw">const</span> el = document.querySelector(<span class="str">'.orbit-morph'</span>);
+el.dataset.state = <span class="str">'thinking'</span>;   <span class="com">// start working</span>
+<span class="com">// …later…</span>
+el.dataset.state = <span class="str">'done'</span>;       <span class="com">// resolve to the A</span></pre>
+
+  <!-- ─────────────  CODE: CSS  ───────────── -->
+  <h2>CSS</h2>
+  <p>Three rules. The dark-theme glow is a CSS <code>filter</code> so it runs on the GPU and scales with size.</p>
+<pre><span class="com">/* size variable + base layout */</span>
+.orbit-morph { display: inline-block; }
+
+<span class="com">/* dark-theme accent glow when active */</span>
+.orbit-morph[data-theme=<span class="str">"dark"</span>][data-state=<span class="str">"thinking"</span>],
+.orbit-morph[data-theme=<span class="str">"dark"</span>][data-state=<span class="str">"done"</span>] {
+  filter: drop-shadow(<span class="num">0</span> <span class="num">0</span> calc(var(--om-size, <span class="num">18px</span>) * <span class="num">0.18</span>) rgba(<span class="num">34</span>, <span class="num">211</span>, <span class="num">238</span>, <span class="num">0.55</span>));
+}
+
+<span class="com">/* idle is quieter */</span>
+.orbit-morph[data-state=<span class="str">"idle"</span>] svg { opacity: <span class="num">0.7</span>; }</pre>
+
+  <!-- ─────────────  CODE: JS  ───────────── -->
+  <h2>JS animator</h2>
+  <p>One <code>requestAnimationFrame</code> loop per indicator. The SVG is rebuilt each frame from the current <code>(angle, phase)</code>. The full implementation is below — drop it in a <code>&lt;script&gt;</code> tag at the end of the page (it auto-mounts every <code>.orbit-morph</code> on the page and watches for attribute changes).</p>
+
+  <p style="font-size: 14px; color: #6B6F73;"><strong>Note:</strong> the same script is what's powering the live previews on this page — view source to inspect.</p>
+
+  <hr />
+
+  <h2>Files</h2>
+  <p>Everything you need is in this single HTML file. Copy the three sections (HTML markup, CSS rule block, and the <code>&lt;script&gt;</code> at the end) into your app. No npm install. No external assets.</p>
+
+</div>
+
+<!-- ─────────────────────────────────────────────────────────────
+     ORBIT · MORPH ANIMATOR
+     Vanilla JS. Auto-mounts every .orbit-morph element on the page.
+     Watches data-state and data-theme via MutationObserver.
+     ───────────────────────────────────────────────────────────── -->
+<script>
+(function () {
+  'use strict';
+
+  const PALETTE = {
+    light: { faded: '#6B6F73', accent: '#1F9CB0' },
+    dark:  { faded: '#8A97AE', accent: 'rgb(34, 211, 238)' },
+  };
+
+  // SVG namespace helper
+  const NS = 'http://www.w3.org/2000/svg';
+  const svgEl = (tag, attrs) => {
+    const e = document.createElementNS(NS, tag);
+    if (attrs) for (const k in attrs) e.setAttribute(k, attrs[k]);
+    return e;
+  };
+
+  function mount(el) {
+    if (el.__omMounted) return;
+    el.__omMounted = true;
+
+    const svg = svgEl('svg', { viewBox: '0 0 24 24', width: '100%', height: '100%' });
+    svg.style.display = 'block';
+    svg.style.width = 'var(--om-size, 18px)';
+    svg.style.height = 'var(--om-size, 18px)';
+    el.appendChild(svg);
+
+    const t0 = performance.now();
+    let raf;
+
+    function tick() {
+      const state = el.dataset.state || 'thinking';
+      const theme = el.dataset.theme || 'light';
+      const p = PALETTE[theme];
+
+      const t = performance.now() - t0;
+      const orbitDur = state === 'thinking' ? 1400 : 4500;
+      const morphDur = state === 'thinking' ? 4800 : 12000;
+      const angle = ((t / orbitDur) * 360) % 360;
+      const phase = (t / morphDur) % 1;
+
+      // Stage / grow envelope
+      const stage = Math.floor(phase * 4);
+      const stageT = (phase * 4) % 1;
+      const grow = stageT < 0.5 ? stageT * 2 : (1 - stageT) * 2;
+      const ease = (x) => x < 0.5 ? 2 * x * x : 1 - Math.pow(-2 * x + 2, 2) / 2;
+      const g = ease(grow);
+
+      let shape = 'dot';
+      if (state === 'thinking') {
+        if      (stage === 0) shape = 'chaos';
+        else if (stage === 1) shape = 'pyramid';
+        else if (stage === 3) shape = 'cube';
+      }
+      if (state === 'done') shape = 'A';
+
+      const orbitR = 8.5;
+      const a = (angle * Math.PI) / 180;
+      const sx = 12 + Math.cos(a) * orbitR;
+      const sy = 12 + Math.sin(a) * orbitR;
+      const dotR = 1.4 + g * 1.0;
+      const shapeSize = 1.8 + g * 3.2;
+
+      // Build the SVG content from scratch each frame (cheap at this size).
+      while (svg.firstChild) svg.removeChild(svg.firstChild);
+
+      // orbit ring guide
+      svg.appendChild(svgEl('circle', {
+        cx: 12, cy: 12, r: orbitR, fill: 'none',
+        stroke: p.faded, 'stroke-opacity': 0.18, 'stroke-width': 0.6,
+      }));
+
+      // satellite (idle + thinking)
+      if (state !== 'done') {
+        svg.appendChild(svgEl('circle', {
+          cx: sx.toFixed(2), cy: sy.toFixed(2),
+          r: state === 'idle' ? 1.0 : 1.4,
+          fill: p.accent,
+        }));
+      }
+
+      // CENTER MORPH — only in thinking
+      if (state === 'thinking') {
+        if (shape === 'chaos') {
+          const frags = [
+            { d: 'M-3.5,6 L0,-6',  spin: phase * 720,  ox: -2, oy: -1 },
+            { d: 'M0,-6 L3.5,6',   spin: -phase * 540, ox:  2, oy:  1 },
+            { d: 'M-2.5,5 L2.5,5', spin: phase * 900,  ox:  0, oy:  2 },
+          ];
+          const wrap = svgEl('g', { opacity: g });
+          frags.forEach((f) => {
+            const outer = svgEl('g', {
+              transform: `translate(${(12 + f.ox * g).toFixed(2)} ${(12 + f.oy * g).toFixed(2)}) rotate(${f.spin.toFixed(2)})`,
+            });
+            const inner = svgEl('path', {
+              d: f.d,
+              fill: 'none',
+              stroke: p.accent,
+              'stroke-width': (0.15 + g * 0.35).toFixed(3),
+              'stroke-linejoin': 'round',
+              'stroke-linecap': 'round',
+              transform: `scale(${(0.5 + g * 0.7).toFixed(3)})`,
+            });
+            outer.appendChild(inner);
+            wrap.appendChild(outer);
+          });
+          svg.appendChild(wrap);
+        }
+        else if (shape === 'pyramid') {
+          const outer = svgEl('g', { transform: `rotate(${angle.toFixed(2)} 12 12)` });
+          const inner = svgEl('g', {
+            transform: `translate(12 12) scale(${(shapeSize / 9).toFixed(3)}) translate(-12 -12)`,
+            opacity: g,
+          });
+          inner.appendChild(svgEl('path', {
+            d: 'M5,20 L12,15.96 M19,20 L12,15.96 M12,7.88 L12,15.96',
+            fill: 'none', stroke: p.accent,
+            'stroke-opacity': 0.55,
+            'stroke-width': (0.18 + g * 0.4).toFixed(3),
+            'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+          }));
+          inner.appendChild(svgEl('path', {
+            d: 'M5,20 L12,7.88 L19,20 Z',
+            fill: 'none', stroke: p.accent,
+            'stroke-width': (0.25 + g * 0.55).toFixed(3),
+            'stroke-linejoin': 'round', 'stroke-linecap': 'round',
+          }));
+          outer.appendChild(inner);
+          svg.appendChild(outer);
+        }
+        else if (shape === 'dot') {
+          svg.appendChild(svgEl('circle', {
+            cx: 12, cy: 12, r: dotR.toFixed(3), fill: 'none',
+            stroke: p.accent, 'stroke-width': (0.15 + g * 0.35).toFixed(3),
+          }));
+        }
+        else if (shape === 'cube') {
+          const outer = svgEl('g', { transform: `rotate(${angle.toFixed(2)} 12 12)` });
+          const inner = svgEl('g', {
+            transform: `translate(12 12) scale(${(shapeSize / 9).toFixed(3)}) translate(-12 -12)`,
+            opacity: g,
+          });
+          inner.appendChild(svgEl('path', {
+            d: 'M3.5,8 L12,13 L20.5,8 M12,13 L12,22',
+            fill: 'none', stroke: p.faded,
+            'stroke-opacity': 0.45,
+            'stroke-width': 0.8,
+            'stroke-dasharray': '1.5 1.5',
+          }));
+          inner.appendChild(svgEl('path', {
+            d: [
+              'M3.5,8 L12,3 L20.5,8 L12,13 Z',
+              'M3.5,8 L3.5,17',
+              'M20.5,8 L20.5,17',
+              'M12,13 L12,22',
+              'M3.5,17 L12,22 L20.5,17',
+            ].join(' '),
+            fill: 'none',
+            stroke: p.accent,
+            'stroke-width': (0.25 + g * 0.55).toFixed(3),
+            'stroke-linejoin': 'round',
+            'stroke-linecap': 'round',
+          }));
+          outer.appendChild(inner);
+          svg.appendChild(outer);
+        }
+      }
+
+      // DONE — futurist A + locked ring
+      if (state === 'done') {
+        const grp = svgEl('g', {
+          stroke: p.accent, 'stroke-width': 1.4,
+          'stroke-linecap': 'round', 'stroke-linejoin': 'round', fill: 'none',
+        });
+        grp.appendChild(svgEl('path', { d: 'M5 20 L12 7.88 L19 20 L9 20' }));
+        svg.appendChild(grp);
+        svg.appendChild(svgEl('circle', {
+          cx: 12, cy: 12, r: orbitR, fill: 'none',
+          stroke: p.accent, 'stroke-width': 1, 'stroke-opacity': 0.35,
+        }));
+      }
+
+      raf = requestAnimationFrame(tick);
+    }
+    raf = requestAnimationFrame(tick);
+
+    // Cleanup hook
+    el.__omStop = () => cancelAnimationFrame(raf);
+  }
+
+  function mountAll() {
+    document.querySelectorAll('.orbit-morph').forEach(mount);
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', mountAll);
+  } else {
+    mountAll();
+  }
+
+  // Watch for new .orbit-morph nodes added later
+  const mo = new MutationObserver((muts) => {
+    for (const m of muts) {
+      m.addedNodes.forEach((n) => {
+        if (n.nodeType !== 1) return;
+        if (n.matches && n.matches('.orbit-morph')) mount(n);
+        if (n.querySelectorAll) n.querySelectorAll('.orbit-morph').forEach(mount);
+      });
+    }
+  });
+  mo.observe(document.body, { childList: true, subtree: true });
+})();
+</script>
+
+</body>
+</html>

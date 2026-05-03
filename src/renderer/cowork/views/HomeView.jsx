@@ -1,5 +1,6 @@
 import Ico from '../components/Icons';
 import Composer from '../components/Composer';
+import { OrbitMorph } from '../components/ui';
 
 function ActiveList({ tasks, onSelect, onClear }) {
   if (!tasks.length) return null;
@@ -62,8 +63,14 @@ export default function HomeView({
         color: 'var(--text-strong)',
         margin: '0 0 28px', textAlign: 'center',
         animation: 'fadein-up .4s ease-out',
+        display: 'inline-flex', alignItems: 'center', gap: 16,
       }}>
-        {greeting}
+        <OrbitMorph
+          size={42}
+          state={activeTasks && activeTasks.length > 0 ? 'thinking' : 'idle'}
+          style={{ flexShrink: 0 }}
+        />
+        <span>{greeting}</span>
       </h1>
       {blocked ? (
         <div style={{
