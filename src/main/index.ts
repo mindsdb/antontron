@@ -6,7 +6,7 @@ import * as https from 'https';
 import * as http from 'http';
 import { IPC } from '../shared/ipc-channels';
 import { checkAntonInstalled, runInstaller } from './installer';
-import { startServer, stopServer, isServerRunning, getServerPort } from './server-process';
+import { startServer, stopServer, isServerRunning, isServerStarting, getServerPort } from './server-process';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
 import { sendEvent } from './analytics';
 import { getRendererPath, checkForUIUpdate, getCachedVersion } from './ui-updater';
@@ -496,9 +496,32 @@ function setupIPC() {
   // Renderer can ask main where the server lives.
   ipcMain.handle('server:get-info', () => ({
     running: isServerRunning(),
+    starting: isServerStarting(),
     port: getServerPort(),
     origin: `http://127.0.0.1:${getServerPort()}`,
   }));
+
+  // Toggle the python server up/down. Used by the sidebar footer button.
+  // Returns the new state so the renderer can reflect it without polling.
+  // "Already starting" counts as up — stop it instead of double-spawning.
+  ipcMain.handle('server:toggle', async () => {
+    if (isServerRunning() || isServerStarting()) {
+      stopServer();
+      return { running: false, port: getServerPort() };
+    }
+    const result = await startServer();
+    return { running: !!result.ok, port: result.port ?? getServerPort(), error: result.reason };
+  });
+  ipcMain.handle('server:start', async () => {
+    if (isServerRunning()) return { running: true, port: getServerPort() };
+    // If a start is already in progress, await it rather than spawn again.
+    const result = await startServer();
+    return { running: !!result.ok, port: result.port ?? getServerPort(), error: result.reason };
+  });
+  ipcMain.handle('server:stop', async () => {
+    stopServer();
+    return { running: false, port: getServerPort() };
+  });
 
   ipcMain.handle(IPC.INSTALL_CANCEL, async () => {
     if (!activeInstall) return false;

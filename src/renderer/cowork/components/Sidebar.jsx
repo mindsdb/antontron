@@ -1,4 +1,5 @@
 import Ico from './Icons';
+import { Spinner } from './ui';
 
 // Platform-aware modifier symbol for keyboard hints. Mac uses ⌘ glyph,
 // Windows/Linux use Ctrl+ literal.
@@ -71,6 +72,8 @@ export default function Sidebar({
   activeRoute,
   activeTaskId,
   serverOnline,
+  serverBusy = false,
+  serverBusyKind = 'starting', // 'starting' | 'stopping'
   onNavigate,
   onSelectTask,
   onNewTask,
@@ -79,8 +82,7 @@ export default function Sidebar({
   onToggleCollapsed,
   onPinTask,
   onUnpinTask,
-  theme = 'dark',
-  onToggleTheme,
+  onToggleServer,
 }) {
   const recents = tasks.slice(0, 8);
   const pinnedTasks = pins
@@ -216,24 +218,53 @@ export default function Sidebar({
 
         {/* Footer status */}
         <div className="anton-sidebar__footer">
-          <div className="status-pill">
-            <span className={`status-dot${serverOnline ? '' : ' offline'}`} />
+          <div
+            className={
+              'status-pill' +
+              (serverBusy ? ' is-busy' : serverOnline ? ' is-on' : '')
+            }
+          >
+            <span
+              className={
+                'status-dot' +
+                (serverBusy ? ' busy' : serverOnline ? '' : ' offline')
+              }
+            />
             <span className="status-text">
               <span className="status-text__faded">backend ·</span>{' '}
-              <span className={serverOnline ? 'status-text__live' : 'status-text__faded'}>
-                {serverOnline ? 'connected' : 'offline'}
-              </span>
+              {serverBusy ? (
+                <>
+                  <span className="status-text__live">{serverBusyKind}</span>{' '}
+                  <Spinner />
+                </>
+              ) : (
+                <span className={serverOnline ? 'status-text__live' : 'status-text__faded'}>
+                  {serverOnline ? 'connected' : 'offline'}
+                </span>
+              )}
             </span>
           </div>
           <div className="anton-sidebar__footer-actions">
             <button
-              className="chrome-btn--small"
-              onClick={onToggleTheme}
-              title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-              aria-label="Toggle colour theme"
+              className={
+                'chrome-btn--small server-toggle' +
+                (serverOnline ? ' is-on' : '') +
+                (serverBusy ? ' is-busy' : '')
+              }
+              onClick={onToggleServer}
+              disabled={serverBusy}
+              title={
+                serverBusy
+                  ? `Backend ${serverBusyKind}…`
+                  : serverOnline ? 'Stop Anton backend' : 'Start Anton backend'
+              }
+              aria-label={serverOnline ? 'Stop backend' : 'Start backend'}
+              aria-busy={serverBusy ? 'true' : undefined}
               style={{ WebkitAppRegion: 'no-drag' }}
             >
-              {theme === 'dark' ? Ico.sun(13) : Ico.moon(13)}
+              {serverBusy
+                ? <Spinner intervalMs={70} />
+                : (serverOnline ? Ico.powerOff(13) : Ico.power(13))}
             </button>
           </div>
         </div>

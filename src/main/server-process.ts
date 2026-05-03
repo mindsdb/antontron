@@ -16,6 +16,10 @@ const SERVER_HOST = '127.0.0.1';
 let serverProcess: ChildProcess | null = null;
 let serverPort: number = DEFAULT_PORT;
 let serverStarted = false;
+// Tracks an in-flight startServer() call so concurrent invocations
+// share the same promise instead of spawning duplicate python processes
+// (which would race for the same port and the second would fail).
+let pendingStart: Promise<StartServerResult> | null = null;
 
 export function getServerPort(): number {
   return serverPort;
@@ -72,6 +76,9 @@ export interface StartServerResult {
 
 export async function startServer(opts: { port?: number; readyTimeoutMs?: number } = {}): Promise<StartServerResult> {
   if (serverStarted) return { ok: true, port: serverPort };
+  // If a start is already in progress (e.g. from app boot), reuse it
+  // instead of spawning a second python that would clash on the port.
+  if (pendingStart) return pendingStart;
 
   serverPort = opts.port ?? (Number(process.env.ANTON_SERVER_PORT) || DEFAULT_PORT);
   const readyTimeoutMs = opts.readyTimeoutMs ?? 15000;
@@ -92,46 +99,54 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     };
   }
 
-  const env = {
-    ...process.env,
-    PYTHONUNBUFFERED: '1',
-    ANTON_SERVER_PORT: String(serverPort),
-    ANTON_SERVER_HOST: SERVER_HOST,
-    ANTON_PROJECTS_DIR: path.join(app.getPath('userData'), 'projects'),
-  };
-
-  const child = spawn(pythonCmd, ['main.py'], {
-    cwd: serverDir,
-    env,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-
-  child.stdout.on('data', (d) => {
-    process.stdout.write(`[anton-server] ${d.toString()}`);
-  });
-  child.stderr.on('data', (d) => {
-    process.stderr.write(`[anton-server] ${d.toString()}`);
-  });
-  child.on('exit', (code) => {
-    serverStarted = false;
-    serverProcess = null;
-    if (code !== 0 && code !== null) {
-      console.error(`[anton-server] exited with code ${code}`);
-    }
-  });
-
-  serverProcess = child;
-
-  const ready = await probeHealth(readyTimeoutMs);
-  if (!ready) {
-    return {
-      ok: false,
-      reason: `Server did not respond on /health within ${readyTimeoutMs}ms.`,
-      port: serverPort,
+  pendingStart = (async (): Promise<StartServerResult> => {
+    const env = {
+      ...process.env,
+      PYTHONUNBUFFERED: '1',
+      ANTON_SERVER_PORT: String(serverPort),
+      ANTON_SERVER_HOST: SERVER_HOST,
+      ANTON_PROJECTS_DIR: path.join(app.getPath('userData'), 'projects'),
     };
+
+    const child = spawn(pythonCmd, ['main.py'], {
+      cwd: serverDir,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    child.stdout.on('data', (d) => {
+      process.stdout.write(`[anton-server] ${d.toString()}`);
+    });
+    child.stderr.on('data', (d) => {
+      process.stderr.write(`[anton-server] ${d.toString()}`);
+    });
+    child.on('exit', (code) => {
+      serverStarted = false;
+      serverProcess = null;
+      if (code !== 0 && code !== null) {
+        console.error(`[anton-server] exited with code ${code}`);
+      }
+    });
+
+    serverProcess = child;
+
+    const ready = await probeHealth(readyTimeoutMs);
+    if (!ready) {
+      return {
+        ok: false,
+        reason: `Server did not respond on /health within ${readyTimeoutMs}ms.`,
+        port: serverPort,
+      };
+    }
+    serverStarted = true;
+    return { ok: true, port: serverPort };
+  })();
+
+  try {
+    return await pendingStart;
+  } finally {
+    pendingStart = null;
   }
-  serverStarted = true;
-  return { ok: true, port: serverPort };
 }
 
 export function stopServer() {
@@ -142,6 +157,14 @@ export function stopServer() {
   }
 }
 
+// True once /health has confirmed the python is responsive.
 export function isServerRunning(): boolean {
   return serverStarted && serverProcess !== null;
+}
+
+// True between spawn() and the first successful /health probe — i.e.
+// the python child exists but isn't proven ready yet. The renderer
+// uses this to show "starting…" without firing a duplicate start.
+export function isServerStarting(): boolean {
+  return pendingStart !== null;
 }

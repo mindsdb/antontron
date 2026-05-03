@@ -6,6 +6,12 @@ contextBridge.exposeInMainWorld('antontron', {
   checkInstall: () => ipcRenderer.invoke(IPC.INSTALL_CHECK),
   startInstall: () => ipcRenderer.invoke(IPC.INSTALL_START),
   cancelInstall: () => ipcRenderer.invoke(IPC.INSTALL_CANCEL),
+
+  // Anton python server lifecycle
+  serverInfo:   () => ipcRenderer.invoke('server:get-info'),
+  serverStart:  () => ipcRenderer.invoke('server:start'),
+  serverStop:   () => ipcRenderer.invoke('server:stop'),
+  serverToggle: () => ipcRenderer.invoke('server:toggle'),
   onInstallLog: (cb: (msg: string) => void) => {
     const listener = (_: any, msg: string) => cb(msg);
     ipcRenderer.on(IPC.INSTALL_LOG, listener);

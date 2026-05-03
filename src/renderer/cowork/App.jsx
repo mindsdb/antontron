@@ -164,6 +164,25 @@ function AppCore() {
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  // After a *mouse* click on a button, drop its keyboard focus so a later
+  // stray Space/Enter doesn't re-trigger that button (e.g. clicking
+  // "Projects" in the sidebar shouldn't leave Space wired to it).
+  // Pure keyboard navigation (Tab → Enter/Space) is untouched because we
+  // only run on mouse events; :focus-visible still draws the ring for
+  // genuine keyboard focus.
+  useEffect(() => {
+    const onMouseUp = (e) => {
+      const btn = e.target instanceof Element
+        ? e.target.closest('button, [role="button"]')
+        : null;
+      if (btn && !btn.matches('input, textarea, select, [contenteditable="true"]')) {
+        requestAnimationFrame(() => { try { btn.blur(); } catch {} });
+      }
+    };
+    document.addEventListener('mouseup', onMouseUp, true);
+    return () => document.removeEventListener('mouseup', onMouseUp, true);
+  }, []);
+
   // Latest newTask handler kept in a ref so the keydown listener — bound
   // once on mount — always invokes the up-to-date function.
   const newTaskRef = useRef(null);
@@ -185,6 +204,8 @@ function AppCore() {
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedModel, setSelectedModel] = useState(MOCK_DATA.models[0]);
   const [serverOnline, setServerOnline] = useState(false);
+  const [serverBusy, setServerBusy] = useState(false);
+  const [serverBusyKind, setServerBusyKind] = useState('starting'); // 'starting' | 'stopping'
   const [health, setHealth] = useState({ status: 'offline', anton_available: false, config_ready: false });
 
   // Load data from server on mount
@@ -215,6 +236,36 @@ function AppCore() {
   useEffect(() => {
     refreshData();
   }, [refreshData]);
+
+  // Seed server state from main's truth on first paint so the toggle
+  // button reflects reality (running OR starting) even before /health
+  // has returned. While main is mid-start, show the spinner; poll
+  // every 600 ms until it resolves.
+  useEffect(() => {
+    let cancelled = false;
+    let timer = null;
+
+    const tick = async () => {
+      try {
+        const info = await window.antontron?.serverInfo?.();
+        if (cancelled || !info) return;
+        if (typeof info.running === 'boolean') setServerOnline(info.running);
+        if (info.starting) {
+          setServerBusyKind('starting');
+          setServerBusy(true);
+          timer = setTimeout(tick, 600);
+        } else {
+          setServerBusy(false);
+        }
+      } catch {}
+    };
+
+    tick();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, []);
 
   const saveSettings = useCallback(async (patch = settings) => {
     const result = await updateSettings(patch);
@@ -623,8 +674,6 @@ function AppCore() {
         {Ico.menu(15)}
       </button>
 
-      {/* Theme toggle now lives inside the Sidebar footer per the design
-          guideline. The floating bottom-right version was removed. */}
       <Sidebar
         tasks={tasks}
         pins={pins}
@@ -640,8 +689,38 @@ function AppCore() {
         onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
         onPinTask={handlePinTask}
         onUnpinTask={handleUnpinTask}
-        theme={theme}
-        onToggleTheme={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        serverBusy={serverBusy}
+        serverBusyKind={serverBusyKind}
+        onToggleServer={async () => {
+          if (serverBusy) return;
+          // Decide intent from main's actual state, not renderer state.
+          // Treat "running OR mid-start" as up so a click during boot
+          // stops the in-flight start instead of double-spawning python.
+          let actuallyRunning = serverOnline;
+          let actuallyStarting = false;
+          try {
+            const info = await window.antontron?.serverInfo?.();
+            if (info) {
+              if (typeof info.running === 'boolean') actuallyRunning = info.running;
+              if (typeof info.starting === 'boolean') actuallyStarting = info.starting;
+            }
+          } catch {}
+          const isUp = actuallyRunning || actuallyStarting;
+          const goingUp = !isUp;
+          setServerBusyKind(goingUp ? 'starting' : 'stopping');
+          setServerBusy(true);
+          try {
+            const result = goingUp
+              ? await window.antontron?.serverStart?.()
+              : await window.antontron?.serverStop?.();
+            if (result) {
+              setServerOnline(!!result.running);
+              if (result.running) setTimeout(refreshData, 400);
+            }
+          } catch {} finally {
+            setServerBusy(false);
+          }
+        }}
       />
 
       <main style={{
@@ -749,6 +828,18 @@ function AppCore() {
         onSearch={searchCowork}
         onSelect={handleSearchSelect}
       />
+
+      {/* Floating theme toggle (bottom-right). Lives outside the sidebar so
+          it's always reachable, including when the sidebar is collapsed. */}
+      <button
+        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        aria-label="Toggle colour theme"
+        className="floating-theme-toggle"
+        style={{ WebkitAppRegion: 'no-drag' }}
+      >
+        {theme === 'dark' ? Ico.sun(15) : Ico.moon(15)}
+      </button>
     </div>
   );
 }

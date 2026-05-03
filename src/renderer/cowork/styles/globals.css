@@ -2241,9 +2241,38 @@ body[data-theme="dark"] .app-sidebar .sidebar-empty {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  background: var(--surface-2);
+  /* Footer inherits the sidebar surface so the pill reads as part of the
+     panel rather than sitting on a darker tray. */
+  background: transparent;
 }
-.status-pill { display: flex; align-items: center; gap: 8px; }
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  /* Default: muted (offline) palette. Overridden by .is-on / .is-busy below. */
+  --status-label-color: var(--ink-3);
+  --status-value-color: var(--ink-3);
+}
+.status-pill.is-on   { --status-label-color: var(--ink-2); --status-value-color: var(--accent); }
+.status-pill.is-busy { --status-label-color: var(--ink-2); --status-value-color: var(--accent); }
+/* In dark mode, drop the chip a notch deeper so it reads as inset against
+   the navy sidebar surface — same family, just a touch darker. */
+body[data-theme="dark"] .status-pill {
+  background: var(--bg);
+  border-color: rgba(255, 255, 255, 0.04);
+}
+body[data-theme="dark"] .status-pill.is-on,
+body[data-theme="dark"] .status-pill.is-busy {
+  border-color: color-mix(in srgb, var(--accent) 22%, transparent);
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 12%, transparent);
+}
+body[data-theme="dark"] .status-pill.is-on .status-text__live {
+  text-shadow: 0 0 10px var(--accent-glow);
+}
 .status-dot {
   width: 8px; height: 8px;
   border-radius: 99px;
@@ -2251,14 +2280,28 @@ body[data-theme="dark"] .app-sidebar .sidebar-empty {
   box-shadow: 0 0 0 3px var(--accent-bg);
   flex: 0 0 auto;
 }
-body[data-theme="dark"] .status-dot {
+/* Live "on" indicator — same neon cyan we use across the app, with two
+   glow layers (tight + soft) so it reads as an authentic power LED on
+   the dark navy sidebar. */
+body[data-theme="dark"] .status-dot:not(.offline):not(.busy) {
+  background: var(--accent);
   box-shadow:
-    0 0 0 3px rgba(34,211,238,0.15),
-    0 0 12px var(--accent-glow);
+    0 0 0 3px rgba(34, 211, 238, 0.18),
+    0 0 8px rgba(34, 211, 238, 0.85),
+    0 0 18px var(--accent-glow);
 }
 .status-dot.offline {
   background: var(--ink-4);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-4) 18%, transparent);
+}
+/* Pulsing accent dot while the backend is starting / stopping. */
+.status-dot.busy {
+  background: var(--accent);
+  animation: status-dot-pulse 1.1s ease-in-out infinite;
+}
+@keyframes status-dot-pulse {
+  0%, 100% { opacity: 1;   transform: scale(1);    }
+  50%      { opacity: 0.45; transform: scale(0.85); }
 }
 .status-text {
   font-family: var(--font-mono);
@@ -2266,9 +2309,22 @@ body[data-theme="dark"] .status-dot {
   color: var(--ink-2);
   letter-spacing: 0.02em;
 }
-.status-text__faded { color: var(--ink-3); }
-.status-text__live  { color: var(--accent); }
-body[data-theme="dark"] .status-text__live { text-shadow: 0 0 10px var(--accent-glow); }
+/* Both halves of the pill text now read from the pill-level CSS vars
+   so the whole label shifts together with the on/off/busy state. */
+.status-text__faded { color: var(--status-label-color); }
+.status-text__live  { color: var(--status-value-color); }
+body[data-theme="dark"] .status-pill.is-busy .status-text__live {
+  text-shadow: 0 0 10px var(--accent-glow);
+}
+/* While starting/stopping, the value word breathes — pairs with the
+   pulsing dot and the spinner for a coherent "in flight" look. */
+.status-pill.is-busy .status-text__live {
+  animation: status-text-blink 1.1s ease-in-out infinite;
+}
+@keyframes status-text-blink {
+  0%, 100% { opacity: 1;    }
+  50%      { opacity: 0.45; }
+}
 .anton-sidebar__footer-actions { display: flex; gap: 4px; }
 
 /* Small chrome button (used in footer + sidebar header where 22px is tight) */
@@ -2293,6 +2349,72 @@ body[data-theme="dark"] .chrome-btn--small:hover {
   background: transparent;
   box-shadow: 0 0 16px rgba(34,211,238,0.25);
 }
+
+/* Server (backend) toggle in the sidebar footer. Neutral by default in
+   every state — the destructive intent only surfaces on hover when the
+   server is on (red), so the panel doesn't shout at idle. */
+.server-toggle {
+  position: relative;
+  color: var(--ink-3);
+}
+/* When the backend is on, hovering the button reveals it as a stop /
+   disconnect action — danger red, no glow on light, gentle red glow on dark. */
+.server-toggle.is-on:hover {
+  color: var(--danger);
+  background: var(--danger-bg);
+  box-shadow: none;
+}
+body[data-theme="dark"] .server-toggle.is-on:hover {
+  color: var(--danger);
+  background: transparent;
+  box-shadow: 0 0 14px rgba(248, 113, 113, 0.3);
+}
+.server-toggle.is-busy,
+.server-toggle:disabled {
+  cursor: progress;
+  opacity: 0.85;
+  color: var(--accent);
+}
+.server-toggle.is-busy:hover {
+  /* Don't show the hover fill while the action is in flight. */
+  background: transparent;
+  box-shadow: none;
+  color: var(--accent);
+}
+
+/* Floating bottom-right theme toggle. Always reachable, sits above the
+   gravity-field background and clear of the composer. */
+.floating-theme-toggle {
+  position: fixed;
+  right: 18px;
+  bottom: 16px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-2);
+  cursor: pointer;
+  z-index: 50;
+  box-shadow: var(--sh-1);
+  transition: background .15s, color .15s, transform .15s, box-shadow .2s;
+}
+.floating-theme-toggle:hover {
+  color: var(--ink);
+  transform: translateY(-1px);
+}
+body[data-theme="dark"] .floating-theme-toggle:hover {
+  color: var(--accent);
+  box-shadow: 0 0 18px rgba(34,211,238,0.3);
+}
+
+/* Hide focus ring on mouse-clicked buttons so a stray Space/Enter
+   later in the session doesn't re-trigger the last-clicked nav item.
+   :focus-visible keeps the ring for true keyboard navigation. */
+button:focus:not(:focus-visible) { outline: none; }
 
 @media (max-width: 700px) {
   .app-sidebar {
