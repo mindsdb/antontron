@@ -30,10 +30,29 @@ html, body, #root {
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: var(--bg-primary);
   color: var(--text-primary);
   font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
   -webkit-font-smoothing: antialiased;
+}
+
+/* The body background is now controlled by .gf-theme-dark / .gf-theme-light
+   from the gravity-field kit. Don't set it on html/body or it will mask
+   the animated canvas behind. The React root sits above the canvas. */
+
+/* Override the kit's near-black dark default with a deep navy that
+   matches antontron's previous dark palette. Light theme keeps the
+   kit's near-white. */
+body.gf-theme-dark  { background: #0a1426; }
+
+/* Dim the gravity-field canvas overall — the kit's base alpha values
+   are tuned for full visibility, but we want a more whisper-quiet
+   feel where the dots, arrows, and center-of-mass glow all sit
+   firmly in the background. 0.45 ≈ "barely there, present on focus." */
+.gravity-field { opacity: 0.45; }
+
+#root {
+  position: relative;
+  z-index: 1;
 }
 
 /* Global scrollbar styling to avoid native white bars on macOS/Electron */

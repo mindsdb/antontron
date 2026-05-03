@@ -28,7 +28,7 @@ if _env_path.exists():
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from anton_api import conversation_manager, scratchpad_runtime
+from anton_api import conversation_manager, projects_store, scratchpad_runtime
 from routes.responses import router as responses_router
 from routes.conversations import router as conversations_router
 from routes.scratchpad import router as scratchpad_router
@@ -53,6 +53,7 @@ logger = logging.getLogger("anton-server")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    projects_store.ensure_default_project()
     start_scheduler()
     yield
     await conversation_manager.close_all()

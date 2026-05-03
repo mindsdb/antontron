@@ -128,6 +128,27 @@ function AppCore() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [models] = useState(MOCK_DATA.models);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Theme (light | dark) — persisted in localStorage so the choice
+  // survives reloads. The animated background canvas (gravity-field)
+  // and the body's bg colour both follow this value.
+  const [theme, setTheme] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem('anton.theme');
+      return saved === 'light' || saved === 'dark' ? saved : 'dark';
+    } catch { return 'dark'; }
+  });
+
+  useEffect(() => {
+    try { window.localStorage.setItem('anton.theme', theme); } catch {}
+    // Swap body class so kit's gf-theme-* page background colour applies.
+    document.body.classList.remove('gf-theme-dark', 'gf-theme-light');
+    document.body.classList.add(theme === 'light' ? 'gf-theme-light' : 'gf-theme-dark');
+    document.body.dataset.theme = theme;
+    // Tell the gravity field to swap palettes live.
+    if (window.gravityField && typeof window.gravityField.setTheme === 'function') {
+      window.gravityField.setTheme(theme);
+    }
+  }, [theme]);
 
   const [route, setRoute] = useState('home');         // home | task | projects | scheduled | artifacts | dispatch | customize | settings
   const [activeTaskId, setActiveTaskId] = useState(null);
@@ -437,19 +458,16 @@ function AppCore() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleCreateProject = async ({ name, path }) => {
-    try {
-      const project = await createProject(name, path);
-      const latest = await fetchProjects();
-      if (Array.isArray(latest)) {
-        setProjects(latest);
-        const selected = latest.find((p) => p.path === project.path) || latest.find((p) => p.name === project.name) || project;
-        setSelectedProject(selected);
-      }
-      setRoute('home');
-    } catch (err) {
-      console.error(err);
+  const handleCreateProject = async ({ name }) => {
+    const project = await createProject(name);
+    const latest = await fetchProjects();
+    if (Array.isArray(latest)) {
+      setProjects(latest);
+      const selected = latest.find((p) => p.name === project.name) || project;
+      setSelectedProject(selected);
     }
+    setRoute('projects');
+    return project;
   };
 
   const handlePinTask = async (task) => {
@@ -506,7 +524,7 @@ function AppCore() {
     if (result.type === 'task' || (result.type === 'pin' && result.route === 'task')) {
       selectTask(result.id);
     } else if (result.type === 'project') {
-      const project = projects.find((p) => p.path === result.id || p.id === result.id);
+      const project = projects.find((p) => p.name === result.id || p.path === result.id);
       if (project) setSelectedProject(project);
       setRoute('projects');
     } else if (result.type === 'attachment' && result.sessionId) {
@@ -520,17 +538,20 @@ function AppCore() {
 
   const { showDots, accentVariant } = settings;
   const accentCss = ACCENT_VARS[accentVariant] || {};
-  const appStyle = { width: '100vw', height: '100vh', background: 'var(--surface-0)' };
+  // appStyle + mainBg deliberately transparent so the gravity-field
+  // canvas painted behind the React root is the visible background.
+  // Individual views can supply their own surface (HomeView is fully
+  // transparent — the greeting + composer float over the field;
+  // dense views like Settings get a subtle frosted overlay below).
+  const appStyle = { width: '100vw', height: '100vh', background: 'transparent' };
 
-  const mainBg = showDots && route === 'home'
-    ? 'var(--surface-0)'
-    : 'var(--surface-0)';
+  const mainBg = 'transparent';
   const modelOptions = selectedModel && !models.some((m) => m.id === selectedModel.id)
     ? [selectedModel, ...models]
     : models;
 
   return (
-    <div style={{ ...appStyle, ...accentCss, display: 'flex', gap: 4, padding: 4, position: 'relative' }}>
+    <div style={{ ...appStyle, ...accentCss, display: 'flex', gap: 6, padding: 6, position: 'relative' }}>
       {/*
         Floating hamburger — visible when the sidebar is collapsed. Sits
         right of the macOS traffic lights (window-x=14, so left=88 clears
@@ -558,6 +579,55 @@ function AppCore() {
         }}
       >
         {Ico.menu(15)}
+      </button>
+
+      {/*
+        Floating theme toggle (bottom-right). Sun in dark mode → click to
+        go light. Moon in light mode → click to go dark. Both icons stay
+        rendered, fading in/out with the same Apple-spring easing as the
+        sidebar transitions; the button frame also rotates 360° on every
+        toggle for a slick "spin to swap" feel.
+      */}
+      <button
+        onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}
+        title={theme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+        className="icon-btn theme-toggle"
+        style={{
+          position: 'absolute',
+          bottom: 12, right: 12,
+          width: 36, height: 36, borderRadius: 12,
+          zIndex: 10,
+          WebkitAppRegion: 'no-drag',
+          background: theme === 'dark'
+            ? 'rgba(255,255,255,0.06)'
+            : 'rgba(0,0,0,0.04)',
+          color: theme === 'dark' ? '#E8EEF2' : '#3A464B',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          boxShadow: '0 1px 2px rgba(0,0,0,0.06), 0 4px 16px rgba(0,0,0,0.08)',
+          transition:
+            'background 240ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+            'color 240ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+            'transform 480ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transform: `rotate(${theme === 'dark' ? 0 : 360}deg)`,
+        }}
+      >
+        <span style={{ position: 'relative', width: 16, height: 16, display: 'inline-flex' }}>
+          <span style={{
+            position: 'absolute', inset: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            opacity: theme === 'dark' ? 1 : 0,
+            transform: `rotate(${theme === 'dark' ? 0 : -90}deg) scale(${theme === 'dark' ? 1 : 0.6})`,
+            transition: 'opacity 200ms cubic-bezier(0.32, 0.72, 0, 1), transform 320ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}>{Ico.sun(16)}</span>
+          <span style={{
+            position: 'absolute', inset: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            opacity: theme === 'light' ? 1 : 0,
+            transform: `rotate(${theme === 'light' ? 0 : 90}deg) scale(${theme === 'light' ? 1 : 0.6})`,
+            transition: 'opacity 200ms cubic-bezier(0.32, 0.72, 0, 1), transform 320ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}>{Ico.moon(16)}</span>
+        </span>
       </button>
       <Sidebar
         tasks={tasks}
@@ -664,7 +734,7 @@ function AppCore() {
         )}
 
         {route === 'settings' && (
-          <SettingsView settings={settings} setSetting={setSetting} onSave={saveSettings} />
+          <SettingsView settings={settings} setSetting={setSetting} onSave={saveSettings} theme={theme} onThemeChange={setTheme} />
         )}
 
         {['memory', 'skills', 'connect', 'publish'].includes(route) && (

@@ -1,7 +1,7 @@
 """POST /v1/responses — OpenAI Responses API.
 
 Streaming SSE by default; pass {"stream": false} for one-shot JSON.
-Cowork extensions: project_path + attachment_ids fields on the request.
+Cowork extensions: project (name) + attachment_ids fields on the request.
 The returned `response.created` event carries the conversation_id the
 frontend uses as its task id.
 """
@@ -79,7 +79,7 @@ async def create_response(req: ResponsesRequest):
                 event_stream, cid = await conversation_manager.chat_stream(
                     final_input,
                     conversation_id=req.conversation,
-                    project_path=req.project_path,
+                    project=req.project,
                     model=req.model if req.model and req.model != "anton" else None,
                 )
                 # If this is a new conversation, retroactively assign attachments
@@ -127,7 +127,7 @@ async def create_response(req: ResponsesRequest):
         event_stream, cid = await conversation_manager.chat_stream(
             final_input,
             conversation_id=req.conversation,
-            project_path=req.project_path,
+            project=req.project,
             model=req.model if req.model and req.model != "anton" else None,
         )
         if req.attachment_ids and not req.conversation:

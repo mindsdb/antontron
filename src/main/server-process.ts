@@ -97,6 +97,7 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     PYTHONUNBUFFERED: '1',
     ANTON_SERVER_PORT: String(serverPort),
     ANTON_SERVER_HOST: SERVER_HOST,
+    ANTON_PROJECTS_DIR: path.join(app.getPath('userData'), 'projects'),
   };
 
   const child = spawn(pythonCmd, ['main.py'], {

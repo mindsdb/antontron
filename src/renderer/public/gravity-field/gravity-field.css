@@ -1,0 +1,28 @@
+/*
+ * gravity-field.css
+ * Drop-in styles for the gravity-field background canvas.
+ * Pair with dist/gravity-field.js.
+ */
+
+/* The canvas should sit behind everything else, full-window, untouchable. */
+.gravity-field {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 0;
+  pointer-events: none;     /* clicks/scroll fall through to your UI */
+  display: block;
+}
+
+/* Theme-aware page background. The canvas itself is transparent — the
+   page background colour is what shows through, and the dots are drawn
+   on top. */
+.gf-theme-dark  { background: #0F1416; color: #DDE9EE; }
+.gf-theme-light { background: #FAFAFA; color: #3A464B; }
+
+/* If you DO want the canvas to receive pointer events (so the field
+   reacts even where your UI sits on top), the simpler pattern is to
+   pass `pointerTarget: document.body` to GravityField.mount() and keep
+   pointer-events:none here. That way the body forwards mouse coords
+   to the canvas without intercepting clicks. */

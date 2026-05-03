@@ -30,7 +30,7 @@ class ScheduleRequest(BaseModel):
     cadence: str = "once"
     timezone: str = "local"
     next_run_at: str
-    project_path: str | None = None
+    project: str | None = None
     model: str | None = None
     enabled: bool = True
 
@@ -41,7 +41,7 @@ class ScheduleUpdateRequest(BaseModel):
     cadence: str | None = None
     timezone: str | None = None
     next_run_at: str | None = None
-    project_path: str | None = None
+    project: str | None = None
     model: str | None = None
     enabled: bool | None = None
 
@@ -119,7 +119,7 @@ def _serialise_schedule(request: ScheduleRequest) -> dict:
         "timezone": request.timezone or "local",
         "nextRunAt": next_run.isoformat(),
         "enabled": request.enabled,
-        "projectPath": request.project_path,
+        "project": request.project,
         "model": request.model,
         "lastRunAt": None,
         "lastResultSessionId": None,
@@ -137,7 +137,7 @@ async def _run_schedule(schedule: dict, manual: bool = False) -> dict:
     task = {
         "title": title,
         "summary": "Scheduled Anton task",
-        "projectPath": schedule.get("projectPath"),
+        "project": schedule.get("project"),
         "model": schedule.get("model"),
         "status": "running",
         "createdAt": utc_now_iso(),
@@ -158,7 +158,7 @@ async def _run_schedule(schedule: dict, manual: bool = False) -> dict:
     try:
         event_stream, conversation_id = await conversation_manager.chat_stream(
             schedule.get("prompt", ""),
-            project_path=schedule.get("projectPath"),
+            project=schedule.get("project"),
             model=schedule.get("model"),
         )
         task["id"] = conversation_id
@@ -255,8 +255,8 @@ def update_schedule(schedule_id: str, request: ScheduleUpdateRequest):
             raise HTTPException(status_code=400, detail="Next run time must be a valid ISO datetime.")
         schedule["nextRunAt"] = next_run.isoformat()
         schedule["catchupPending"] = False
-    if request.project_path is not None:
-        schedule["projectPath"] = request.project_path
+    if request.project is not None:
+        schedule["project"] = request.project
     if request.model is not None:
         schedule["model"] = request.model
     if request.enabled is not None:

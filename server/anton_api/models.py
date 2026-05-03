@@ -5,10 +5,10 @@ Two surfaces here:
   - Scratchpad             (/v1/scratchpad/*)
 
 The chat shape mirrors OpenAI's Responses API. The scratchpad shape mirrors
-the hosted scratchpad service. Cowork-specific fields (project_path,
-attachment_ids) live alongside the OpenAI fields on the request model
-because cowork is the only client today; if we ever generalize, those move
-to a subclass in the cowork-specific route layer.
+the hosted scratchpad service. Cowork-specific fields (project, attachment_ids)
+live alongside the OpenAI fields on the request model because cowork is the
+only client today; if we ever generalize, those move to a subclass in the
+cowork-specific route layer.
 """
 
 from __future__ import annotations
@@ -59,7 +59,7 @@ class ResponsesRequest(BaseModel):
     stream: bool = True
     conversation: str | None = None  # session/conversation ID
     # Cowork-side extensions — optional, ignored by non-cowork clients.
-    project_path: str | None = None
+    project: str | None = None  # project name (folder); None = active project
     attachment_ids: list[str] = Field(default_factory=list)
 
 
@@ -113,7 +113,7 @@ class ConversationMeta(BaseModel):
     preview: str = ""
     created_at: str = ""
     updated_at: str = ""
-    project_path: str | None = None
+    project: str | None = None
 
 
 class ConversationPatch(BaseModel):

@@ -228,16 +228,32 @@ export function streamMessage(sessionId, text, opts = {}) {
 }
 
 // ─── Projects ─────────────────────────────────────────────────────────────────
+// Server returns { projects: [{ name, path }] }. Unwrap so call sites
+// keep their array contract.
 export async function fetchProjects() {
   try {
-    return await req('/projects');
+    const data = await req('/projects');
+    return Array.isArray(data?.projects) ? data.projects : [];
   } catch {
     return [];
   }
 }
 
-export async function createProject(name, path) {
-  return req('/projects', { method: 'POST', body: JSON.stringify({ name, path: path || null }) });
+export async function createProject(name) {
+  return req('/projects', { method: 'POST', body: JSON.stringify({ name }) });
+}
+
+export async function fetchActiveProject() {
+  try {
+    const data = await req('/projects/active');
+    return data?.name || null;
+  } catch {
+    return null;
+  }
+}
+
+export async function setActiveProject(name) {
+  return req('/projects/active', { method: 'PUT', body: JSON.stringify({ name }) });
 }
 
 // ─── Artifacts ────────────────────────────────────────────────────────────────

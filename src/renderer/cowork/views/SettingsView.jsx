@@ -159,7 +159,7 @@ function ApiKeyInput({ value, onChange, placeholder }) {
   );
 }
 
-export default function SettingsView({ settings, setSetting, onSave }) {
+export default function SettingsView({ settings, setSetting, onSave, theme, onThemeChange }) {
   const [saved, setSaved] = useState(false);
   const [validation, setValidation] = useState(null);
   const configReady = validation?.configReady ?? settings.configReady;
@@ -241,6 +241,17 @@ export default function SettingsView({ settings, setSetting, onSave }) {
         </div>
 
         <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--frost-600)', textTransform: 'uppercase', letterSpacing: '0.04em', paddingBottom: 12, paddingTop: 4 }}>Desktop</div>
+
+        <Section title="Theme" subtitle="Light or dark — also drives the animated background.">
+          <Segmented
+            value={theme || 'dark'}
+            onChange={(v) => onThemeChange?.(v)}
+            options={[
+              { value: 'light', label: 'Light' },
+              { value: 'dark',  label: 'Dark' },
+            ]}
+          />
+        </Section>
 
         <Section title="Greeting" subtitle="The line shown when you start a new task.">
           <TextInput value={settings.greeting} onChange={(v) => setSetting('greeting', v)} />

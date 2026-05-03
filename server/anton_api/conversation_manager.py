@@ -2,21 +2,25 @@
 
 Owns:
   - The in-memory pool of live ChatSession instances (capped, evicted oldest).
-  - The "build a ChatSession for this workspace" recipe that cowork was
+  - The "build a ChatSession for this project" recipe that cowork was
     using inside anton_bridge._build_chat_session.
   - On-disk history persistence (delegated to anton.memory.HistoryStore).
   - Conversation metadata (id / title / turns / preview / created_at /
-    updated_at / project_path) persisted alongside history.
+    updated_at / project) persisted alongside history.
 
 The public API is small:
-  - chat_stream(input, conversation_id, project_path, model)  → (stream, id)
-  - list_conversations(limit)
+  - chat_stream(input, conversation_id, project, model)        → (stream, id)
+  - list_conversations(limit, project)
   - get_conversation(id)
   - get_messages(id)
   - update_conversation(id, **patch)
   - delete_conversation(id)
   - close_all()
   - is_anton_available()
+
+A "project" is a folder name under projects_store.projects_dir(); the actual
+filesystem path is resolved internally. Passing project=None means "active
+project."
 
 Internally the live cache calls a Python class still named ChatSession
 because that's anton-core's name. The API noun is "conversation."
@@ -32,6 +36,8 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, Optional
+
+from anton_api import projects_store
 
 
 logger = logging.getLogger(__name__)
@@ -68,24 +74,22 @@ def is_anton_available() -> bool:
 # ---------------------------------------------------------------------------
 
 
-def _workspace_base(workspace_path: Optional[str]) -> Path:
-    return (
-        Path(workspace_path).expanduser().resolve()
-        if workspace_path
-        else Path.cwd().resolve()
-    )
+def _project_base(project: Optional[str]) -> Path:
+    """Resolve project name → filesystem path. None ⇒ active project."""
+    _, base = projects_store.resolve_project(project)
+    return base
 
 
-def _episodes_dir(workspace_path: Optional[str]) -> Path:
-    return _workspace_base(workspace_path) / ".anton" / "episodes"
+def _episodes_dir(project: Optional[str]) -> Path:
+    return _project_base(project) / ".anton" / "episodes"
 
 
-def _meta_path(workspace_path: Optional[str], conversation_id: str) -> Path:
-    return _episodes_dir(workspace_path) / f"{conversation_id}_meta.json"
+def _meta_path(project: Optional[str], conversation_id: str) -> Path:
+    return _episodes_dir(project) / f"{conversation_id}_meta.json"
 
 
-def _history_path(workspace_path: Optional[str], conversation_id: str) -> Path:
-    return _episodes_dir(workspace_path) / f"{conversation_id}_history.json"
+def _history_path(project: Optional[str], conversation_id: str) -> Path:
+    return _episodes_dir(project) / f"{conversation_id}_history.json"
 
 
 # ---------------------------------------------------------------------------
@@ -116,8 +120,8 @@ def _atomic_write(path: Path, payload: dict) -> None:
         raise
 
 
-def _load_meta(workspace_path: Optional[str], conversation_id: str) -> dict | None:
-    path = _meta_path(workspace_path, conversation_id)
+def _load_meta(project: Optional[str], conversation_id: str) -> dict | None:
+    path = _meta_path(project, conversation_id)
     if not path.is_file():
         return None
     try:
@@ -126,15 +130,15 @@ def _load_meta(workspace_path: Optional[str], conversation_id: str) -> dict | No
         return None
 
 
-def _save_meta(workspace_path: Optional[str], conversation_id: str, meta: dict) -> None:
+def _save_meta(project: Optional[str], conversation_id: str, meta: dict) -> None:
     try:
-        _atomic_write(_meta_path(workspace_path, conversation_id), meta)
+        _atomic_write(_meta_path(project, conversation_id), meta)
     except Exception:
         logger.debug("Could not persist conversation meta", exc_info=True)
 
 
-def _load_history(workspace_path: Optional[str], conversation_id: str) -> list[dict] | None:
-    path = _history_path(workspace_path, conversation_id)
+def _load_history(project: Optional[str], conversation_id: str) -> list[dict] | None:
+    path = _history_path(project, conversation_id)
     if not path.is_file():
         return None
     try:
@@ -145,15 +149,14 @@ def _load_history(workspace_path: Optional[str], conversation_id: str) -> list[d
 
 
 def _ensure_meta(
-    workspace_path: Optional[str],
+    project: Optional[str],
     conversation_id: str,
-    *,
-    project_path: Optional[str] = None,
 ) -> dict:
-    meta = _load_meta(workspace_path, conversation_id)
+    meta = _load_meta(project, conversation_id)
     if meta:
         return meta
     now = datetime.now(timezone.utc).isoformat()
+    name, _ = projects_store.resolve_project(project)
     meta = {
         "id": conversation_id,
         "title": "",
@@ -161,21 +164,26 @@ def _ensure_meta(
         "preview": "",
         "created_at": now,
         "updated_at": now,
-        "project_path": project_path,
+        "project": name,
     }
-    _save_meta(workspace_path, conversation_id, meta)
+    _save_meta(project, conversation_id, meta)
     return meta
 
 
 def _update_meta_after_turn(
-    workspace_path: Optional[str],
+    project: Optional[str],
     conversation_id: str,
     history: list[dict],
 ) -> None:
-    meta = _load_meta(workspace_path, conversation_id) or {}
+    meta = _load_meta(project, conversation_id) or {}
     if not meta.get("created_at"):
         meta["created_at"] = datetime.now(timezone.utc).isoformat()
     meta["id"] = conversation_id
+    if not meta.get("project"):
+        try:
+            meta["project"], _ = projects_store.resolve_project(project)
+        except FileNotFoundError:
+            pass
     meta["turns"] = sum(1 for m in history if m.get("role") == "user")
     preview = ""
     for m in history:
@@ -189,7 +197,7 @@ def _update_meta_after_turn(
         if preview:
             meta["title"] = preview[:50] + ("..." if len(preview) > 50 else "")
     meta["updated_at"] = datetime.now(timezone.utc).isoformat()
-    _save_meta(workspace_path, conversation_id, meta)
+    _save_meta(project, conversation_id, meta)
 
 
 # ---------------------------------------------------------------------------
@@ -199,10 +207,10 @@ def _update_meta_after_turn(
 
 async def _build_chat_session(
     conversation_id: str,
-    workspace_path: Optional[str],
+    project: Optional[str],
     model: Optional[str],
 ):
-    """Build the same core runtime the Anton CLI uses, scoped to one workspace."""
+    """Build the same core runtime the Anton CLI uses, scoped to one project."""
     from anton.chat_session import build_runtime_context
     from anton.config.settings import AntonSettings
     from anton.context.self_awareness import SelfAwarenessContext
@@ -220,7 +228,7 @@ async def _build_chat_session(
     except Exception:  # pragma: no cover
         LocalDataVault = None
 
-    base = _workspace_base(workspace_path)
+    base = _project_base(project)
     settings = AntonSettings()
     settings.resolve_workspace(str(base))
     if model:
@@ -325,7 +333,7 @@ def _safe_error(exc: Exception) -> str:
 
 
 _live: dict[str, dict[str, Any]] = {}
-# entry shape: {"session": ChatSession, "workspace_path": str|None}
+# entry shape: {"session": ChatSession, "project": str|None}
 
 
 def list_live() -> list[str]:
@@ -354,7 +362,7 @@ def _evict_oldest() -> None:
 
 async def _resolve_session(
     conversation_id: str,
-    workspace_path: Optional[str],
+    project: Optional[str],
     model: Optional[str],
 ):
     if conversation_id in _live:
@@ -363,8 +371,8 @@ async def _resolve_session(
     if len(_live) >= MAX_CONVERSATIONS:
         _evict_oldest()
 
-    session = await _build_chat_session(conversation_id, workspace_path, model)
-    _live[conversation_id] = {"session": session, "workspace_path": workspace_path}
+    session = await _build_chat_session(conversation_id, project, model)
+    _live[conversation_id] = {"session": session, "project": project}
     return session
 
 
@@ -377,14 +385,16 @@ async def chat_stream(
     user_input: str,
     *,
     conversation_id: Optional[str] = None,
-    project_path: Optional[str] = None,
+    project: Optional[str] = None,
     model: Optional[str] = None,
 ) -> tuple[AsyncIterator, str]:
     """Run one turn against a conversation, returning (event_stream, conversation_id).
 
-    Raises AntonConfigurationError if Anton isn't installed or configuration
-    is incomplete; the caller is expected to map that to an SSE failed event.
-    Wraps mid-turn failures in AntonRuntimeError with secrets redacted.
+    `project` is a project name (folder under projects_store.projects_dir());
+    None resolves to the active project. Raises AntonConfigurationError if
+    Anton isn't installed or configuration is incomplete; the caller maps
+    that to an SSE failed event. Wraps mid-turn failures in AntonRuntimeError
+    with secrets redacted.
     """
     if not ANTON_AVAILABLE:
         raise AntonConfigurationError(
@@ -395,9 +405,9 @@ async def chat_stream(
     # so this module stays free of cowork-route imports.
 
     cid = conversation_id or _new_conversation_id()
-    _ensure_meta(project_path, cid, project_path=project_path)
+    _ensure_meta(project, cid)
 
-    session = await _resolve_session(cid, project_path, model)
+    session = await _resolve_session(cid, project, model)
 
     async def _stream() -> AsyncGenerator:
         try:
@@ -408,7 +418,7 @@ async def chat_stream(
             raise AntonRuntimeError(_safe_error(exc)) from exc
         finally:
             try:
-                _update_meta_after_turn(project_path, cid, session.history)
+                _update_meta_after_turn(project, cid, session.history)
             except Exception:
                 logger.debug("Could not update conversation meta", exc_info=True)
 
@@ -420,25 +430,32 @@ async def chat_stream(
 # ---------------------------------------------------------------------------
 
 
-def _candidate_episode_dirs() -> list[Path]:
-    """Where to look for conversations. Cwd workspace + global ~/.anton."""
-    seen: set[str] = set()
-    out: list[Path] = []
-    for base in (Path.cwd().resolve(), Path.home()):
+def _candidate_episode_dirs(project: Optional[str] = None) -> list[tuple[str, Path]]:
+    """Episode dirs to scan, paired with project name.
+
+    project=None     → every registered project
+    project="all"    → every registered project (alias)
+    project="<name>" → just that one (silent skip if missing)
+    """
+    if project and project != "all":
+        try:
+            name, base = projects_store.resolve_project(project)
+        except FileNotFoundError:
+            return []
         ep = base / ".anton" / "episodes"
-        s = str(ep)
-        if s in seen:
-            continue
-        seen.add(s)
+        return [(name, ep)] if ep.is_dir() else []
+    out: list[tuple[str, Path]] = []
+    for proj in projects_store.list_projects():
+        ep = Path(proj["path"]) / ".anton" / "episodes"
         if ep.is_dir():
-            out.append(ep)
+            out.append((proj["name"], ep))
     return out
 
 
-def list_conversations(limit: int = 200) -> list[dict]:
-    """Return conversation metadata across all known workspaces."""
+def list_conversations(limit: int = 200, project: Optional[str] = None) -> list[dict]:
+    """Return conversation metadata, optionally scoped to a project name."""
     out: list[dict] = []
-    for ep_dir in _candidate_episode_dirs():
+    for project_name, ep_dir in _candidate_episode_dirs(project):
         for path in ep_dir.iterdir():
             name = path.name
             if name.endswith("_meta.json"):
@@ -460,6 +477,8 @@ def list_conversations(limit: int = 200) -> list[dict]:
                 meta = {}
             if not meta.get("id"):
                 meta["id"] = cid
+            if not meta.get("project"):
+                meta["project"] = project_name
             # Backfill turns/preview from history if meta is sparse
             if not meta.get("turns") or not meta.get("preview"):
                 hist_path = ep_dir / f"{cid}_history.json"
@@ -486,24 +505,28 @@ def list_conversations(limit: int = 200) -> list[dict]:
     return out[:limit]
 
 
-def _find_conversation_dir(conversation_id: str) -> Path | None:
-    for ep_dir in _candidate_episode_dirs():
+def _find_conversation_dir(conversation_id: str) -> tuple[str, Path] | None:
+    """Return (project_name, episodes_dir) for a conversation id, if found."""
+    for project_name, ep_dir in _candidate_episode_dirs():
         if (ep_dir / f"{conversation_id}_meta.json").is_file():
-            return ep_dir
+            return project_name, ep_dir
         if (ep_dir / f"{conversation_id}_history.json").is_file():
-            return ep_dir
+            return project_name, ep_dir
     return None
 
 
 def get_conversation(conversation_id: str) -> dict | None:
-    ep = _find_conversation_dir(conversation_id)
-    if not ep:
+    located = _find_conversation_dir(conversation_id)
+    if not located:
         return None
+    project_name, ep = located
     meta_path = ep / f"{conversation_id}_meta.json"
     if meta_path.is_file():
         try:
             data = json.loads(meta_path.read_text(encoding="utf-8"))
             data["id"] = conversation_id
+            if not data.get("project"):
+                data["project"] = project_name
             return data
         except Exception:
             return None
@@ -528,7 +551,7 @@ def get_conversation(conversation_id: str) -> dict | None:
                     "preview": preview,
                     "created_at": "",
                     "updated_at": "",
-                    "project_path": None,
+                    "project": project_name,
                 }
         except Exception:
             return None
@@ -536,9 +559,10 @@ def get_conversation(conversation_id: str) -> dict | None:
 
 
 def get_messages(conversation_id: str) -> list[dict] | None:
-    ep = _find_conversation_dir(conversation_id)
-    if not ep:
+    located = _find_conversation_dir(conversation_id)
+    if not located:
         return None
+    _, ep = located
     hist_path = ep / f"{conversation_id}_history.json"
     if not hist_path.is_file():
         return []
@@ -550,9 +574,10 @@ def get_messages(conversation_id: str) -> list[dict] | None:
 
 
 def update_conversation(conversation_id: str, **patch) -> dict | None:
-    ep = _find_conversation_dir(conversation_id)
-    if not ep:
+    located = _find_conversation_dir(conversation_id)
+    if not located:
         return None
+    project_name, ep = located
     meta_path = ep / f"{conversation_id}_meta.json"
     meta: dict
     if meta_path.is_file():
@@ -567,6 +592,8 @@ def update_conversation(conversation_id: str, **patch) -> dict | None:
         if k in allowed and v is not None:
             meta[k] = v
     meta["id"] = conversation_id
+    if not meta.get("project"):
+        meta["project"] = project_name
     meta["updated_at"] = datetime.now(timezone.utc).isoformat()
     try:
         _atomic_write(meta_path, meta)
@@ -578,8 +605,9 @@ def update_conversation(conversation_id: str, **patch) -> dict | None:
 def delete_conversation(conversation_id: str) -> bool:
     """Delete history + meta. Closes live session if any."""
     found = False
-    ep = _find_conversation_dir(conversation_id)
-    if ep:
+    located = _find_conversation_dir(conversation_id)
+    if located:
+        _, ep = located
         for suffix in ("_meta.json", "_history.json"):
             p = ep / f"{conversation_id}{suffix}"
             if p.is_file():

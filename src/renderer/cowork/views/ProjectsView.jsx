@@ -16,25 +16,30 @@ function PageHeader({ title, subtitle, action }) {
 export default function ProjectsView({ projects, selectedProject, onSelectProject, onCreateProject }) {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
-  const [path, setPath] = useState('');
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
   const submit = async (e) => {
     e.preventDefault();
     if (!name.trim()) return;
     setBusy(true);
-    await onCreateProject?.({ name: name.trim(), path: path.trim() || undefined });
-    setBusy(false);
-    setCreating(false);
-    setName('');
-    setPath('');
+    setError('');
+    try {
+      await onCreateProject?.({ name: name.trim() });
+      setCreating(false);
+      setName('');
+    } catch (err) {
+      setError(err?.message || 'Could not create project');
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
     <div className="scroll-clean" style={{ flex: 1, overflowY: 'auto' }}>
       <PageHeader
         title="Projects"
-        subtitle="Group related tasks, files, and context. Anton remembers what's in each project."
+        subtitle="Workspaces Anton uses to group conversations, memory, and outputs."
         action={
           <button className="btn-primary" onClick={() => setCreating(true)}>
             {Ico.plus(14)} New project
@@ -49,7 +54,7 @@ export default function ProjectsView({ projects, selectedProject, onSelectProjec
           borderRadius: 10,
           background: 'var(--surface-0)',
           display: 'grid',
-          gridTemplateColumns: '1fr 1.4fr auto auto',
+          gridTemplateColumns: '1fr auto auto',
           gap: 10,
           alignItems: 'center',
         }}>
@@ -57,16 +62,14 @@ export default function ProjectsView({ projects, selectedProject, onSelectProjec
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Project name"
-            style={{ height: 34, border: '1px solid var(--border-01)', borderRadius: 7, padding: '0 10px', fontSize: 13 }}
-          />
-          <input
-            value={path}
-            onChange={(e) => setPath(e.target.value)}
-            placeholder="Parent folder, default ~/Projects"
+            autoFocus
             style={{ height: 34, border: '1px solid var(--border-01)', borderRadius: 7, padding: '0 10px', fontSize: 13 }}
           />
           <button className="btn-primary" disabled={busy}>{busy ? 'Creating' : 'Create'}</button>
-          <button type="button" className="icon-btn" onClick={() => setCreating(false)} title="Cancel">{Ico.chevLeft(14)}</button>
+          <button type="button" className="icon-btn" onClick={() => { setCreating(false); setError(''); }} title="Cancel">{Ico.chevLeft(14)}</button>
+          {error && (
+            <div style={{ gridColumn: '1 / -1', fontSize: 12, color: 'var(--danger-600, #b3261e)' }}>{error}</div>
+          )}
         </form>
       )}
       <div style={{
@@ -75,49 +78,51 @@ export default function ProjectsView({ projects, selectedProject, onSelectProjec
         gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
         gap: 14,
       }}>
-        {projects.map((p) => (
-          <button
-            key={p.id}
-            style={{
-              textAlign: 'left', background: 'var(--surface-0)',
-              border: `1px solid ${selectedProject?.path === p.path ? 'var(--primary-400)' : 'var(--border-01)'}`, borderRadius: 12,
-              padding: 16, cursor: 'pointer',
-              transition: 'border-color .15s, box-shadow .15s',
-              boxShadow: 'var(--shadow-sm)',
-              display: 'flex', flexDirection: 'column', gap: 12,
-              minHeight: 140,
-            }}
-            onClick={() => onSelectProject?.(p)}
-            onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--primary-300)'; }}
-            onMouseOut={(e) => { e.currentTarget.style.borderColor = selectedProject?.path === p.path ? 'var(--primary-400)' : 'var(--border-01)'; }}
-          >
-            <div style={{
-              width: 36, height: 36, borderRadius: 10,
-              background: p.tint, color: p.color,
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            }}>
-              {Ico.folder(18)}
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)', flex: 1 }}>{p.name}</div>
-                {selectedProject?.path === p.path && <span style={{ color: 'var(--primary-700)' }}>{Ico.check(14)}</span>}
+        {projects.map((p) => {
+          const isSelected = selectedProject?.name === p.name;
+          return (
+            <button
+              key={p.name}
+              style={{
+                textAlign: 'left', background: 'var(--surface-0)',
+                border: `1px solid ${isSelected ? 'var(--primary-400)' : 'var(--border-01)'}`, borderRadius: 12,
+                padding: 16, cursor: 'pointer',
+                transition: 'border-color .15s, box-shadow .15s',
+                boxShadow: 'var(--shadow-sm)',
+                display: 'flex', flexDirection: 'column', gap: 12,
+                minHeight: 120,
+              }}
+              onClick={() => onSelectProject?.(p)}
+              onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--primary-300)'; }}
+              onMouseOut={(e) => { e.currentTarget.style.borderColor = isSelected ? 'var(--primary-400)' : 'var(--border-01)'; }}
+            >
+              <div style={{
+                width: 36, height: 36, borderRadius: 10,
+                background: 'var(--stone-100)', color: 'var(--primary-700)',
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              }}>
+                {Ico.folder(18)}
               </div>
-              <div style={{ fontSize: 12, color: 'var(--frost-600)', marginTop: 2 }}>{p.description}</div>
-            </div>
-            <div style={{ flex: 1 }} />
-            <div style={{ display: 'flex', gap: 12, fontSize: 11.5, color: 'var(--frost-600)' }}>
-              <span>{p.taskCount} tasks</span>
-              <span>·</span>
-              <span>{p.fileCount} files</span>
-              <span style={{ flex: 1 }} />
-              <span>{p.updated}</span>
-            </div>
-          </button>
-        ))}
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)', flex: 1 }}>{p.name}</div>
+                  {isSelected && <span style={{ color: 'var(--primary-700)' }}>{Ico.check(14)}</span>}
+                </div>
+                <div style={{
+                  fontSize: 11.5,
+                  color: 'var(--frost-600)',
+                  marginTop: 4,
+                  fontFamily: 'var(--font-mono)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>{p.path}</div>
+              </div>
+            </button>
+          );
+        })}
       </div>
 
-      {/* Projects are workspace folders in Anton — show a hint */}
       <div style={{
         margin: '0 28px 28px',
         padding: '12px 16px',
@@ -132,9 +137,8 @@ export default function ProjectsView({ projects, selectedProject, onSelectProjec
       }}>
         <span style={{ display: 'inline-flex', color: 'var(--primary-700)', marginTop: 1 }}>{Ico.folder(14)}</span>
         <span>
-          <strong style={{ color: 'var(--text-strong)' }}>Anton projects</strong> are workspace folders containing an{' '}
-          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, background: 'var(--stone-150)', padding: '1px 5px', borderRadius: 4 }}>.anton/</code>{' '}
-          directory. Open a folder with Anton to add it here.
+          <strong style={{ color: 'var(--text-strong)' }}>Anton projects</strong> live under the app's data directory; each one
+          owns its conversations, memory, and generated files.
         </span>
       </div>
     </div>

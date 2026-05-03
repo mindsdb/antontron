@@ -84,7 +84,7 @@ export default function Sidebar({
         // easing + duration so the bubble feels like one continuous motion
         // rather than three separate transitions resolving at different
         // moments. willChange hints at GPU acceleration.
-        borderRadius: 14,
+        borderRadius: 5,
         boxShadow: '0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.05)',
         width: collapsed ? 0 : 'clamp(280px, 26vw, 320px)',
         opacity: collapsed ? 0 : 1,

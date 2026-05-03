@@ -34,13 +34,14 @@ async def search_cowork(q: str = "", limit: int = 25):
         return {"results": []}
 
     results: list[dict] = []
-    conversations = conversation_manager.list_conversations(limit=500)
+    conversations = conversation_manager.list_conversations(limit=500, project="all")
     for conv in conversations:
+        project_label = conv.get("project") or conv.get("project_path") or ""
         text = " ".join(
             [
                 conv.get("title") or "",
                 conv.get("preview") or "",
-                conv.get("project_path") or "",
+                project_label,
             ]
         )
         score = _score(text, query)
@@ -50,21 +51,22 @@ async def search_cowork(q: str = "", limit: int = 25):
                     "type": "task",
                     "id": conv["id"],
                     "title": conv.get("title") or "Untitled task",
-                    "subtitle": conv.get("project_path") or "Task",
+                    "subtitle": project_label or "Task",
                     "route": "task",
                     "score": score,
                 }
             )
 
-    for project in await list_projects():
-        text = " ".join([project.get("name") or "", project.get("path") or "", project.get("description") or ""])
+    project_listing = await list_projects()
+    for project in project_listing.get("projects", []):
+        text = " ".join([project.get("name") or "", project.get("path") or ""])
         score = _score(text, query)
         if score:
             results.append(
                 {
                     "type": "project",
-                    "id": project.get("path") or project.get("id"),
-                    "title": project.get("name") or project.get("path") or "Project",
+                    "id": project.get("name"),
+                    "title": project.get("name") or "Project",
                     "subtitle": project.get("path") or "Project",
                     "route": "project",
                     "score": score,

@@ -46,12 +46,13 @@ export default function HomeView({
 
   return (
     <div
-      className={showDots ? 'dot-canvas' : ''}
       style={{
         flex: 1, overflow: 'auto',
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         padding: '0 40px 60px',
-        background: '#fff',
+        // Transparent — the gravity-field canvas mounted at the body
+        // level shows through. The composer + greeting float above.
+        background: 'transparent',
       }}
     >
       <div style={{ flex: '0 0 auto', height: '14vh', minHeight: 60 }} />
