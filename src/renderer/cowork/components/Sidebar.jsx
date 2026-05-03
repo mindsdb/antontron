@@ -174,7 +174,7 @@ export default function Sidebar({
           <NavItem icon={Ico.folder(15)}  label="Projects"      onClick={() => onNavigate('projects')}  active={activeRoute === 'projects'} />
           <NavItem icon={Ico.clock(15)}   label="Scheduled"     onClick={() => onNavigate('scheduled')} active={activeRoute === 'scheduled'} badge={scheduledCount || null} />
           <NavItem icon={Ico.sparkle(15)} label="Live artifacts" onClick={() => onNavigate('artifacts')} active={activeRoute === 'artifacts'} />
-          <NavItem icon={Ico.phone(15)}   label="Dispatch"      onClick={() => onNavigate('dispatch')}  active={activeRoute === 'dispatch'} badge="Beta" />
+          {/* Dispatch hidden until the feature ships */}
           <NavItem icon={Ico.slider(15)}  label="Customize"     onClick={() => onNavigate('customize')} active={activeRoute === 'customize'} />
           <NavItem icon={Ico.settings(15)} label="Settings"     onClick={() => onNavigate('settings')}  active={activeRoute === 'settings'} />
         </div>

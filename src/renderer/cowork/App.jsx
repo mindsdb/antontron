@@ -584,7 +584,16 @@ function AppCore() {
     : models;
 
   return (
-    <div style={{ ...appStyle, ...accentCss, display: 'flex', gap: 9, padding: 9, position: 'relative' }}>
+    <div style={{
+      ...appStyle, ...accentCss,
+      display: 'flex', gap: 9, padding: 9,
+      position: 'relative',
+      // Make the whole window draggable. Buttons/inputs/textareas stay
+      // clickable via the global `no-drag` rule in globals.css. Scrollable
+      // surfaces, <main>, the composer, etc. opt out below so they don't
+      // intercept drag on their own surface.
+      WebkitAppRegion: 'drag',
+    }}>
       {/*
         Floating hamburger — visible when the sidebar is collapsed. Sits
         right of the macOS traffic lights (window-x=14, so left=88 clears

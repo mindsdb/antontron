@@ -241,7 +241,28 @@ input, textarea { font-family: inherit; }
 
 #root { width: 100%; height: 100%; }
 .drag-region { -webkit-app-region: drag; }
-button, input, textarea, select { -webkit-app-region: no-drag; }
+/* Default everything to draggable — the window-shell sets drag on the
+   outermost container so the user can pick the window up from any
+   visual surface (sidebar gaps, content panels, the gravity-field
+   bands at the edges, etc.). */
+
+/* Form controls + interactive surfaces explicitly opt OUT so clicks,
+   text selection, and scrolling work. The composer + chat area + modals
+   are real interactive surfaces; everything else stays draggable. */
+button, input, textarea, select,
+a[href],
+[role="button"],
+[role="tab"],
+[role="link"],
+[contenteditable="true"],
+.composer-wrap,
+.composer-textarea,
+.modal,
+.search-modal,
+.field-input,
+.field-textarea {
+  -webkit-app-region: no-drag;
+}
 
 /* ─── Scrollbars ─────────────────────────────────────────────────────────── */
 .scroll-clean::-webkit-scrollbar { width: 8px; height: 8px; }
