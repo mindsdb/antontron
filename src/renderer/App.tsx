@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import TermsConsent from './pages/TermsConsent';
 import Setup from './pages/Setup';
 import Onboarding from './pages/Onboarding';
-import Terminal from './pages/Terminal';
+import CoworkApp from './CoworkApp';
 import './styles.css';
 
 type Page = 'loading' | 'terms' | 'setup' | 'onboarding' | 'launching' | 'terminal';
@@ -107,7 +107,7 @@ export default function App() {
         </div>
       )}
 
-      {page === 'terminal' && <Terminal />}
+      {page === 'terminal' && <CoworkApp />}
     </>
   );
 }

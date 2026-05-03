@@ -41,12 +41,12 @@ function getBundledRendererPath(): string {
   return path.join(__dirname, '..', '..', 'renderer', 'index.html');
 }
 
-/** Returns the index.html path to load — cached UI if valid, otherwise bundled. */
+/** Returns the index.html path to load — bundled only.
+ *  UI auto-updater is disabled while we iterate on the cowork-derived
+ *  renderer; previously this returned a cached download from
+ *  mindsdb.github.io which would mask local builds.
+ */
 export function getRendererPath(): string {
-  const cached = path.join(getCurrentDir(), 'index.html');
-  if (fs.existsSync(cached)) {
-    return cached;
-  }
   return getBundledRendererPath();
 }
 
@@ -124,60 +124,13 @@ async function extractTarGz(buf: Buffer, targetDir: string): Promise<void> {
  * so it's ready on next launch. Returns true if a new version was downloaded.
  */
 export async function checkForUIUpdate(): Promise<boolean> {
-  try {
-    const manifest = await fetchManifest();
-    if (!manifest) return false;
-
-    const cached = getCachedVersion();
-    if (cached === manifest.version) return false;
-
-    console.log(`[ui-updater] New UI version available: ${manifest.version} (current: ${cached || 'bundled'})`);
-
-    // Download the bundle
-    const res = await httpsGet(manifest.url);
-    if (res.statusCode !== 200) {
-      console.log(`[ui-updater] Download failed: HTTP ${res.statusCode}`);
-      return false;
-    }
-
-    // Verify checksum
-    const hash = sha256(res.body);
-    if (hash !== manifest.sha256) {
-      console.log(`[ui-updater] Checksum mismatch: expected ${manifest.sha256}, got ${hash}`);
-      return false;
-    }
-
-    // Extract to staging
-    const staging = getStagingDir();
-    rmDir(staging);
-    await extractTarGz(res.body, staging);
-
-    // Verify index.html exists in the extracted bundle
-    if (!fs.existsSync(path.join(staging, 'index.html'))) {
-      console.log('[ui-updater] Extracted bundle missing index.html');
-      rmDir(staging);
-      return false;
-    }
-
-    // Atomic swap: current → previous, staging → current
-    const current = getCurrentDir();
-    const previous = getPreviousDir();
-
-    rmDir(previous);
-    if (fs.existsSync(current)) {
-      fs.renameSync(current, previous);
-    }
-    fs.renameSync(staging, current);
-
-    // Write version marker
-    fs.writeFileSync(getVersionFile(), JSON.stringify({ version: manifest.version }), 'utf-8');
-
-    console.log(`[ui-updater] Updated to ${manifest.version}`);
-    return true;
-  } catch (err: any) {
-    console.log(`[ui-updater] Update check failed: ${err.message}`);
-    return false;
-  }
+  // UI auto-updater is disabled while we iterate on the cowork-derived
+  // renderer. Previously this fetched a manifest from
+  // https://mindsdb.github.io/antontron-releases/latest.json and downloaded
+  // a tarball that masked locally-bundled changes. Re-enable when the
+  // renderer ships and we want hot UI updates again. See getRendererPath()
+  // above — it now always returns the bundled UI.
+  return false;
 }
 
 /** Roll back to previous cached version or bundled UI. */

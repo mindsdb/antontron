@@ -6,6 +6,7 @@ import * as https from 'https';
 import * as http from 'http';
 import { IPC } from '../shared/ipc-channels';
 import { checkAntonInstalled, runInstaller } from './installer';
+import { startServer, stopServer, isServerRunning, getServerPort } from './server-process';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
 import { sendEvent } from './analytics';
 import { getRendererPath, checkForUIUpdate, getCachedVersion } from './ui-updater';
@@ -408,6 +409,11 @@ function createWindow() {
     minHeight: 500,
     icon,
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    // Embed the macOS traffic lights inside the sidebar header. The sidebar
+    // floats with a 4px outer margin, so its top-left is at (4,4) in window
+    // coordinates. y:18 puts the traffic lights ~14px below the sidebar top
+    // edge, vertically aligned with the search field next to them.
+    trafficLightPosition: process.platform === 'darwin' ? { x: 14, y: 18 } : undefined,
     backgroundColor: '#0a0a0f',
     show: false,
     webPreferences: {
@@ -415,6 +421,12 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: false, // needed for node-pty
+      // Disable Chromium's same-origin/mixed-content checks so the renderer
+      // (loaded from file://) can fetch http://127.0.0.1:<antonPort>/v1/*.
+      // Safe in this context: app is local, network calls only target the
+      // loopback python server we spawn ourselves. CSP in index.html still
+      // allowlists the exact origins for defense in depth.
+      webSecurity: false,
     },
   });
 
@@ -471,6 +483,8 @@ function setupIPC() {
     const state = { cancelled: false };
     activeInstall = state;
     try {
+      // runInstaller now also spins up the python server as its final
+      // visible step (so the install screen shows "Start Anton server").
       return await runInstaller(mainWindow, { shouldAbort: () => state.cancelled });
     } finally {
       if (activeInstall === state) {
@@ -478,6 +492,13 @@ function setupIPC() {
       }
     }
   });
+
+  // Renderer can ask main where the server lives.
+  ipcMain.handle('server:get-info', () => ({
+    running: isServerRunning(),
+    port: getServerPort(),
+    origin: `http://127.0.0.1:${getServerPort()}`,
+  }));
 
   ipcMain.handle(IPC.INSTALL_CANCEL, async () => {
     if (!activeInstall) return false;
@@ -923,6 +944,21 @@ app.whenReady().then(() => {
   startEnvWatcher();
   createWindow();
 
+  // If anton is already installed (returning user), start the bundled
+  // python server in the background. Skips silently if anton isn't
+  // installed yet — the installer will start it after install completes.
+  checkAntonInstalled().then(async (installed) => {
+    if (!installed) return;
+    const result = await startServer();
+    if (!result.ok) {
+      console.error(`[server] start failed: ${result.reason}`);
+    } else {
+      console.log(`[server] running on http://127.0.0.1:${result.port}`);
+    }
+  }).catch((err) => {
+    console.error('[server] check-and-start failed:', err);
+  });
+
   // Check for UI updates in the background — only in packaged builds
   if (app.isPackaged) {
     checkForUIUpdate().then((updated) => {
@@ -940,5 +976,10 @@ app.whenReady().then(() => {
 app.on('window-all-closed', () => {
   fs.unwatchFile(getAntonEnvPath());
   killAnton();
+  stopServer();
   app.quit();
+});
+
+app.on('before-quit', () => {
+  stopServer();
 });

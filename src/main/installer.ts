@@ -24,8 +24,9 @@ function getSteps(): InstallStep[] {
   steps.push(
     { id: 'git', label: 'Check for git (required)', status: 'pending' },
     { id: 'uv', label: 'Install uv (Python package manager)', status: 'pending' },
-    { id: 'anton', label: 'Install Anton', status: 'pending' },
+    { id: 'anton', label: 'Install Anton (with server extras)', status: 'pending' },
     { id: 'verify', label: 'Verify installation', status: 'pending' },
+    { id: 'server', label: 'Start Anton server', status: 'pending' },
   );
   return steps;
 }
@@ -373,15 +374,22 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     }
     setStep('uv', 'done');
 
-    // Step 3: Install Anton
+    // Step 3: Install Anton (with fastapi + uvicorn so the bundled server runs)
     if (abortIfRequested()) return false;
     setStep('anton', 'running');
-    sendLog(win, '\n--- Installing Anton ---\n');
+    sendLog(win, '\n--- Installing Anton (with server extras) ---\n');
 
     const uvBin = fileExists(getUvBinary()) ? getUvBinary() : 'uv';
     const installResult = await runCommand(
       uvBin,
-      ['tool', 'install', 'git+https://github.com/mindsdb/anton.git', '--force'],
+      [
+        'tool', 'install',
+        'git+https://github.com/mindsdb/anton.git',
+        '--with', 'fastapi',
+        '--with', 'uvicorn[standard]',
+        '--with', 'python-multipart',
+        '--force',
+      ],
       win,
       { shouldAbort }
     );
@@ -409,6 +417,29 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     }
     sendLog(win, 'Anton is ready!\n');
     setStep('verify', 'done');
+
+    // Step 5: Start the bundled FastAPI server (server/main.py) using the
+    // python interpreter uv just installed. Failure here doesn't roll back
+    // the install — anton itself is fine. The server can be retried later
+    // by re-launching the app.
+    if (abortIfRequested()) return false;
+    setStep('server', 'running');
+    sendLog(win, '\n--- Starting Anton server ---\n');
+    try {
+      const { startServer } = await import('./server-process');
+      const result = await startServer();
+      if (result.ok) {
+        sendLog(win, `Anton server running on http://127.0.0.1:${result.port}\n`);
+        setStep('server', 'done');
+      } else {
+        sendLog(win, `WARNING: server did not start: ${result.reason}\n`);
+        sendLog(win, 'You can retry by re-launching the app.\n');
+        setStep('server', 'warning');
+      }
+    } catch (err: any) {
+      sendLog(win, `WARNING: server start threw: ${err.message}\n`);
+      setStep('server', 'warning');
+    }
 
     sendEvent('ANTONAPP_INSTALLATION_SUCCESS');
     if (canSend(win)) {

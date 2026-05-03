@@ -1,0 +1,548 @@
+import { useEffect, useState } from 'react';
+import Ico from '../components/Icons';
+import {
+  deleteDatasource,
+  deleteMemory,
+  deleteSkill,
+  fetchDatasources,
+  fetchMemory,
+  fetchPublishable,
+  fetchSkills,
+  publishArtifact,
+  saveDatasource,
+  saveMemory,
+  saveSkill,
+  validateDatasource,
+} from '../api';
+
+const TITLES = {
+  memory: ['Memory', 'Rules, lessons, identity notes, and saved episodes Anton can reuse.'],
+  skills: ['Skills library', 'Saved Anton skills and recall guidance.'],
+  connect: ['Connect data', 'Credential maps saved to Anton’s local data vault.'],
+  publish: ['Publish', 'HTML artifacts Anton can publish with Minds credentials.'],
+};
+
+function PageHeader({ title, subtitle }) {
+  return (
+    <div className="page-header">
+      <div style={{ flex: 1 }}>
+        <h2 className="page-title">{title}</h2>
+        {subtitle && <div style={{ fontSize: 13, color: 'var(--frost-600)', marginTop: 4 }}>{subtitle}</div>}
+      </div>
+    </div>
+  );
+}
+
+function EmptyState({ children }) {
+  return <div style={{ padding: 32, color: 'var(--frost-600)', fontSize: 13 }}>{children}</div>;
+}
+
+function credentialTemplate(engineDef) {
+  return Object.fromEntries(activeCredentialFields(engineDef).map((field) => [field.name, field.default || '']));
+}
+
+function activeAuthMethod(engineDef, authMethod) {
+  const methods = engineDef?.authMethods || [];
+  if (!methods.length) return null;
+  return methods.find((method) => method.name === authMethod) || methods[0];
+}
+
+function activeCredentialFields(engineDef, authMethod) {
+  const method = activeAuthMethod(engineDef, authMethod);
+  return method?.fields || engineDef?.fields || [];
+}
+
+function fieldLabel(name) {
+  return String(name || '').replace(/_/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function isLongField(field) {
+  return /json|private_key|certificate|token_secret|session_configuration/i.test(field.name || '');
+}
+
+function shouldUseTextarea(field) {
+  return isLongField(field) && !field.secret;
+}
+
+export default function UtilitiesView({ kind, project, onRefreshArtifacts }) {
+  const [data, setData] = useState(null);
+  const [selected, setSelected] = useState(null);
+  const [status, setStatus] = useState('');
+
+  useEffect(() => {
+    setData(null);
+    setSelected(null);
+    setStatus('');
+    if (kind === 'memory') fetchMemory(project?.path).then(setData).catch((err) => setStatus(err.message));
+    if (kind === 'skills') fetchSkills().then(setData).catch((err) => setStatus(err.message));
+    if (kind === 'connect') fetchDatasources().then(setData).catch((err) => setStatus(err.message));
+    if (kind === 'publish') fetchPublishable().then(setData).catch((err) => setStatus(err.message));
+  }, [kind, project?.path]);
+
+  const [title, subtitle] = TITLES[kind] || ['Anton utility', ''];
+
+  return (
+    <div className="scroll-clean" style={{ flex: 1, overflowY: 'auto' }}>
+      <PageHeader title={title} subtitle={subtitle} />
+      {status && <div style={{ margin: '16px 28px 0', color: '#8F321A', fontSize: 12.5 }}>{status}</div>}
+      {!data ? <EmptyState>Loading…</EmptyState> : null}
+      {data && kind === 'memory' && (
+        <MemoryView
+          data={data}
+          selected={selected}
+          onSelect={setSelected}
+          project={project}
+          setData={setData}
+          setStatus={setStatus}
+        />
+      )}
+      {data && kind === 'skills' && (
+        <SkillsView
+          data={data}
+          selected={selected}
+          onSelect={setSelected}
+          onSaved={() => fetchSkills().then(setData)}
+          onDeleted={(label) => setData((prev) => ({ ...prev, skills: (prev.skills || []).filter((s) => s.label !== label) }))}
+          setStatus={setStatus}
+        />
+      )}
+      {data && kind === 'connect' && <ConnectView data={data} setData={setData} setStatus={setStatus} />}
+      {data && kind === 'publish' && <PublishView data={data} setData={setData} setStatus={setStatus} onRefreshArtifacts={onRefreshArtifacts} />}
+    </div>
+  );
+}
+
+function MemoryView({ data, selected, onSelect, project, setData, setStatus }) {
+  const sections = Array.isArray(data?.sections) ? data.sections : [];
+  const files = sections.flatMap((section) => (
+    Array.isArray(section.files)
+      ? section.files.map((file) => ({ ...file, scope: section.scope }))
+      : []
+  ));
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState({ scope: 'Global', relativePath: '', content: '' });
+
+  const refresh = async () => {
+    const latest = await fetchMemory(project?.path);
+    setData(latest);
+  };
+
+  const startNew = () => {
+    const scope = project?.path ? 'Project' : 'Global';
+    setEditing('new');
+    setDraft({ scope, relativePath: '', content: '' });
+    onSelect(null);
+  };
+
+  const startEdit = (file) => {
+    setEditing('edit');
+    setDraft({ scope: file.scope || 'Global', relativePath: file.relativePath, content: file.content || file.preview || '' });
+    onSelect(file);
+  };
+
+  const save = async () => {
+    if (!draft.relativePath.trim()) {
+      setStatus('Choose a Markdown path for this memory file.');
+      return;
+    }
+    try {
+      await saveMemory({
+        scope: draft.scope,
+        relativePath: draft.relativePath,
+        content: draft.content,
+        projectPath: draft.scope === 'Project' ? project?.path : null,
+      });
+      setStatus(`Saved memory file ${draft.relativePath}.`);
+      setEditing(null);
+      await refresh();
+    } catch (err) {
+      setStatus(err.message || 'Could not save memory file.');
+    }
+  };
+
+  const remove = async (file) => {
+    if (!window.confirm(`Delete memory file "${file.relativePath}"? A backup will be kept.`)) return;
+    try {
+      await deleteMemory({
+        scope: file.scope || 'Global',
+        relativePath: file.relativePath,
+        projectPath: file.scope === 'Project' ? project?.path : null,
+      });
+      setStatus(`Deleted memory file ${file.relativePath}.`);
+      onSelect(null);
+      await refresh();
+    } catch (err) {
+      setStatus(err.message || 'Could not delete memory file.');
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '280px 1fr', minHeight: 0 }}>
+      <div style={{ padding: 20, borderRight: '1px solid var(--border-0)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button className="btn-primary" onClick={startNew} style={{ marginBottom: 8 }}>{Ico.plus(14)} New memory</button>
+        {files.map((file) => (
+          <button key={file.path} className={`recent-item${selected?.path === file.path ? ' active' : ''}`} onClick={() => onSelect(file)} style={{ height: 'auto', minHeight: 34, padding: '8px 10px' }}>
+            <span style={{ color: 'var(--primary-700)', display: 'inline-flex' }}>{Ico.doc(14)}</span>
+            <span style={{ flex: 1, whiteSpace: 'normal' }}>{file.scope}: {file.relativePath}</span>
+          </button>
+        ))}
+        {!files.length && <EmptyState>No Anton memory files found.</EmptyState>}
+      </div>
+      <div style={{ padding: 24 }}>
+        {editing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: 8 }}>
+              <select value={draft.scope} onChange={(e) => setDraft((prev) => ({ ...prev, scope: e.target.value }))} style={inputStyle}>
+                <option value="Global">Global</option>
+                <option value="Project" disabled={!project?.path}>Project</option>
+              </select>
+              <input value={draft.relativePath} onChange={(e) => setDraft((prev) => ({ ...prev, relativePath: e.target.value }))} placeholder="topics/customer-notes.md" style={inputStyle} />
+            </div>
+            <textarea value={draft.content} onChange={(e) => setDraft((prev) => ({ ...prev, content: e.target.value }))} rows={18} style={{ ...inputStyle, height: 'auto', padding: 10, fontFamily: 'var(--font-mono)', userSelect: 'text' }} />
+            <div className="dialog-actions">
+              <button className="secondary-btn" onClick={() => setEditing(null)}>Cancel</button>
+              <button className="primary-btn" onClick={save}>Save memory</button>
+            </div>
+          </div>
+        ) : selected ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--text-strong)' }}>{selected.relativePath}</div>
+                <div style={{ fontSize: 12, color: 'var(--frost-600)' }}>{selected.scope}</div>
+              </div>
+              <button className="btn-secondary" onClick={() => startEdit(selected)}>Edit</button>
+              <button className="btn-secondary" onClick={() => remove(selected)}>Delete</button>
+            </div>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', userSelect: 'text', fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.55 }}>{selected.content || selected.preview}</pre>
+          </>
+        ) : (
+          <EmptyState>Select a memory file to inspect it.</EmptyState>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SkillsView({ data, selected, onSelect, onSaved, onDeleted, setStatus }) {
+  const skills = data.skills || [];
+  const emptyDraft = { label: '', name: '', description: '', whenToUse: '', declarative: '' };
+  const [editing, setEditing] = useState(null);
+  const [draft, setDraft] = useState(emptyDraft);
+
+  const remove = async (skill) => {
+    if (!window.confirm(`Remove skill "${skill.name}"?`)) return;
+    try {
+      await deleteSkill(skill.label);
+      onDeleted(skill.label);
+      onSelect(null);
+      setStatus(`Removed ${skill.name}.`);
+    } catch (err) {
+      setStatus(err.message || 'Could not remove skill.');
+    }
+  };
+
+  const startNew = () => {
+    setEditing('new');
+    setDraft(emptyDraft);
+    onSelect(null);
+  };
+
+  const startEdit = (skill) => {
+    setEditing('edit');
+    setDraft({
+      label: skill.label || '',
+      name: skill.name || '',
+      description: skill.description || '',
+      whenToUse: skill.whenToUse || '',
+      declarative: skill.declarative || '',
+    });
+    onSelect(skill);
+  };
+
+  const save = async () => {
+    try {
+      await saveSkill(draft);
+      setStatus(`Saved skill ${draft.name || draft.label}.`);
+      setEditing(null);
+      await onSaved?.();
+    } catch (err) {
+      setStatus(err.message || 'Could not save skill.');
+    }
+  };
+
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: 0 }}>
+      <div style={{ padding: 20, borderRight: '1px solid var(--border-0)', display: 'flex', flexDirection: 'column', gap: 6 }}>
+        <button className="btn-primary" onClick={startNew} style={{ marginBottom: 8 }}>{Ico.plus(14)} New skill</button>
+        {skills.map((skill) => (
+          <button key={skill.label} className={`recent-item${selected?.label === skill.label ? ' active' : ''}`} onClick={() => onSelect(skill)} style={{ height: 'auto', minHeight: 38, padding: '8px 10px' }}>
+            <span style={{ color: 'var(--primary-700)', display: 'inline-flex' }}>{Ico.brain(14)}</span>
+            <span style={{ flex: 1, whiteSpace: 'normal' }}>{skill.name}</span>
+          </button>
+        ))}
+        {!skills.length && <EmptyState>No saved Anton skills found.</EmptyState>}
+      </div>
+      <div style={{ padding: 24 }}>
+        {editing ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '180px 1fr', gap: 8 }}>
+              <input value={draft.label} onChange={(e) => setDraft((prev) => ({ ...prev, label: e.target.value }))} placeholder="skill_label" style={inputStyle} disabled={editing === 'edit'} />
+              <input value={draft.name} onChange={(e) => setDraft((prev) => ({ ...prev, name: e.target.value }))} placeholder="Skill name" style={inputStyle} />
+            </div>
+            <input value={draft.description} onChange={(e) => setDraft((prev) => ({ ...prev, description: e.target.value }))} placeholder="Short description" style={inputStyle} />
+            <input value={draft.whenToUse} onChange={(e) => setDraft((prev) => ({ ...prev, whenToUse: e.target.value }))} placeholder="When Anton should use this skill" style={inputStyle} />
+            <textarea value={draft.declarative} onChange={(e) => setDraft((prev) => ({ ...prev, declarative: e.target.value }))} rows={16} placeholder="Skill instructions..." style={{ ...inputStyle, height: 'auto', padding: 10, fontFamily: 'var(--font-mono)', userSelect: 'text' }} />
+            <div className="dialog-actions">
+              <button className="secondary-btn" onClick={() => setEditing(null)}>Cancel</button>
+              <button className="primary-btn" disabled={!draft.label.trim() || !draft.name.trim() || !draft.declarative.trim()} onClick={save}>Save skill</button>
+            </div>
+          </div>
+        ) : selected ? (
+          <>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 15, fontWeight: 650, color: 'var(--text-strong)' }}>{selected.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--frost-600)' }}>{selected.label}</div>
+              </div>
+              <button className="btn-secondary" onClick={() => startEdit(selected)}>Edit</button>
+              <button className="btn-secondary" onClick={() => remove(selected)}>Remove</button>
+            </div>
+            {selected.description && <p style={{ margin: '0 0 12px', fontSize: 13.5, color: 'var(--frost-700)' }}>{selected.description}</p>}
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', userSelect: 'text', fontFamily: 'var(--font-mono)', fontSize: 12.5, lineHeight: 1.55 }}>{selected.declarative}</pre>
+          </>
+        ) : (
+          <EmptyState>Select a skill to inspect it.</EmptyState>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConnectView({ data, setData, setStatus }) {
+  const firstEngine = data.engines?.[0]?.engine || '';
+  const initialEngine = (data.engines || []).find((item) => item.engine === firstEngine);
+  const [engine, setEngine] = useState(firstEngine);
+  const [authMethod, setAuthMethod] = useState(activeAuthMethod(initialEngine)?.name || '');
+  const [name, setName] = useState('');
+  const [credentialValues, setCredentialValues] = useState(credentialTemplate(initialEngine));
+  const [validation, setValidation] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [busyAction, setBusyAction] = useState('');
+
+  const engineDef = (data.engines || []).find((item) => item.engine === engine);
+  const fields = activeCredentialFields(engineDef, authMethod);
+  const selectedAuth = activeAuthMethod(engineDef, authMethod);
+
+  const setEngineAndTemplate = (value) => {
+    setEngine(value);
+    const selected = (data.engines || []).find((item) => item.engine === value);
+    const nextAuth = activeAuthMethod(selected)?.name || '';
+    setAuthMethod(nextAuth);
+    setCredentialValues(credentialTemplate(selected));
+    setValidation('');
+    setStatus('');
+  };
+
+  const setAuthAndTemplate = (value) => {
+    setAuthMethod(value);
+    const method = activeAuthMethod(engineDef, value);
+    setCredentialValues(Object.fromEntries((method?.fields || []).map((field) => [field.name, field.default || ''])));
+    setValidation('');
+    setStatus('');
+  };
+
+  const credentialsForSubmit = () => {
+    const known = Object.fromEntries(fields.map((field) => [field.name, credentialValues[field.name] ?? '']));
+    return known;
+  };
+
+  const updateCredential = (field, value) => {
+    setCredentialValues((prev) => ({ ...prev, [field.name]: value }));
+    setValidation('');
+  };
+
+  const validate = async () => {
+    const credentials = credentialsForSubmit();
+    try {
+      setBusy(true);
+      setBusyAction('check');
+      const result = await validateDatasource({ engine, name, authMethod: authMethod || null, credentials });
+      setValidation(result.message || 'Credential shape checked.');
+      if (result.missingFields?.length) {
+        setStatus(`Missing required fields: ${result.missingFields.join(', ')}`);
+      } else {
+        setStatus('Required fields are present. Save this connection to make it available to Anton tasks.');
+      }
+    } catch (err) {
+      setValidation('');
+      setStatus(err.message || 'Could not validate datasource credentials.');
+    } finally {
+      setBusy(false);
+      setBusyAction('');
+    }
+  };
+
+  const save = async (e) => {
+    e.preventDefault();
+    setStatus('');
+    const credentials = credentialsForSubmit();
+    try {
+      setBusy(true);
+      setBusyAction('save');
+      await validateDatasource({ engine, name, authMethod: authMethod || null, credentials });
+      const saved = await saveDatasource({ engine, name, authMethod: authMethod || null, credentials });
+      const latest = await fetchDatasources();
+      setData(latest);
+      setStatus(`Saved ${saved.slug || `${engine}-${saved.name || name}`} to Anton's data vault.`);
+      if (!name.trim() && saved.name) setName(saved.name);
+    } catch (err) {
+      setStatus(err.message || 'Could not save datasource connection.');
+    } finally {
+      setBusy(false);
+      setBusyAction('');
+    }
+  };
+
+  const remove = async (conn) => {
+    if (!window.confirm(`Remove datasource "${conn.engine}/${conn.name}"?`)) return;
+    try {
+      await deleteDatasource(conn.engine, conn.name);
+      const latest = await fetchDatasources();
+      setData(latest);
+      setStatus(`Removed ${conn.engine}/${conn.name}.`);
+    } catch (err) {
+      setStatus(err.message || 'Could not remove datasource connection.');
+    }
+  };
+
+  return (
+    <div style={{ padding: 28, display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24 }}>
+      <div>
+        <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-strong)', marginBottom: 10 }}>Saved connections</div>
+        {(data.connections || []).length ? (data.connections || []).map((conn) => (
+          <div key={`${conn.engine}-${conn.name}`} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0', borderBottom: '1px solid var(--border-0)', fontSize: 13 }}>
+            <div style={{ flex: 1 }}>
+              <strong style={{ color: 'var(--text-strong)' }}>{conn.displayName || conn.engine}</strong> / {conn.name}
+              <div style={{ fontSize: 11.5, color: 'var(--frost-600)' }}>{conn.testAvailable ? 'Ready for Anton datasource tools' : 'Saved in Anton data vault'}</div>
+            </div>
+            <button className="btn-secondary" onClick={() => remove(conn)}>Remove</button>
+          </div>
+        )) : <EmptyState>No data vault connections found.</EmptyState>}
+      </div>
+      <form onSubmit={save} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <select value={engine} onChange={(e) => setEngineAndTemplate(e.target.value)} style={inputStyle}>
+          {(data.engines || []).map((item) => <option key={item.engine} value={item.engine}>{item.displayName}</option>)}
+        </select>
+        {(engineDef?.authMethods || []).length > 0 && (
+          <select value={selectedAuth?.name || ''} onChange={(e) => setAuthAndTemplate(e.target.value)} style={inputStyle}>
+            {(engineDef.authMethods || []).map((method) => <option key={method.name} value={method.name}>{method.display}</option>)}
+          </select>
+        )}
+        <input value={name} onChange={(e) => setName(e.target.value)} placeholder="connection name (optional)" style={inputStyle} />
+        {fields.length > 0 && (
+          <div style={{ fontSize: 11.5, color: 'var(--frost-600)' }}>
+            Required: {fields.filter((field) => field.required).map((field) => field.name).join(', ') || 'none'}
+          </div>
+        )}
+        {fields.length ? fields.map((field) => (
+          <label key={field.name} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-strong)' }}>
+              {fieldLabel(field.name)}{field.required ? ' *' : ''}
+            </span>
+            {shouldUseTextarea(field) ? (
+              <textarea
+                value={credentialValues[field.name] ?? ''}
+                onChange={(event) => updateCredential(field, event.target.value)}
+                rows={4}
+                placeholder={field.description || field.default || ''}
+                spellCheck={false}
+                style={{ ...inputStyle, height: 'auto', padding: 10, fontFamily: 'var(--font-mono)', userSelect: 'text' }}
+              />
+            ) : (
+              <input
+                value={credentialValues[field.name] ?? ''}
+                onChange={(event) => updateCredential(field, event.target.value)}
+                type={field.secret ? 'password' : 'text'}
+                placeholder={field.description || field.default || ''}
+                style={inputStyle}
+              />
+            )}
+            {field.description && <small style={{ fontSize: 11.5, color: 'var(--frost-600)' }}>{field.description}</small>}
+          </label>
+        )) : (
+          <div style={{ padding: 12, border: '1px solid var(--border-01)', borderRadius: 8, color: 'var(--frost-600)', fontSize: 12.5 }}>
+            This engine does not expose editable credential fields in the installed Anton registry.
+          </div>
+        )}
+        {validation && <div style={{ fontSize: 12, color: 'var(--frost-700)' }}>{validation}</div>}
+        <button type="button" className="btn-secondary" disabled={!engine.trim() || busy} onClick={validate}>
+          {busyAction === 'check' ? 'Checking' : 'Check fields'}
+        </button>
+        <button className="btn-primary" disabled={!engine.trim() || busy}>
+          {busyAction === 'save' ? 'Saving' : 'Save connection'}
+        </button>
+      </form>
+    </div>
+  );
+}
+
+function PublishView({ data, setData, setStatus, onRefreshArtifacts }) {
+  const publish = async (artifact) => {
+    try {
+      setStatus('Publishing…');
+      const result = await publishArtifact(artifact.path);
+      setStatus(result.url ? `Published: ${result.url}` : 'Published.');
+      const latest = await fetchPublishable();
+      setData(latest);
+      onRefreshArtifacts?.();
+    } catch (err) {
+      setStatus(err.message || 'Publishing failed.');
+    }
+  };
+
+  return (
+    <div style={{ padding: 28, display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {!data.publishReady && (
+        <div style={{ padding: 12, border: '1px solid #F0C2B5', borderRadius: 9, background: '#FFF7F4', color: '#8F321A', fontSize: 13 }}>
+          Configure a Minds API key in Settings before publishing.
+        </div>
+      )}
+      {(data.artifacts || []).length ? (data.artifacts || []).map((artifact) => (
+        <div key={artifact.path} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: 12, border: '1px solid var(--border-01)', borderRadius: 9 }}>
+          <span style={{ color: 'var(--primary-700)', display: 'inline-flex' }}>{Ico.upload(15)}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--text-strong)' }}>{artifact.title}</div>
+            <div style={{ fontSize: 11.5, color: 'var(--frost-600)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{artifact.path}</div>
+            {artifact.publishedUrl && <div style={{ fontSize: 12, color: 'var(--sage-700)', marginTop: 4, userSelect: 'text' }}>{artifact.publishedUrl}</div>}
+          </div>
+          {artifact.publishedUrl && <button className="btn-secondary" onClick={() => navigator.clipboard?.writeText(artifact.publishedUrl)}>Copy URL</button>}
+          {artifact.publishedUrl && <button className="btn-secondary" onClick={() => window.open(artifact.publishedUrl, '_blank', 'noopener,noreferrer')}>Open</button>}
+          <button className="btn-secondary" disabled={!data.publishReady} onClick={() => publish(artifact)}>Publish</button>
+        </div>
+      )) : <EmptyState>No HTML artifacts found in Anton output folders.</EmptyState>}
+      {(data.history || []).length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-strong)', marginBottom: 8 }}>Publish history</div>
+          {(data.history || []).slice(0, 10).map((item) => (
+            <div key={`${item.artifact}-${item.publishedAt}`} style={{ padding: '8px 0', borderTop: '1px solid var(--border-0)', fontSize: 12.5 }}>
+              <strong>{item.artifactName}</strong>
+              {item.url && <span style={{ marginLeft: 8, color: 'var(--sage-700)', userSelect: 'text' }}>{item.url}</span>}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const inputStyle = {
+  width: '100%',
+  height: 34,
+  border: '1px solid var(--border-01)',
+  borderRadius: 7,
+  padding: '0 10px',
+  fontSize: 13,
+  outline: 'none',
+  background: 'var(--surface-0)',
+};
