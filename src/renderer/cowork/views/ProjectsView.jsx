@@ -107,7 +107,9 @@ function ProjectGrid({ projects, selectedProject, tasks = [], scheduled = [], on
       <div style={{
         padding: 28,
         display: 'grid',
-        gridTemplateColumns: 'repeat(auto-fill, minmax(240px, 1fr))',
+        // Always two cards per row. minmax(0, 1fr) so the cell can
+        // shrink past content min-width and the path ellipsis kicks in.
+        gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
         gap: 14,
       }}>
         {projects.map((p) => (

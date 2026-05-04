@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from .artifacts import _resolve_artifact_path, _scan_output_dirs
@@ -526,3 +526,59 @@ async def publish_artifact(req: PublishRequest):
         save_state(state)
 
     return {"status": "ok", "url": view_url, "result": {k: v for k, v in result.items() if k != "file_payload"}}
+
+
+@router.delete("/publish")
+async def unpublish_artifact(path: str = Query(..., description="Absolute path to the published HTML artifact")):
+    """Tear down the published copy of an HTML artifact.
+
+    Looks up the artifact's last-published md5 from `.published.json`,
+    calls anton.publisher.unpublish, and removes the entry from the
+    map so the UI no longer shows a "Published" pill.
+    """
+    api_key = _get_env("ANTON_MINDS_API_KEY")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="Configure ANTON_MINDS_API_KEY before unpublishing")
+
+    artifact = _resolve_artifact_path(path)
+    published_json = artifact.parent / ".published.json"
+    if not published_json.is_file():
+        raise HTTPException(status_code=404, detail="Artifact has no publish record")
+
+    try:
+        published_map: dict[str, Any] = json.loads(published_json.read_text(encoding="utf-8"))
+    except Exception:
+        raise HTTPException(status_code=500, detail="Could not read publish record")
+
+    entry = published_map.get(artifact.name)
+    md5 = entry.get("last_md5") if isinstance(entry, dict) else None
+    if not md5:
+        raise HTTPException(status_code=404, detail="No published version on file")
+
+    try:
+        from anton.publisher import unpublish
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail="Anton publisher is unavailable") from exc
+
+    try:
+        unpublish(
+            md5,
+            api_key=api_key,
+            publish_url=_get_env("ANTON_PUBLISH_URL", "https://4nton.ai"),
+            ssl_verify=_get_env("ANTON_MINDS_SSL_VERIFY", "true").lower() == "true",
+        )
+    except Exception as exc:
+        logger.exception("Unpublishing failed")
+        raise HTTPException(status_code=502, detail="Unpublishing failed. Check your Minds credentials and try again.") from exc
+
+    # Strip from the per-folder map so the artifact is no longer
+    # reported as published.
+    published_map.pop(artifact.name, None)
+    try:
+        if published_map:
+            published_json.write_text(json.dumps(published_map, indent=2) + "\n", encoding="utf-8")
+        else:
+            published_json.unlink()
+    except Exception:
+        pass
+    return {"status": "ok"}

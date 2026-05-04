@@ -1,0 +1,241 @@
+// Inline preview modal for HTML artifacts. Renders the artifact's
+// content in a sandboxed iframe (via srcdoc so we don't need to
+// expose a file:// URL). Top bar has the title, a "Published" pill
+// when the artifact has a live URL, plus Publish / Unpublish / Open
+// in OS actions.
+
+import { useEffect, useState } from 'react';
+import Ico from '../Icons';
+import { previewArtifact, publishArtifact, unpublishArtifact } from '../../api';
+
+const FONT_BODY = "'Inter', system-ui, sans-serif";
+const FONT_DISPLAY = "'Josefin Sans', sans-serif";
+
+export function ArtifactViewer({ open, artifact, onClose, onChange }) {
+  const [content, setContent] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState('');
+  const [publishedUrl, setPublishedUrl] = useState(artifact?.publishedUrl || '');
+  const [busy, setBusy] = useState(false);
+
+  // Refresh state when the artifact changes (e.g. user opens a
+  // different one without closing first).
+  useEffect(() => {
+    setPublishedUrl(artifact?.publishedUrl || '');
+  }, [artifact?.path, artifact?.publishedUrl]);
+
+  // Esc closes.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  // Load HTML when opened. Only fetched on demand so big artifacts
+  // don't bog down the rail rendering.
+  useEffect(() => {
+    if (!open || !artifact?.path) return;
+    setLoading(true);
+    setErr('');
+    setContent('');
+    previewArtifact(artifact.path)
+      .then((data) => setContent(data?.content || ''))
+      .catch((e) => setErr(e?.message || 'Could not load artifact'))
+      .finally(() => setLoading(false));
+  }, [open, artifact?.path]);
+
+  if (!open || !artifact) return null;
+
+  const onPublish = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      const r = await publishArtifact(artifact.path);
+      if (r?.url) {
+        setPublishedUrl(r.url);
+        onChange?.({ ...artifact, publishedUrl: r.url });
+      }
+    } catch (e) {
+      setErr(e?.message || 'Publish failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const onUnpublish = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await unpublishArtifact(artifact.path);
+      setPublishedUrl('');
+      onChange?.({ ...artifact, publishedUrl: '' });
+    } catch (e) {
+      setErr(e?.message || 'Unpublish failed');
+    } finally {
+      setBusy(false);
+    }
+  };
+  const onOpenOS = async () => {
+    try { await window.antontron?.openPath?.(artifact.path); } catch {}
+  };
+  const onOpenPublished = async () => {
+    if (!publishedUrl) return;
+    try { await window.antontron?.openExternal?.(publishedUrl); } catch {
+      window.open(publishedUrl, '_blank', 'noreferrer');
+    }
+  };
+
+  return (
+    <div
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 80,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: 'rgba(0,0,0,0.45)',
+        backdropFilter: 'blur(2px)',
+        WebkitBackdropFilter: 'blur(2px)',
+        WebkitAppRegion: 'no-drag',
+      }}
+    >
+      <div
+        style={{
+          width: 'min(1080px, 94vw)', height: 'min(820px, 88vh)',
+          background: 'var(--surface)',
+          border: '1px solid var(--line)',
+          borderRadius: 14,
+          boxShadow: '0 24px 60px rgba(15,16,17,0.30)',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          fontFamily: FONT_BODY,
+        }}
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        {/* Header */}
+        <div style={{
+          flex: '0 0 auto',
+          display: 'flex', alignItems: 'center', gap: 12,
+          padding: '12px 16px',
+          borderBottom: '1px solid var(--line)',
+        }}>
+          <span style={{ display: 'inline-flex', color: 'var(--accent)', flexShrink: 0 }}>
+            {Ico.doc(18)}
+          </span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{
+              fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 15,
+              color: 'var(--ink)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {artifact.title || artifact.path?.split('/').pop()}
+            </div>
+            <div title={artifact.path} style={{
+              fontSize: 11, color: 'var(--ink-4)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {artifact.path}
+            </div>
+          </div>
+          {publishedUrl && (
+            <button
+              type="button"
+              onClick={onOpenPublished}
+              title={`Open published URL: ${publishedUrl}`}
+              style={{
+                cursor: 'pointer',
+                background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+                color: 'var(--accent)',
+                padding: '4px 10px', borderRadius: 999,
+                fontSize: 11.5, fontWeight: 600,
+                display: 'inline-flex', alignItems: 'center', gap: 6,
+                flexShrink: 0,
+              }}
+            >
+              <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--accent)' }} />
+              Published
+            </button>
+          )}
+          {publishedUrl ? (
+            <button
+              type="button"
+              onClick={onUnpublish}
+              disabled={busy}
+              title="Unpublish"
+              style={{
+                cursor: busy ? 'progress' : 'pointer',
+                background: 'transparent',
+                border: '1px solid var(--line)',
+                color: 'var(--ink-2)',
+                padding: '6px 12px', borderRadius: 8,
+                fontSize: 12.5, fontWeight: 500,
+                opacity: busy ? 0.6 : 1,
+              }}
+            >
+              Unpublish
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onPublish}
+              disabled={busy}
+              title="Publish"
+              style={{
+                cursor: busy ? 'progress' : 'pointer',
+                background: 'var(--accent)', border: '1px solid var(--accent)',
+                color: '#fff',
+                padding: '6px 12px', borderRadius: 8,
+                fontSize: 12.5, fontWeight: 600,
+                opacity: busy ? 0.7 : 1,
+              }}
+            >
+              {busy ? 'Publishing…' : 'Publish'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onOpenOS}
+            title="Open in OS"
+            style={{
+              cursor: 'pointer',
+              background: 'transparent', border: '1px solid var(--line)',
+              color: 'var(--ink-2)',
+              padding: '6px 12px', borderRadius: 8,
+              fontSize: 12.5, fontWeight: 500,
+            }}
+          >
+            Open in OS
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            title="Close"
+            style={{
+              cursor: 'pointer',
+              background: 'transparent', border: 0,
+              color: 'var(--ink-3)',
+              width: 28, height: 28, borderRadius: 6,
+              display: 'inline-grid', placeItems: 'center',
+              fontSize: 18, lineHeight: 1,
+            }}
+          >×</button>
+        </div>
+
+        {/* Body — iframe with srcdoc, sandbox just enough to render
+            ECharts/Chart.js etc. but not touch the parent app. */}
+        <div style={{ flex: 1, minHeight: 0, background: 'var(--surface-2)' }}>
+          {err ? (
+            <div style={{ padding: 28, color: 'var(--danger)', fontSize: 13 }}>{err}</div>
+          ) : loading ? (
+            <div style={{ padding: 28, color: 'var(--ink-3)', fontSize: 13 }}>Loading preview…</div>
+          ) : (
+            <iframe
+              title={artifact.title || 'Artifact preview'}
+              srcDoc={content}
+              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
+              style={{ width: '100%', height: '100%', border: 0, background: '#fff' }}
+            />
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}

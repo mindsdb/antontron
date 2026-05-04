@@ -4,6 +4,7 @@ Scans all registered projects for output files.
 """
 from __future__ import annotations
 
+import json
 import logging
 import mimetypes
 import subprocess
@@ -117,19 +118,36 @@ async def list_artifacts():
             continue
         seen.add(key)
 
-        kind = KIND_MAP.get(f.suffix.lower(), "File")
+        ext = f.suffix.lower()
+        kind = KIND_MAP.get(ext, "File")
         is_live = (time.time() - f.stat().st_mtime) < 300  # "live" if modified in last 5 min
         idx = len(artifacts) % len(BG_CYCLE)
+
+        # For HTML artifacts, surface the published URL (if any) so the
+        # client can show a "Published" pill without a second round-trip.
+        published_url = ""
+        if ext == ".html":
+            published_path = f.parent / ".published.json"
+            if published_path.is_file():
+                try:
+                    pmap = json.loads(published_path.read_text(encoding="utf-8"))
+                    entry = pmap.get(f.name)
+                    if isinstance(entry, dict):
+                        published_url = entry.get("url", "") or ""
+                except Exception:
+                    pass
 
         artifacts.append({
             "id": f.stem + "_" + str(int(f.stat().st_mtime)),
             "title": f.stem.replace("_", " ").replace("-", " ").title(),
             "kind": kind,
+            "ext": ext,
             "updated": _human_mtime(f),
             "live": is_live,
             "bg": BG_CYCLE[idx],
             "snippet": _snippet(f),
             "path": str(f),
+            "publishedUrl": published_url,
         })
 
         if len(artifacts) >= 40:

@@ -1,28 +1,44 @@
-// Project bubble card for the projects grid. Shows name + path,
-// four stats (tasks / memories / scheduled / artifacts), and a
-// hover kebab → Delete menu. Same Inter + Josefin styling family
-// as the rest of the rail.
+// Project card — bubble surface, accent stripe colored deterministically
+// per project name, prominent Josefin title, stats row, hover kebab
+// for delete. Inter throughout.
 
 import { useEffect, useRef, useState } from 'react';
 import Ico from '../Icons';
 import { fetchMemory, fetchArtifacts } from '../../api';
 
-const FONT_BODY = "'Inter', system-ui, sans-serif";
-const FONT_DISPLAY = "'Josefin Sans', sans-serif";
+const FONT_BODY    = "var(--font-body)";
+const FONT_DISPLAY = "var(--font-display)";
+
+// Deterministic accent color per project — small touch that makes the
+// grid feel less repetitive without manual configuration.
+const STRIPE_HUES = [200, 220, 165, 280, 12, 95, 330, 250, 40, 188];
+function stripeColor(name) {
+  let h = 5381;
+  for (let i = 0; i < (name || '').length; i++) {
+    h = ((h << 5) + h + name.charCodeAt(i)) | 0;
+  }
+  const hue = STRIPE_HUES[Math.abs(h) % STRIPE_HUES.length];
+  return `hsl(${hue}, 70%, 56%)`;
+}
 
 function StatTile({ label, value }) {
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 3,
+      minWidth: 0, alignItems: 'flex-start',
+    }}>
       <span style={{
         fontFamily: FONT_DISPLAY, fontWeight: 600,
-        fontSize: 18, color: 'var(--ink)', lineHeight: 1,
+        fontSize: 22, color: 'var(--ink)', lineHeight: 1,
+        fontVariantNumeric: 'tabular-nums',
       }}>
         {value}
       </span>
       <span style={{
         fontFamily: FONT_BODY,
         fontSize: 10.5, color: 'var(--ink-4)',
-        textTransform: 'uppercase', letterSpacing: '0.06em',
+        textTransform: 'uppercase', letterSpacing: '0.08em',
+        fontWeight: 500,
       }}>
         {label}
       </span>
@@ -30,9 +46,6 @@ function StatTile({ label, value }) {
   );
 }
 
-// Per-project stats. Tasks + scheduled come from the parent's
-// already-loaded state (passed in to avoid duplicate fetching).
-// Memories + artifacts get their own fetch per card.
 function useProjectStats(project, { tasks = [], scheduled = [] }) {
   const [memCount, setMemCount] = useState(null);
   const [artCount, setArtCount] = useState(null);
@@ -91,8 +104,8 @@ export function ProjectCard({
   const [menuOpen, setMenuOpen] = useState(false);
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
+  const stripe = stripeColor(project?.name);
 
-  // Close menu on click-outside or Esc.
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e) => { if (e.key === 'Escape') setMenuOpen(false); };
@@ -125,42 +138,45 @@ export function ProjectCard({
           cursor: 'pointer',
           background: 'var(--surface)',
           border: `1px solid ${isSelected ? 'var(--accent)' : 'var(--line)'}`,
-          borderRadius: 12,
-          padding: 16,
+          borderRadius: 14,
+          padding: '20px 22px 18px',
           width: '100%',
           textAlign: 'left',
-          display: 'flex', flexDirection: 'column', gap: 16,
-          minHeight: 160, minWidth: 0,
+          display: 'flex', flexDirection: 'column', gap: 18,
+          minHeight: 180, minWidth: 0,
           overflow: 'hidden',
-          transition: 'border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease',
-          boxShadow: '0 1px 0 rgba(15,16,17,0.02)',
-          font: 'inherit',
-          color: 'inherit',
-        }}
-        onMouseOver={(e) => {
-          e.currentTarget.style.borderColor = 'var(--accent)';
-          e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02), 0 8px 22px rgba(15,16,17,0.06)';
-          e.currentTarget.style.transform = 'translateY(-1px)';
-        }}
-        onMouseOut={(e) => {
-          e.currentTarget.style.borderColor = isSelected ? 'var(--accent)' : 'var(--line)';
-          e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02)';
-          e.currentTarget.style.transform = 'translateY(0)';
+          position: 'relative',
+          transition: 'border-color 160ms ease, box-shadow 200ms ease, transform 160ms ease',
+          boxShadow: hover
+            ? '0 1px 0 rgba(15,16,17,0.02), 0 12px 28px rgba(15,16,17,0.08)'
+            : '0 1px 0 rgba(15,16,17,0.02)',
+          transform: hover ? 'translateY(-2px)' : 'translateY(0)',
+          font: 'inherit', color: 'inherit',
         }}
       >
-        {/* Header — folder glyph + name + path */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, minWidth: 0, width: '100%' }}>
+        {/* Accent stripe — left edge, deterministic per project name */}
+        <span style={{
+          position: 'absolute', left: 0, top: 0, bottom: 0,
+          width: 4, background: stripe,
+          opacity: isSelected || hover ? 1 : 0.7,
+          transition: 'opacity 160ms ease',
+        }} />
+
+        {/* Header row */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 14, minWidth: 0, width: '100%' }}>
           <span style={{
-            width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-            background: 'var(--surface-2)', color: 'var(--accent)',
+            width: 40, height: 40, borderRadius: 10, flexShrink: 0,
+            background: `color-mix(in srgb, ${stripe} 18%, var(--surface-2))`,
+            color: stripe,
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            border: `1px solid color-mix(in srgb, ${stripe} 30%, transparent)`,
           }}>
-            {Ico.folder(18)}
+            {Ico.folder(20)}
           </span>
           <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <div style={{
-              fontFamily: FONT_BODY, fontSize: 14, fontWeight: 600,
-              color: 'var(--ink)',
+              fontFamily: FONT_DISPLAY, fontSize: 17, fontWeight: 600,
+              color: 'var(--ink)', letterSpacing: '0.005em',
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
               {project.name}
@@ -175,11 +191,14 @@ export function ProjectCard({
           </div>
         </div>
 
-        {/* Stats row */}
+        {/* Stats — tabular-nums on the numbers, very faint hairline above */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-          gap: 12, marginTop: 'auto',
+          gap: 16,
+          marginTop: 'auto',
+          paddingTop: 14,
+          borderTop: '1px solid var(--line)',
         }}>
           <StatTile label="Tasks" value={stats.tasks} />
           <StatTile label="Memories" value={stats.memories} />
@@ -188,7 +207,7 @@ export function ProjectCard({
         </div>
       </button>
 
-      {/* Hover kebab + menu */}
+      {/* Hover kebab — top-right, only on user-deletable projects */}
       {!isReserved && (
         <>
           <button
@@ -198,18 +217,19 @@ export function ProjectCard({
             title="Project menu"
             aria-label="Project menu"
             style={{
-              position: 'absolute', top: 8, right: 8,
+              position: 'absolute', top: 10, right: 10,
               width: 28, height: 28, borderRadius: 6,
-              cursor: 'pointer', background: 'transparent', border: 0,
+              cursor: 'pointer', background: 'var(--surface)',
+              border: '1px solid var(--line)',
               color: 'var(--ink-3)',
               display: 'inline-grid', placeItems: 'center',
               opacity: showKebab ? 1 : 0,
               pointerEvents: showKebab ? 'auto' : 'none',
-              transition: 'opacity 120ms ease, color 120ms ease, background 120ms ease',
-              zIndex: 5,
+              transition: 'opacity 140ms ease, color 140ms ease, background 140ms ease',
+              zIndex: 5, font: 'inherit',
             }}
             onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
-            onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
+            onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'var(--surface)'; }}
           >
             {Ico.moreVert(15)}
           </button>
@@ -217,13 +237,14 @@ export function ProjectCard({
             <div
               ref={menuRef}
               style={{
-                position: 'absolute', top: 36, right: 8, zIndex: 10,
-                width: 180,
+                position: 'absolute', top: 42, right: 10, zIndex: 10,
+                width: 200,
                 background: 'var(--surface)',
                 border: '1px solid var(--line)',
                 borderRadius: 10,
                 boxShadow: '0 12px 32px rgba(15,16,17,0.18)',
                 padding: '4px 0',
+                fontFamily: FONT_BODY,
               }}
               onMouseDown={(e) => e.stopPropagation()}
             >
@@ -235,15 +256,16 @@ export function ProjectCard({
                   background: 'transparent', border: 0,
                   width: 'calc(100% - 8px)', margin: '0 4px',
                   display: 'flex', alignItems: 'center', gap: 10,
-                  padding: '8px 10px', borderRadius: 6,
+                  padding: '9px 10px', borderRadius: 6,
                   fontFamily: FONT_BODY, fontSize: 13,
                   color: 'var(--danger)', textAlign: 'left',
+                  font: 'inherit',
                 }}
                 onMouseOver={(e) => { e.currentTarget.style.background = 'color-mix(in srgb, var(--danger) 12%, transparent)'; }}
                 onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
-                <span style={{ display: 'inline-flex', flexShrink: 0 }}>{Ico.trash(14)}</span>
-                <span>Delete project</span>
+                <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--danger)' }}>{Ico.trash(14)}</span>
+                <span style={{ color: 'var(--danger)' }}>Delete project</span>
               </button>
             </div>
           )}

@@ -11,6 +11,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import Ico from '../Icons';
 import { fetchArtifacts, fetchActiveProject } from '../../api';
+import { ArtifactViewer } from '../artifact';
 
 function timeAgo(iso) {
   if (!iso) return '';
@@ -86,8 +87,21 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
     return artifacts.filter((a) => a.path && a.path.startsWith(prefix)).slice(0, 12);
   }, [artifacts, effectiveProject]);
 
+  // HTML artifacts open in our in-app preview modal so users can
+  // see them without leaving Anton (and so they can publish/unpublish).
+  // Other types open in the OS default app.
+  const [previewArt, setPreviewArt] = useState(null);
   const onOpen = async (path) => {
     try { await window.antontron?.openPath?.(path); } catch {}
+  };
+  const onOpenArtifact = (artifact) => {
+    const isHtml = (artifact.ext || '').toLowerCase() === '.html'
+      || (artifact.path || '').toLowerCase().endsWith('.html');
+    if (isHtml) {
+      setPreviewArt(artifact);
+    } else {
+      onOpen(artifact.path);
+    }
   };
 
   // The project root often looks empty — anton's working files all
@@ -138,14 +152,17 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
               <button
                 key={f.path}
                 type="button"
-                onClick={() => onOpen(f.path)}
+                onClick={() => onOpenArtifact(f)}
                 title={f.path}
                 className={clsx(
                   'group grid items-center gap-2 rounded-md px-1 py-1 text-left',
                   'cursor-pointer transition-colors hover:bg-surface-2',
                   'border-0 bg-transparent'
                 )}
-                style={{ gridTemplateColumns: '14px minmax(0,1fr) auto' }}
+                // font: inherit defeats the user-agent button default
+                // (-webkit-control / Helvetica) so the button text
+                // actually renders in Inter from the parent surface.
+                style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
               >
                 {isNew ? (
                   <span
@@ -167,6 +184,18 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
           })}
         </div>
       )}
+
+      <ArtifactViewer
+        open={!!previewArt}
+        artifact={previewArt}
+        onClose={() => setPreviewArt(null)}
+        onChange={(updated) => {
+          setPreviewArt(updated);
+          // Reflect publish state into the local artifact list so the
+          // pill (and any future indicator on the row) updates.
+          setArtifacts((prev) => prev.map((a) => a.path === updated.path ? { ...a, publishedUrl: updated.publishedUrl } : a));
+        }}
+      />
     </div>
   );
 }

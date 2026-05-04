@@ -266,6 +266,24 @@ export async function createProject(name) {
   return req('/projects', { method: 'POST', body: JSON.stringify({ name }) });
 }
 
+// publishArtifact + previewArtifact live further down in this file.
+// We only add the new unpublish endpoint here.
+export async function unpublishArtifact(path) {
+  // Idempotent — server 404 means "no record" which is the desired
+  // end state.
+  const res = await fetch(BASE + `/publish?path=${encodeURIComponent(path)}`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (res.status === 404) return { status: 'gone' };
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json())?.detail || ''; } catch {}
+    throw new Error(detail || `Unpublish failed (${res.status})`);
+  }
+  return res.json();
+}
+
 export async function deleteProject(name) {
   // Idempotent: 404 = "already gone" = success.
   const res = await fetch(BASE + `/projects/${encodeURIComponent(name)}`, {

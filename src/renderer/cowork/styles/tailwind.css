@@ -4,3 +4,14 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Buttons have a user-agent default font-family (-webkit-control on
+   macOS / Helvetica on others) that does NOT inherit from the body.
+   Force inheritance globally so every <button> shows in Inter
+   without each component having to add `font: inherit` itself. */
+button {
+  font-family: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  color: inherit;
+}

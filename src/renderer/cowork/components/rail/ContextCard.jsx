@@ -38,7 +38,7 @@ function MemoryRow({ entry, onOpen }) {
         'cursor-pointer transition-colors hover:bg-surface-2',
         'border-0 bg-transparent w-full'
       )}
-      style={{ gridTemplateColumns: '14px minmax(0,1fr) auto' }}
+      style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
     >
       <span className="mt-0.5 text-ink-4 inline-flex flex-none">{Ico.code(13)}</span>
       <span className="min-w-0">
