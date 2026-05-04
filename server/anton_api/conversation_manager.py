@@ -618,3 +618,59 @@ def delete_conversation(conversation_id: str) -> bool:
                     pass
     _live.pop(conversation_id, None)
     return found
+
+
+def move_conversation(conversation_id: str, target_project: str) -> dict | None:
+    """Move a conversation's meta + history files to another project's
+    episodes directory and update meta.project to match.
+
+    The live session (if any) is closed because its in-memory state is
+    bound to the old project's filesystem layout; it'll be re-created
+    against the new project on the next chat turn.
+    """
+    located = _find_conversation_dir(conversation_id)
+    if not located:
+        return None
+    src_project, src_ep = located
+    if src_project == target_project:
+        # Nothing to do — already in this project.
+        return get_conversation(conversation_id)
+
+    # Resolve target project dir; raise via projects_store if invalid.
+    _, target_base = projects_store.resolve_project(target_project)
+    target_ep = target_base / ".anton" / "episodes"
+    target_ep.mkdir(parents=True, exist_ok=True)
+
+    moved = False
+    for suffix in ("_meta.json", "_history.json"):
+        src = src_ep / f"{conversation_id}{suffix}"
+        if not src.is_file():
+            continue
+        dst = target_ep / f"{conversation_id}{suffix}"
+        try:
+            src.replace(dst)
+            moved = True
+        except Exception:
+            logger.debug("Could not move %s to %s", src, dst, exc_info=True)
+    if not moved:
+        return None
+
+    # Rewrite meta to point at the new project.
+    meta_path = target_ep / f"{conversation_id}_meta.json"
+    meta: dict = {}
+    if meta_path.is_file():
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        except Exception:
+            meta = {}
+    meta["id"] = conversation_id
+    meta["project"] = target_project
+    meta["updated_at"] = datetime.now(timezone.utc).isoformat()
+    try:
+        _atomic_write(meta_path, meta)
+    except Exception:
+        logger.debug("Could not rewrite meta after move", exc_info=True)
+
+    # Drop the in-memory session — it's bound to the old project path.
+    _live.pop(conversation_id, None)
+    return meta

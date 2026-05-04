@@ -118,6 +118,10 @@ class ConversationMeta(BaseModel):
 
 class ConversationPatch(BaseModel):
     title: str | None = None
+    # When set, move the conversation to this project. Handled by
+    # conversation_manager.move_conversation rather than the title patch
+    # path because it physically relocates files between project dirs.
+    project: str | None = None
 
 
 # ---------------------------------------------------------------------------

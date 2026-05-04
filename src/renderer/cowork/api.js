@@ -84,12 +84,17 @@ function _humanTime(iso) {
 }
 
 function _conversationToTask(conv, messages = []) {
+  // Server stores conversations under <project>/.anton/episodes/ and
+  // returns the project NAME on each conversation meta. We carry both:
+  //   projectName — the canonical id from the server
+  //   projectPath — resolved later from the projects list (App.jsx)
   return {
     id: conv.id,
     title: conv.title || conv.preview || conv.id || 'Untitled task',
     subtitle: _humanTime(conv.updated_at || conv.created_at),
     status: 'idle',
     messages,
+    projectName: conv.project || null,
     projectPath: conv.project_path || null,
     model: null,
     attachments: [],
@@ -134,7 +139,7 @@ export async function fetchSession(id) {
 // callback shape the rest of the app already speaks. `conversationId` is
 // optional — omit it to start a new conversation; the caller learns the
 // new id via the first onChunk/onProgress/onDone callback's second arg.
-function _streamResponse(text, { conversationId, projectPath, model, attachmentIds = [], onChunk, onProgress, onToolResult, onDone, onError, onEvent } = {}) {
+function _streamResponse(text, { conversationId, projectName, projectPath, model, attachmentIds = [], onChunk, onProgress, onToolResult, onDone, onError, onEvent } = {}) {
   const ctrl = new AbortController();
   (async () => {
     try {
@@ -146,7 +151,10 @@ function _streamResponse(text, { conversationId, projectPath, model, attachmentI
           model: model || null,
           stream: true,
           conversation: conversationId || null,
-          project_path: projectPath || null,
+          // Server's `project` field is a project NAME (folder under
+          // projects_store). Sending project_path is silently ignored —
+          // every conversation would fall back to the active project.
+          project: projectName || null,
           attachment_ids: attachmentIds,
         }),
         signal: ctrl.signal,
@@ -419,6 +427,28 @@ export async function pinTask(task) {
 
 export async function unpinTask(id) {
   return req(`/pins/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+// Rename + delete + move are powered by the conversation patch/delete
+// endpoints. The server's PATCH supports both `title` and `project`
+// in one call; we expose them as separate helpers for clearer call
+// sites.
+export async function renameConversation(id, title) {
+  return req(`/conversations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ title }),
+  });
+}
+
+export async function deleteConversation(id) {
+  return req(`/conversations/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+export async function moveConversation(id, projectName) {
+  return req(`/conversations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ project: projectName }),
+  });
 }
 
 export async function recordTaskVisit(task, autoPin = false) {

@@ -446,6 +446,22 @@ function createWindow() {
     });
   }
 
+  // Grant the renderer access to the microphone so the Web Speech API
+  // (composer voice input) can capture audio. Other permissions stay
+  // denied. Pair with NSMicrophoneUsageDescription in Info.plist and
+  // the audio-input entitlement so the OS prompt actually fires.
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, permission, callback) => {
+    // 'audioCapture' isn't in Electron's Permission union but some
+    // Chromium builds emit it for the Web Speech API. Cast through
+    // string for the comparison so TS doesn't narrow it away.
+    const perm = permission as string;
+    if (perm === 'media' || perm === 'audioCapture') {
+      callback(true);
+      return;
+    }
+    callback(false);
+  });
+
   // Open external links in the OS default browser instead of navigating Electron
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
@@ -865,6 +881,20 @@ function setupIPC() {
   ipcMain.handle(IPC.OPEN_EXTERNAL, async (_event, url: string) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
       await shell.openExternal(url);
+    }
+  });
+
+  // Open a local file/folder in the OS default app (Finder, browser,
+  // editor, etc.). Used by the chat's working-folder card.
+  ipcMain.handle('shell:open-path', async (_event, p: string) => {
+    if (typeof p !== 'string' || !p) return { ok: false, reason: 'empty path' };
+    try {
+      const result = await shell.openPath(p);
+      // shell.openPath returns '' on success, or an error string.
+      if (result) return { ok: false, reason: result };
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, reason: e?.message || String(e) };
     }
   });
 

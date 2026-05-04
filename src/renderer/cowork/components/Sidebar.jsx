@@ -1,5 +1,7 @@
+import { useRef, useState } from 'react';
 import Ico from './Icons';
 import { Spinner } from './ui';
+import { TaskMenu } from './TaskMenu';
 
 // Platform-aware modifier symbol for keyboard hints. Mac uses ⌘ glyph,
 // Windows/Linux use Ctrl+ literal.
@@ -48,20 +50,96 @@ function NavItem({ icon, label, active, onClick, badge, comingSoon, compact }) {
   );
 }
 
-function RecentItem({ task, onClick }) {
+function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelete, onMoveToProject }) {
+  const [hover, setHover] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [anchorRect, setAnchorRect] = useState(null);
+  const triggerRef = useRef(null);
+
+  const openMenu = (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (!triggerRef.current) return;
+    setAnchorRect(triggerRef.current.getBoundingClientRect());
+    setMenuOpen(true);
+  };
+
+  // Fixed-width right slot — both timestamp and kebab are always
+  // rendered (cross-fade on hover). Reserving the same width means
+  // the row height/width stays constant whether the kebab is visible
+  // or not — no jumping when moving between rows.
+  const showKebab = hover || menuOpen;
   return (
-    <button className="recent-item" onClick={onClick} aria-label={task.title}>
-      <span className="recent-row__title" style={{
-        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        flex: 1, paddingRight: 8,
-      }}>{task.title || 'Untitled'}</span>
-      <span style={{
-        fontFamily: 'var(--font-mono)', fontSize: 10,
-        color: 'var(--ink-4)', letterSpacing: '0.02em', flexShrink: 0,
-      }}>
-        {timeAgo(task.updatedAt || task.subtitle)}
-      </span>
-    </button>
+    <div
+      style={{ position: 'relative', display: 'flex' }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+    >
+      <button className="recent-item" onClick={onClick} aria-label={task.title} style={{ flex: 1, minWidth: 0 }}>
+        <span className="recent-row__title" style={{
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          flex: 1, paddingRight: 8,
+        }}>{task.title || 'Untitled'}</span>
+
+        {/* Right-side fixed slot — 22px wide, holds timestamp OR kebab */}
+        <span style={{
+          position: 'relative',
+          width: 50, height: 18,
+          flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center', justifyContent: 'flex-end',
+        }}>
+          <span style={{
+            position: 'absolute', inset: 0,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
+            fontFamily: 'var(--font-mono)', fontSize: 10,
+            color: 'var(--ink-4)', letterSpacing: '0.02em',
+            opacity: showKebab ? 0 : 1,
+            transition: 'opacity 120ms ease',
+          }}>
+            {timeAgo(task.updatedAt || task.subtitle)}
+          </span>
+          <span
+            ref={triggerRef}
+            role="button"
+            aria-label="Task menu"
+            onClick={openMenu}
+            style={{
+              position: 'absolute', right: 0, top: '50%',
+              transform: 'translateY(-50%)',
+              display: 'inline-flex',
+              width: 22, height: 22,
+              alignItems: 'center', justifyContent: 'center',
+              color: 'var(--ink-3)', borderRadius: 5,
+              cursor: 'pointer',
+              opacity: showKebab ? 1 : 0,
+              pointerEvents: showKebab ? 'auto' : 'none',
+              transition: 'opacity 120ms ease, background 120ms ease, color 120ms ease',
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--ink)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-3)'; }}
+          >
+            {Ico.moreVert(13)}
+          </span>
+        </span>
+      </button>
+
+      <TaskMenu
+        task={task}
+        projects={projects}
+        open={menuOpen}
+        anchorRect={anchorRect}
+        onClose={() => setMenuOpen(false)}
+        onPin={() => onPin?.(task)}
+        onUnpin={() => onUnpin?.(task.id)}
+        onRename={() => {
+          const next = window.prompt('Rename task', task.title || '');
+          if (next != null) onRename?.(task.id, next);
+        }}
+        onDelete={() => onDelete?.(task.id)}
+        onMoveToProject={(p) => onMoveToProject?.(task.id, p.name)}
+      />
+    </div>
   );
 }
 
@@ -82,12 +160,32 @@ export default function Sidebar({
   onToggleCollapsed,
   onPinTask,
   onUnpinTask,
+  onRenameTask,
+  onDeleteTask,
+  onMoveTaskToProject,
+  projects = [],
   onToggleServer,
 }) {
-  const recents = tasks.slice(0, 8);
-  const pinnedTasks = pins
+  // Decorate every task with its pinned state. Tasks come from the
+  // conversations endpoint which doesn't know about pins (they live
+  // in a separate /pins store), so without this the menu shows
+  // "Pin" on items that are already pinned.
+  const pinnedIds = new Set(
+    (pins || []).filter((p) => p.type === 'task').map((p) => p.id)
+  );
+  const tasksWithPin = tasks.map((t) =>
+    pinnedIds.has(t.id) ? { ...t, pinned: true } : t
+  );
+
+  const recents = tasksWithPin.slice(0, 8);
+  const pinnedTasks = (pins || [])
     .filter((pin) => pin.type === 'task')
-    .map((pin) => tasks.find((task) => task.id === pin.id) || { id: pin.id, title: pin.title || pin.id, status: 'idle', pinned: true })
+    .map((pin) => {
+      const found = tasksWithPin.find((task) => task.id === pin.id);
+      return found
+        ? { ...found, pinned: true }
+        : { id: pin.id, title: pin.title || pin.id, status: 'idle', pinned: true };
+    })
     .slice(0, 8);
 
   return (
@@ -132,7 +230,7 @@ export default function Sidebar({
               aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
               style={{ WebkitAppRegion: 'no-drag' }}
             >
-              {collapsed ? Ico.menu(15) : Ico.sidebar(15)}
+              {collapsed ? Ico.sidebarExpandRight(15) : Ico.sidebarCollapseLeft(15)}
             </button>
             <button
               className="icon-btn"
@@ -195,7 +293,17 @@ export default function Sidebar({
         {pinnedTasks.length ? (
           <div style={{ padding: '0 10px', display: 'flex', flexDirection: 'column', gap: 1 }}>
             {pinnedTasks.map((task) => (
-              <RecentItem key={task.id} task={task} onClick={() => onSelectTask(task.id)} />
+              <RecentItem
+                key={task.id}
+                task={task}
+                projects={projects}
+                onClick={() => onSelectTask(task.id)}
+                onPin={onPinTask}
+                onUnpin={onUnpinTask}
+                onRename={onRenameTask}
+                onDelete={onDeleteTask}
+                onMoveToProject={onMoveTaskToProject}
+              />
             ))}
           </div>
         ) : (
@@ -212,7 +320,17 @@ export default function Sidebar({
           display: 'flex', flexDirection: 'column', gap: 1,
         }}>
           {recents.map((t) => (
-            <RecentItem key={t.id} task={t} onClick={() => onSelectTask(t.id)} />
+            <RecentItem
+              key={t.id}
+              task={t}
+              projects={projects}
+              onClick={() => onSelectTask(t.id)}
+              onPin={onPinTask}
+              onUnpin={onUnpinTask}
+              onRename={onRenameTask}
+              onDelete={onDeleteTask}
+              onMoveToProject={onMoveTaskToProject}
+            />
           ))}
         </div>
 

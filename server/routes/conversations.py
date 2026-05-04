@@ -101,10 +101,22 @@ async def update_conversation(conversation_id: str, patch: ConversationPatch):
     updates = patch.model_dump(exclude_none=True)
     if not updates:
         raise HTTPException(status_code=400, detail="No valid fields to update")
-    meta = conversation_manager.update_conversation(conversation_id, **updates)
-    if meta is None:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    return meta
+
+    # Project move is a different operation from a title update —
+    # it physically relocates the conversation between project dirs.
+    target_project = updates.pop("project", None)
+    meta = None
+    if target_project is not None:
+        meta = conversation_manager.move_conversation(conversation_id, target_project)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if updates:
+        meta = conversation_manager.update_conversation(conversation_id, **updates)
+        if meta is None:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+    return meta or {"id": conversation_id}
 
 
 @router.delete("/v1/conversations/{conversation_id}")

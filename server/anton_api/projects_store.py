@@ -25,6 +25,10 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_PROJECT = "default"
+# General is the orphan-fallback project surfaced to the client when a
+# task has no project assigned. We always keep it provisioned so the
+# UI can confidently route there.
+GENERAL_PROJECT = "general"
 _NAME_RE = re.compile(r"[^a-zA-Z0-9._-]+")
 
 
@@ -68,6 +72,17 @@ def ensure_default_project() -> None:
     if not default_dir.exists():
         default_dir.mkdir(parents=True, exist_ok=True)
     _scaffold(default_dir)
+    # Also provision the orphan-fallback "general" project so the
+    # client can always route there for unassigned tasks.
+    ensure_general_project()
+
+
+def ensure_general_project() -> None:
+    ensure_projects_dir()
+    general_dir = project_path(GENERAL_PROJECT)
+    if not general_dir.exists():
+        general_dir.mkdir(parents=True, exist_ok=True)
+    _scaffold(general_dir)
 
 
 def list_projects() -> list[Project]:

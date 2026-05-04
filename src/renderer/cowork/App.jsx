@@ -20,7 +20,8 @@ import { fetchSessions, fetchProjects, fetchArtifacts, fetchSettings, fetchHealt
          uploadAttachments, createSnippetAttachment, createUrlAttachment, fetchProjectFiles,
          attachProjectFile, deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
-         pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA } from './api';
+         pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
+         renameConversation, deleteConversation, moveConversation } from './api';
 import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
 
 const ACCENT_VARS = {
@@ -308,13 +309,26 @@ function AppCore() {
 
   const activeTasks = tasks.filter((t) => t.status === 'active');
   const currentTask = tasks.find((t) => t.id === activeTaskId) || (route === 'task' ? tasks[0] : null);
-  const currentTaskProject = currentTask?.projectPath
-    ? (projects.find((p) => p.path === currentTask.projectPath) || {
+  // Tasks belong to one project for life. Resolve via projectName
+  // first (server's canonical id), then projectPath, then fall back
+  // to the currently-selected project for orphans.
+  const currentTaskProject = (() => {
+    if (!currentTask) return selectedProject;
+    if (currentTask.projectName) {
+      const byName = projects.find((p) => p.name === currentTask.projectName);
+      if (byName) return byName;
+    }
+    if (currentTask.projectPath) {
+      const byPath = projects.find((p) => p.path === currentTask.projectPath);
+      if (byPath) return byPath;
+      return {
         id: currentTask.projectPath,
         name: currentTask.projectName || currentTask.projectPath.split('/').pop(),
         path: currentTask.projectPath,
-      })
-    : selectedProject;
+      };
+    }
+    return selectedProject;
+  })();
   const currentTaskModel = currentTask?.model
     ? (models.find((m) => m.id === currentTask.model) || { id: currentTask.model, name: currentTask.model, desc: 'Configured Anton model' })
     : selectedModel;
@@ -322,7 +336,9 @@ function AppCore() {
   const selectTask = (id) => {
     const task = tasks.find((t) => t.id === id);
     if (task) {
-      recordTaskVisit(task, settings.autoPin).then(() => {
+      // Record the visit for recents ordering, but never auto-pin.
+      // Pin/unpin is now an explicit action via the task menu.
+      recordTaskVisit(task, false).then(() => {
         fetchPins().then((data) => setPins(data.pins || []));
         fetchSessions().then((data) => { if (Array.isArray(data)) setTasks(data); });
       }).catch(() => {});
@@ -414,14 +430,20 @@ function AppCore() {
     const tempId = 'tmp-' + Date.now();
     const sendingAttachments = composerAttachments;
     const attachmentIds = sendingAttachments.map((attachment) => attachment.id);
+    // Orphan fallback: if the user hasn't picked a project, route the
+    // task into "general" (server provisions it on startup). This way
+    // every task ends up under a real project — never a null one.
+    const generalProject = projects.find((p) => p.name === 'general');
+    const effectiveProjectName = selectedProject?.name || 'general';
+    const effectiveProjectPath = selectedProject?.path || generalProject?.path || null;
     const newT = {
       id: tempId,
       title: text.length > 60 ? text.slice(0, 57) + '…' : text,
       subtitle: 'just now',
       status: 'active',
       messages: withThinkingPlaceholder([{ role: 'user', content: text, attachments: sendingAttachments }]),
-      projectPath: selectedProject?.path ?? null,
-      projectName: selectedProject?.name ?? null,
+      projectPath: effectiveProjectPath,
+      projectName: effectiveProjectName,
       model: selectedModel?.id ?? null,
       attachments: sendingAttachments,
     };
@@ -451,7 +473,8 @@ function AppCore() {
     };
 
     streamNewSession(text, {
-      projectPath: selectedProject?.path,
+      projectName: effectiveProjectName,
+      projectPath: effectiveProjectPath,
       model: selectedModel?.id,
       attachmentIds,
       onEvent(ev) {
@@ -553,7 +576,16 @@ function AppCore() {
     let assistantContent = '';
     let streamState = initialStreamState();
 
-    const taskProjectPath = currentTask.projectPath || selectedProject?.path || null;
+    // The task's project is fixed at creation; never let the user's
+    // current selectedProject override it on later turns. Resolve from
+    // the task itself (projectName is the canonical id, projectPath is
+    // the resolved filesystem path used for things like attachments).
+    const taskProjectName = currentTask.projectName
+      || (currentTaskProject?.name)
+      || null;
+    const taskProjectPath = currentTask.projectPath
+      || currentTaskProject?.path
+      || null;
     const taskModel = currentTask.model || selectedModel?.id || null;
 
     const flushStreaming = () => {
@@ -571,6 +603,7 @@ function AppCore() {
     };
 
     streamMessage(id, text, {
+      projectName: taskProjectName,
       projectPath: taskProjectPath,
       model: taskModel,
       attachmentIds,
@@ -641,6 +674,48 @@ function AppCore() {
     setTasks((prev) => prev.map((item) => item.id === id ? { ...item, pinned: false } : item));
     const data = await fetchPins();
     setPins(data.pins || []);
+  };
+
+  const handleRenameTask = async (taskId, newTitle) => {
+    if (!newTitle?.trim()) return;
+    const next = newTitle.trim();
+    // Optimistic update — flip back if the server rejects.
+    setTasks((prev) => prev.map((t) => t.id === taskId ? { ...t, title: next } : t));
+    try {
+      await renameConversation(taskId, next);
+    } catch {
+      // Reload from server on failure to recover the canonical title.
+      const fresh = await fetchSessions();
+      if (Array.isArray(fresh)) setTasks(fresh);
+    }
+  };
+
+  const handleDeleteTask = async (taskId) => {
+    const ok = window.confirm('Delete this task and its history? This cannot be undone.');
+    if (!ok) return;
+    // Drop locally before the round-trip; if it leaves the active
+    // task, navigate home.
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    if (activeTaskId === taskId) {
+      setActiveTaskId(null);
+      setRoute('home');
+    }
+    try { await deleteConversation(taskId); } catch {}
+    fetchPins().then((data) => setPins(data.pins || [])).catch(() => {});
+  };
+
+  const handleMoveTaskToProject = async (taskId, projectName) => {
+    if (!projectName) return;
+    setTasks((prev) => prev.map((t) =>
+      t.id === taskId
+        ? { ...t, projectName, projectPath: projects.find((p) => p.name === projectName)?.path || t.projectPath }
+        : t
+    ));
+    try { await moveConversation(taskId, projectName); } catch {}
+    // Refresh sessions so the server's canonical project mapping wins
+    // if our optimistic guess was wrong.
+    const fresh = await fetchSessions();
+    if (Array.isArray(fresh)) setTasks(fresh);
   };
 
   const refreshSchedules = async () => {
@@ -750,7 +825,7 @@ function AppCore() {
               `${sidebarCollapsed ? '80ms' : '0ms'}`,
         }}
       >
-        {Ico.menu(15)}
+        {Ico.sidebarExpandRight(15)}
       </button>
 
       <Sidebar
@@ -768,6 +843,10 @@ function AppCore() {
         onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
         onPinTask={handlePinTask}
         onUnpinTask={handleUnpinTask}
+        onRenameTask={handleRenameTask}
+        onDeleteTask={handleDeleteTask}
+        onMoveTaskToProject={handleMoveTaskToProject}
+        projects={projects}
         serverBusy={serverBusy}
         serverBusyKind={serverBusyKind}
         onToggleServer={async () => {
@@ -836,7 +915,12 @@ function AppCore() {
           <ChatView
             task={currentTask}
             onSend={handleSendInTask}
-            onBack={() => setRoute('home')}
+            onBack={() => {
+              // Returning home = "new task in this project". Pre-select
+              // the task's project so the home composer is ready to go.
+              if (currentTaskProject) setSelectedProject(currentTaskProject);
+              setRoute('home');
+            }}
             project={currentTaskProject}
             model={currentTaskModel}
             attachments={composerAttachments}
@@ -846,6 +930,14 @@ function AppCore() {
             onRemoveAttachment={handleRemoveAttachment}
             onPinTask={handlePinTask}
             onUnpinTask={handleUnpinTask}
+            onRenameTask={handleRenameTask}
+            onDeleteTask={handleDeleteTask}
+            onMoveTaskToProject={handleMoveTaskToProject}
+            onOpenProject={(p) => {
+              if (p) setSelectedProject(p);
+              setRoute('projects');
+            }}
+            projects={projects}
             sidebarCollapsed={sidebarCollapsed}
           />
         )}

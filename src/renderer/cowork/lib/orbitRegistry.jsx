@@ -24,6 +24,7 @@ import {
   useRef,
   useState,
 } from 'react';
+import { createPortal } from 'react-dom';
 import { OrbitMorph } from '../components/ui';
 
 const OrbitContext = createContext(null);
@@ -68,6 +69,10 @@ export function OrbitProvider({
   // Position the orb is currently rendered at. State so it triggers
   // a paint.
   const [pos, setPos] = useState({ top: 0, left: 0, visible: false });
+  // Force a re-render once the canvasRef has populated so the portal
+  // (which depends on canvasRef.current) actually mounts.
+  const [, forceRender] = useState(0);
+  useEffect(() => { forceRender((n) => n + 1); }, []);
 
   const register = useCallback((id, el) => {
     if (el == null) {
@@ -127,32 +132,37 @@ export function OrbitProvider({
 
   const ctx = useMemo(() => ({ register }), [register]);
 
+  // Portal the orb into the canvas element itself. That way the
+  // canvas's `overflow: hidden` (or any clip on its ancestors) bounds
+  // the orb naturally — it can never leak past the conv column into
+  // the rail. Without the portal, the orb is a sibling of the canvas
+  // and only the chat outer's clip applies, which is too permissive.
+  const orbNode = state ? (
+    <div
+      aria-hidden="true"
+      style={{
+        position: 'absolute',
+        top: pos.top, left: pos.left,
+        width: size, height: size,
+        pointerEvents: 'none',
+        opacity: pos.visible ? 1 : 0,
+        transform: pos.visible ? 'scale(1)' : 'scale(0.6)',
+        transition:
+          'top 380ms cubic-bezier(.32,.72,0,1), ' +
+          'left 380ms cubic-bezier(.32,.72,0,1), ' +
+          'opacity 220ms ease, ' +
+          'transform 220ms ease',
+        zIndex: 6,
+      }}
+    >
+      <OrbitMorph state={state} size={size} />
+    </div>
+  ) : null;
+
   return (
     <OrbitContext.Provider value={ctx}>
       {children}
-      {/* The orb itself — absolutely positioned inside the canvas
-          ancestor. pointer-events:none so it never blocks clicks. */}
-      {state && (
-        <div
-          aria-hidden="true"
-          style={{
-            position: 'absolute',
-            top: pos.top, left: pos.left,
-            width: size, height: size,
-            pointerEvents: 'none',
-            opacity: pos.visible ? 1 : 0,
-            transform: pos.visible ? 'scale(1)' : 'scale(0.6)',
-            transition:
-              'top 380ms cubic-bezier(.32,.72,0,1), ' +
-              'left 380ms cubic-bezier(.32,.72,0,1), ' +
-              'opacity 220ms ease, ' +
-              'transform 220ms ease',
-            zIndex: 6,
-          }}
-        >
-          <OrbitMorph state={state} size={size} />
-        </div>
-      )}
+      {orbNode && canvasRef?.current && createPortal(orbNode, canvasRef.current)}
     </OrbitContext.Provider>
   );
 }

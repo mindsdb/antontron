@@ -16,7 +16,10 @@ import { MarkdownContent } from '../components/markdown/MarkdownContent';
 import { ThinkingBlock } from '../components/thinking/ThinkingBlock';
 import { OrbitProvider, useOrbitSlot } from '../lib/orbitRegistry';
 import { PhaseProgress } from '../components/thinking/PhaseProgress';
+import { TaskMenu } from '../components/TaskMenu';
 import { ScratchpadModal } from '../components/thinking/ScratchpadModal';
+import { WorkingFolderLive } from '../components/rail/WorkingFolderLive';
+import { ContextCard } from '../components/rail/ContextCard';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -269,12 +272,25 @@ function StreamCursor({ slotId }) {
 }
 
 // ─── Right rail: collapsible cards ────────────────────────────────────────
-function RailCard({ title, defaultOpen = false, children }) {
+//
+// Two visual modes:
+//   default — boxed card with border, header has a divider below
+//   slim    — borderless / no header divider; body padding tighter.
+//             Used for Context per the spec ("one line has no underline
+//             unlike the header of the chat").
+//
+// Body always has maxHeight + overflowY: auto so a long Working-folder
+// or Progress list scrolls inside its own card rather than pushing the
+// whole rail past the viewport.
+function RailCard({ title, defaultOpen = false, slim = false, maxBodyHeight = 320, children }) {
   const [open, setOpen] = useState(!!defaultOpen);
   return (
     <div style={{
-      background: T.surface, border: `1px solid ${T.line}`,
-      borderRadius: 12, overflow: 'hidden',
+      background: T.surface,
+      border: `1px solid ${T.line}`,
+      borderRadius: 12,
+      overflow: 'hidden',
+      flexShrink: 0,
     }}>
       <button
         type="button"
@@ -293,15 +309,28 @@ function RailCard({ title, defaultOpen = false, children }) {
           color: 'inherit',
         }}
       >
-        <span style={{ fontFamily: FONT_BODY, fontSize: 13, fontWeight: 600, color: T.ink, letterSpacing: '-0.005em' }}>
+        <span style={{
+          fontFamily: FONT_BODY, fontSize: 13, fontWeight: 600,
+          color: T.ink, letterSpacing: '-0.005em',
+          minWidth: 0, flex: 1,
+          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        }}>
           {title}
         </span>
-        <span style={{ color: T.ink4, display: 'inline-flex' }}>
+        <span style={{ color: T.ink4, display: 'inline-flex', flexShrink: 0 }} title={open ? 'Collapse' : 'Expand'}>
           {open ? Ico.chevDown(12) : Ico.chevRight(12)}
         </span>
       </button>
       {open && (
-        <div style={{ padding: '4px 14px 14px', borderTop: `1px solid ${T.line}` }}>
+        <div style={{
+          padding: '4px 14px 14px',
+          // `slim` keeps the bubble surface + border but drops the
+          // top divider so the header reads as a single continuous
+          // line above the body (per spec for Context).
+          borderTop: slim ? 'none' : `1px solid ${T.line}`,
+          maxHeight: maxBodyHeight,
+          overflowY: 'auto',
+        }}>
           {children}
         </div>
       )}
@@ -447,12 +476,21 @@ export default function ChatView({
   onRemoveAttachment,
   onPinTask,
   onUnpinTask,
+  onRenameTask,
+  onDeleteTask,
+  onMoveTaskToProject,
+  onOpenProject,
+  projects = [],
   sidebarCollapsed = false,
 }) {
   const scrollRef = useRef(null);
   const [railOpen, setRailOpen] = useState(true);
   // Step id whose scratchpad cells are visible in the modal. null = closed.
   const [openScratchpadStepId, setOpenScratchpadStepId] = useState(null);
+  // Task settings menu (kebab in header).
+  const settingsBtnRef = useRef(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsAnchor, setSettingsAnchor] = useState(null);
 
   const isStreaming = task.messages.some((m) => m.role === '_streaming');
   const visibleMessages = task.messages.filter((m) => m.role !== '_streaming');
@@ -504,7 +542,13 @@ export default function ChatView({
     <div ref={chatRef} style={{
       flex: 1, minHeight: 0,
       display: 'grid',
-      gridTemplateColumns: railOpen ? '1fr 320px' : '1fr 0px',
+      // minmax(0, 1fr) is critical — bare `1fr` lets the grid track
+      // EXPAND past its allocated size when an unbreakable child (e.g.
+      // a very long task title) demands more width, which pushes the
+      // rail off-screen and causes content to bleed visually behind
+      // the rail. minmax(0, …) tells grid the column can shrink to 0,
+      // so the conv col stays inside its track and content clips.
+      gridTemplateColumns: railOpen ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr) 0px',
       // Without an explicit row, the implicit row is sized to content,
       // so the scroll region's inner content height grows the row past
       // the container — the scroll bar never appears. 1fr forces the
@@ -537,6 +581,38 @@ export default function ChatView({
         gridTemplateRows: 'auto 1fr',
         minWidth: 0, minHeight: 0,
       }}>
+        {/* Floating expand-rail button — appears on the right edge of
+            the conv column when the rail is collapsed. Mirror of the
+            sidebar's hamburger pattern. */}
+        <button
+          type="button"
+          onClick={() => setRailOpen(true)}
+          title="Expand panel"
+          aria-label="Expand panel"
+          style={{
+            position: 'absolute',
+            top: 14, right: 14,
+            zIndex: 10,
+            width: 28, height: 28,
+            borderRadius: 6,
+            display: 'inline-grid', placeItems: 'center',
+            cursor: 'pointer',
+            background: 'transparent',
+            border: 0,
+            color: T.ink3,
+            opacity: railOpen ? 0 : 1,
+            transform: railOpen ? 'translateX(8px)' : 'translateX(0)',
+            pointerEvents: railOpen ? 'none' : 'auto',
+            transition:
+              `opacity 280ms cubic-bezier(0.32,0.72,0,1) ${railOpen ? '0ms' : '120ms'}, ` +
+              `transform 360ms cubic-bezier(0.32,0.72,0,1) ${railOpen ? '0ms' : '80ms'}`,
+            WebkitAppRegion: 'no-drag',
+          }}
+          onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+          onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
+        >
+          {Ico.panelExpandLeft(15)}
+        </button>
 
         {/* Header — when the sidebar is collapsed, the floating hamburger
             sits at x:97 in the window, so push the header content right
@@ -547,64 +623,135 @@ export default function ChatView({
           borderBottom: `1px solid ${T.line}`,
           background: 'transparent',
           flexShrink: 0,
+          // Belt + suspenders: even if a flex child miscalculates by a
+          // pixel, this prevents the header from visually pushing past
+          // the conv-col grid track (which is what was making the icons
+          // appear to slide behind the right rail).
+          minWidth: 0, overflow: 'hidden',
           transition: 'padding 240ms cubic-bezier(0.32, 0.72, 0, 1)',
         }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0, flex: 1 }}>
-            <button
-              onClick={onBack}
-              title="Back"
-              style={{
-                all: 'unset', cursor: 'pointer',
-                width: 22, height: 22, borderRadius: 5, color: T.ink4,
-                display: 'inline-grid', placeItems: 'center',
-              }}
-            >
-              {Ico.chevLeft(14)}
-            </button>
-            <span style={{
+          {/* Left side: [Project] › [Task]. The project crumb is a
+              clickable button that returns home with that project
+              pre-selected (the equivalent of "new task in this project"). */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            minWidth: 0, flex: '1 1 0',
+            overflow: 'hidden',
+          }}>
+            {project?.name && (
+              <>
+                <button
+                  type="button"
+                  onClick={() => onOpenProject?.(project)}
+                  title={`Open project: ${project.name}`}
+                  style={{
+                    all: 'unset', cursor: 'pointer',
+                    fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 13,
+                    letterSpacing: '0.04em', color: T.ink3,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    maxWidth: 200, flexShrink: 1,
+                    padding: '2px 4px', borderRadius: 5,
+                    transition: 'color 120ms ease, background 120ms ease',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
+                >
+                  {project.name}
+                </button>
+                <span style={{ color: T.ink4, display: 'inline-flex', flexShrink: 0 }}>{Ico.chevRight(12)}</span>
+              </>
+            )}
+            <span title={task.title} style={{
               fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
               letterSpacing: '0.04em', color: T.ink,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              minWidth: 0,
+              overflowWrap: 'anywhere',
+              minWidth: 0, flex: '1 1 0',
             }}>{task.title}</span>
-            <span style={{ color: T.ink4, display: 'inline-flex' }}>{Ico.chevRight(12)}</span>
           </div>
+
+          {/* Right side: settings (kebab) + rail toggle. */}
           <div style={{
-            display: 'flex', alignItems: 'center', gap: 14,
-            fontFamily: FONT_MONO, fontSize: 11, color: T.ink4, letterSpacing: '0.04em',
+            display: 'flex', alignItems: 'center', gap: 4,
             flexShrink: 0,
           }}>
-            <span>{model?.name ?? task.model ?? 'model'}</span>
-            <span style={{ width: 1, height: 12, background: T.line2 }} />
-            <span>{dialogMessageCount} turns</span>
+            {task.pinned && (
+              <span title="Pinned" style={{
+                display: 'inline-grid', placeItems: 'center',
+                width: 22, height: 22, color: T.accent, flexShrink: 0,
+              }}>{Ico.pin(13)}</span>
+            )}
             <button
-              onClick={() => task.pinned ? onUnpinTask?.(task.id) : onPinTask?.(task)}
-              title={task.pinned ? 'Unpin task' : 'Pin task'}
+              ref={settingsBtnRef}
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                if (!settingsBtnRef.current) return;
+                setSettingsAnchor(settingsBtnRef.current.getBoundingClientRect());
+                setSettingsOpen((v) => !v);
+              }}
+              title="Task settings"
+              aria-label="Task settings"
               style={{
                 all: 'unset', cursor: 'pointer',
-                width: 26, height: 26, borderRadius: 6,
+                width: 28, height: 28, borderRadius: 6,
                 display: 'inline-grid', placeItems: 'center',
-                color: task.pinned ? T.accent : T.ink3,
+                color: T.ink3,
+                flexShrink: 0,
               }}
+              onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+              onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
             >
-              {Ico.pin(14)}
+              {Ico.moreVert(15)}
             </button>
             <button
+              type="button"
               onClick={() => setRailOpen((o) => !o)}
               title={railOpen ? 'Hide side panel' : 'Show side panel'}
+              aria-label={railOpen ? 'Hide side panel' : 'Show side panel'}
               style={{
                 all: 'unset', cursor: 'pointer',
-                width: 26, height: 26, marginLeft: 0, borderRadius: 6,
+                width: 28, height: 28, borderRadius: 6,
                 display: 'inline-grid', placeItems: 'center',
                 color: T.ink3,
                 border: `1px solid ${railOpen ? T.line2 : 'transparent'}`,
                 background: railOpen ? T.surface : 'transparent',
+                flexShrink: 0,
               }}
             >
-              {Ico.list(13)}
+              {Ico.list(14)}
             </button>
           </div>
         </div>
+        {/* Settings menu — Schedule (WIP) + Turn into skill +
+            Move to project / Pin / Rename / Delete. */}
+        <TaskMenu
+          task={task}
+          projects={projects}
+          open={settingsOpen}
+          anchorRect={settingsAnchor}
+          showHeaderActions
+          onClose={() => setSettingsOpen(false)}
+          onPin={() => onPinTask?.(task)}
+          onUnpin={() => onUnpinTask?.(task.id)}
+          onRename={() => {
+            const next = window.prompt('Rename task', task.title || '');
+            if (next != null) onRenameTask?.(task.id, next);
+          }}
+          onDelete={() => onDeleteTask?.(task.id)}
+          onMoveToProject={(p) => onMoveTaskToProject?.(task.id, p.name)}
+          onSchedule={() => {
+            // Placeholder — schedule UX is WIP. Drop a hint into the
+            // composer-friendly inbox by sending a message that asks
+            // anton to set one up.
+            onSend?.('Schedule this task to recur — let me confirm the cadence.');
+          }}
+          onTurnIntoSkill={() => {
+            // Per spec: send a message asking anton to turn this turn
+            // into a reusable skill, then let the chat continue.
+            onSend?.('Turn this conversation into a reusable skill.');
+          }}
+        />
 
         {/* Scrollable conversation */}
         <div ref={scrollRef} data-scroll="true" style={{
@@ -732,7 +879,7 @@ export default function ChatView({
         visibility: railOpen ? 'visible' : 'hidden',
         opacity: railOpen ? 1 : 0,
         transition: 'opacity 180ms ease',
-        display: 'flex', flexDirection: 'column', gap: 12,
+        display: 'flex', flexDirection: 'column', gap: 10,
         // overflowX hidden is defensive: when the grid column shrinks
         // to 0 (collapsed), card content shouldn't visually spill
         // back into the conversation column.
@@ -741,7 +888,30 @@ export default function ChatView({
         minWidth: 0,
         WebkitAppRegion: 'no-drag',
       }}>
-        <RailCard title="Progress" defaultOpen>
+        {/* Rail header bar — dedicated collapse-to-right button at the
+            top-right corner. Mirrors the sidebar's collapse pattern. */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+          flexShrink: 0,
+        }}>
+          <button
+            type="button"
+            onClick={() => setRailOpen(false)}
+            title="Collapse panel"
+            aria-label="Collapse panel"
+            style={{
+              all: 'unset', cursor: 'pointer',
+              width: 26, height: 26, borderRadius: 6,
+              display: 'inline-grid', placeItems: 'center',
+              color: T.ink3,
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
+          >
+            {Ico.panelCollapseRight(15)}
+          </button>
+        </div>
+        <RailCard title="Progress" defaultOpen maxBodyHeight={300}>
           <PhaseProgress
             steps={railSteps}
             streamStatus={streamingMsg?.streamStatus || (railSteps.length ? 'done' : null)}
@@ -749,11 +919,18 @@ export default function ChatView({
             onActivateStep={(step) => setOpenScratchpadStepId(step.id)}
           />
         </RailCard>
-        <RailCard title="Working folder" defaultOpen>
-          <WorkingFolder project={project} files={[]} />
+        <RailCard title="Working folder" defaultOpen maxBodyHeight={320}>
+          <WorkingFolderLive
+            project={project}
+            isStreaming={isStreaming}
+            streamStartedAt={streamingMsg?.startedAt}
+          />
         </RailCard>
-        <RailCard title="Context">
-          <ContextSection attachments={taskAttachments} />
+        {/* Context — slim header with no underline, expanded by
+            default per spec. The expander icon on the right doubles
+            as the collapse button. */}
+        <RailCard title="Context" defaultOpen slim maxBodyHeight={360}>
+          <ContextCard project={project} />
         </RailCard>
       </aside>
 

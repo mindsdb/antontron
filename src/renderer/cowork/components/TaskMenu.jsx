@@ -1,0 +1,277 @@
+// Task action menu — used in two places:
+//   1. Sidebar RecentItem / pinned items, on hover
+//   2. Chat header (with extra Schedule + Turn into skill items)
+//
+// Renders as a positioned popover anchored to the trigger button. The
+// trigger is provided by the parent (a 3-dot kebab); we just take the
+// task and a set of callbacks. Clicking outside / Esc closes.
+//
+// Project list is fetched lazily once when "Move to project" hovers
+// open, then cached for the lifetime of the menu.
+
+import { useEffect, useRef, useState } from 'react';
+import Ico from './Icons';
+
+function MenuButton({ icon, label, onClick, danger = false, hint, hasSubmenu = false, onMouseEnter, onMouseLeave }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick?.(); }}
+      onMouseEnter={onMouseEnter}
+      onMouseLeave={onMouseLeave}
+      style={{
+        all: 'unset', cursor: 'pointer',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: '7px 10px',
+        fontFamily: "'Inter', sans-serif",
+        fontSize: 13,
+        color: danger ? 'var(--danger)' : 'var(--ink-2)',
+        borderRadius: 6,
+        width: 'calc(100% - 20px)',
+        margin: '0 4px',
+      }}
+      onMouseOver={(e) => { e.currentTarget.style.background = danger ? 'color-mix(in srgb, var(--danger) 12%, transparent)' : 'var(--surface-2)'; }}
+      onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >
+      {icon && (
+        <span style={{ display: 'inline-flex', flexShrink: 0, color: danger ? 'var(--danger)' : 'var(--ink-3)' }}>
+          {icon}
+        </span>
+      )}
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {label}
+      </span>
+      {hint && <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-4)' }}>{hint}</span>}
+      {hasSubmenu && <span style={{ display: 'inline-flex', color: 'var(--ink-4)' }}>{Ico.chevRight(11)}</span>}
+    </button>
+  );
+}
+
+function MenuDivider() {
+  return <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />;
+}
+
+export function TaskMenu({
+  task,
+  projects = [],
+  open,
+  anchorRect,                 // {top, left, bottom, right} from trigger.getBoundingClientRect()
+  align = 'right',            // 'right' anchors the menu's right edge to the trigger's right edge
+  onClose,
+  onPin,
+  onUnpin,
+  onRename,
+  onDelete,
+  onMoveToProject,
+  // Header-only extras:
+  onSchedule,
+  onTurnIntoSkill,
+  showHeaderActions = false,
+}) {
+  const [moveOpen, setMoveOpen] = useState(false);
+  const popoverRef = useRef(null);
+  const submenuRef = useRef(null);
+  const moveItemRef = useRef(null);
+  const [submenuPos, setSubmenuPos] = useState(null);
+
+  // Auto-close grace timer. Two cases handled:
+  //   - Menu opens and the user never moves the mouse into it. We
+  //     start an initial timer (1500ms) so the menu doesn't sit
+  //     forever after a stray click.
+  //   - Mouse enters then leaves. mouseenter cancels the timer;
+  //     mouseleave restarts a short one (450ms).
+  const closeTimer = useRef(null);
+  const cancelCloseTimer = () => {
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
+    }
+  };
+  const scheduleClose = (ms = 450) => {
+    cancelCloseTimer();
+    closeTimer.current = setTimeout(() => onClose?.(), ms);
+  };
+
+  // Submenu open timer — opens on hover with a tiny delay, but more
+  // importantly stays open while the cursor is en route between menu
+  // and submenu (the 4px gap was firing onMouseLeave before the click
+  // could land on a submenu item).
+  const submenuTimer = useRef(null);
+  const cancelSubmenuTimer = () => {
+    if (submenuTimer.current) {
+      clearTimeout(submenuTimer.current);
+      submenuTimer.current = null;
+    }
+  };
+
+  // Esc + click-outside + initial auto-close.
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
+    const onClick = (e) => {
+      const inMain = popoverRef.current?.contains(e.target);
+      const inSub  = submenuRef.current?.contains(e.target);
+      if (!inMain && !inSub) onClose?.();
+    };
+    window.addEventListener('keydown', onKey);
+    // Use mousedown so the close fires before any other click handler
+    // on the page (e.g. the row click that would re-open the menu).
+    window.addEventListener('mousedown', onClick);
+
+    // Kick off an initial auto-close. If the user moves into the
+    // menu, mouseenter cancels it. If they never engage, the menu
+    // dismisses on its own.
+    scheduleClose(2200);
+
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('mousedown', onClick);
+      cancelCloseTimer();
+      cancelSubmenuTimer();
+    };
+  }, [open, onClose]);
+
+  // Reset submenu state on close.
+  useEffect(() => {
+    if (!open) {
+      setMoveOpen(false);
+      setSubmenuPos(null);
+      cancelCloseTimer();
+      cancelSubmenuTimer();
+    }
+  }, [open]);
+
+  if (!open) return null;
+
+  // Position the popover. We use fixed positioning anchored to
+  // viewport coordinates from anchorRect. Fall back to (0,0) if the
+  // anchor is missing.
+  const top = (anchorRect?.bottom ?? 0) + 4;
+  const left = align === 'right'
+    ? Math.max(8, (anchorRect?.right ?? 0) - 220)
+    : (anchorRect?.left ?? 0);
+
+  const handleMoveHover = () => {
+    cancelSubmenuTimer();
+    if (!moveItemRef.current) return;
+    const r = moveItemRef.current.getBoundingClientRect();
+    setSubmenuPos({ top: r.top, left: r.right + 4 });
+    setMoveOpen(true);
+  };
+
+  // Defer closing the submenu so the cursor has time to cross the
+  // 4px gap from the menu edge into the submenu without the submenu
+  // disappearing.
+  const scheduleSubmenuClose = () => {
+    cancelSubmenuTimer();
+    submenuTimer.current = setTimeout(() => setMoveOpen(false), 220);
+  };
+
+  return (
+    <div
+      ref={popoverRef}
+      onMouseEnter={cancelCloseTimer}
+      onMouseLeave={scheduleClose}
+      style={{
+        position: 'fixed', top, left, zIndex: 60,
+        width: 220,
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 10,
+        boxShadow: '0 12px 32px rgba(15,16,17,0.18), 0 1px 0 rgba(15,16,17,0.04)',
+        padding: '4px 0',
+        WebkitAppRegion: 'no-drag',
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {showHeaderActions && (
+        <>
+          <MenuButton
+            icon={Ico.schedule(14)}
+            label="Schedule"
+            hint="WIP"
+            onClick={() => { onSchedule?.(); onClose?.(); }}
+          />
+          <MenuButton
+            icon={Ico.brain(14)}
+            label="Turn into skill"
+            onClick={() => { onTurnIntoSkill?.(); onClose?.(); }}
+          />
+          <MenuDivider />
+        </>
+      )}
+
+      <div
+        ref={moveItemRef}
+        onMouseEnter={handleMoveHover}
+        onMouseLeave={scheduleSubmenuClose}
+        style={{ position: 'relative' }}
+      >
+        <MenuButton
+          icon={Ico.moveTo(14)}
+          label="Move to project"
+          hasSubmenu
+          onClick={handleMoveHover}
+        />
+      </div>
+      {moveOpen && submenuPos && (
+        <div
+          ref={submenuRef}
+          onMouseEnter={() => { cancelSubmenuTimer(); cancelCloseTimer(); }}
+          onMouseLeave={() => { scheduleSubmenuClose(); scheduleClose(); }}
+          style={{
+            position: 'fixed',
+            top: submenuPos.top, left: submenuPos.left,
+            zIndex: 61,
+            width: 200,
+            maxHeight: 280, overflowY: 'auto',
+            background: 'var(--surface)',
+            border: '1px solid var(--line)',
+            borderRadius: 10,
+            boxShadow: '0 12px 32px rgba(15,16,17,0.18)',
+            padding: '4px 0',
+          }}
+        >
+          {projects.length === 0 && (
+            <div style={{ padding: '10px 14px', fontSize: 12.5, color: 'var(--ink-4)' }}>
+              No other projects.
+            </div>
+          )}
+          {projects.map((p) => {
+            const isCurrent = p.name === task?.projectName || p.path === task?.projectPath;
+            return (
+              <MenuButton
+                key={p.name}
+                label={p.name}
+                onClick={() => { if (!isCurrent) { onMoveToProject?.(p); onClose?.(); } }}
+                hint={isCurrent ? 'current' : undefined}
+              />
+            );
+          })}
+        </div>
+      )}
+
+      <MenuDivider />
+
+      <MenuButton
+        icon={Ico.pin(14)}
+        label={task?.pinned ? 'Unpin' : 'Pin'}
+        onClick={() => { (task?.pinned ? onUnpin : onPin)?.(); onClose?.(); }}
+      />
+      <MenuButton
+        icon={Ico.edit(14)}
+        label="Rename"
+        onClick={() => { onRename?.(); onClose?.(); }}
+      />
+
+      <MenuDivider />
+
+      <MenuButton
+        icon={Ico.trash(14)}
+        label="Delete"
+        danger
+        onClick={() => { onDelete?.(); onClose?.(); }}
+      />
+    </div>
+  );
+}

@@ -57,9 +57,17 @@ export default function Composer({
   const [connectorsOpen, setConnectorsOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [listening, setListening] = useState(false);
   const taRef = useRef(null);
   const fileRef = useRef(null);
   const wrapRef = useRef(null);
+  const recognitionRef = useRef(null);
+  const dictationBaseRef = useRef('');
+
+  const SpeechRecognitionCtor = typeof window !== 'undefined'
+    ? (window.SpeechRecognition || window.webkitSpeechRecognition)
+    : null;
+  const speechSupported = !!SpeechRecognitionCtor;
 
   useEffect(() => {
     if (!taRef.current) return;
@@ -119,6 +127,69 @@ export default function Composer({
     if (taRef.current) taRef.current.style.height = 'auto';
   };
 
+  const stopListening = () => {
+    const rec = recognitionRef.current;
+    if (rec) { try { rec.stop(); } catch {} }
+  };
+
+  const startListening = () => {
+    if (!SpeechRecognitionCtor || listening || disabled) return;
+    setError('');
+    const rec = new SpeechRecognitionCtor();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = navigator.language || 'en-US';
+    dictationBaseRef.current = value;
+
+    rec.onresult = (event) => {
+      let interim = '';
+      let finalChunk = '';
+      for (let i = event.resultIndex; i < event.results.length; i += 1) {
+        const transcript = event.results[i][0].transcript;
+        if (event.results[i].isFinal) finalChunk += transcript;
+        else interim += transcript;
+      }
+      const base = dictationBaseRef.current;
+      const join = (text) => {
+        if (!text) return base;
+        const sep = base && !/\s$/.test(base) ? ' ' : '';
+        return base + sep + text;
+      };
+      if (finalChunk) {
+        dictationBaseRef.current = join(finalChunk);
+        setValue(dictationBaseRef.current);
+      } else {
+        setValue(join(interim));
+      }
+    };
+    rec.onerror = (event) => {
+      const code = event.error || 'unknown';
+      const msg = code === 'not-allowed' || code === 'service-not-allowed'
+        ? 'Microphone permission was denied.'
+        : code === 'no-speech'
+          ? 'Did not catch that — try again.'
+          : `Voice input error: ${code}`;
+      setError(msg);
+    };
+    rec.onend = () => {
+      setListening(false);
+      recognitionRef.current = null;
+    };
+
+    recognitionRef.current = rec;
+    setListening(true);
+    try { rec.start(); } catch (err) {
+      setListening(false);
+      recognitionRef.current = null;
+      setError(err?.message || 'Could not start voice input.');
+    }
+  };
+
+  useEffect(() => () => {
+    const rec = recognitionRef.current;
+    if (rec) { try { rec.abort(); } catch {} }
+  }, []);
+
   return (
     <div ref={wrapRef} style={{ width: '100%', maxWidth: 'var(--composer-max-width, 640px)', position: 'relative' }}>
       <input
@@ -167,14 +238,17 @@ export default function Composer({
             {Ico.plus(15)}
           </button>
           <div style={{ flex: 1 }} />
-          <button
-            className="composer-mic"
-            title="Voice is disabled for this pass"
-            data-coming-soon=""
-            style={{ opacity: 0.6, cursor: 'default' }}
-          >
-            {Ico.mic(16)}
-          </button>
+          {speechSupported && (
+            <button
+              className={`composer-icon${listening ? ' listening' : ''}`}
+              onClick={listening ? stopListening : startListening}
+              disabled={disabled}
+              title={listening ? 'Stop voice input' : 'Voice input'}
+              aria-pressed={listening}
+            >
+              {Ico.mic(16)}
+            </button>
+          )}
           <button
             className="send-btn"
             disabled={disabled || !value.trim() || busy}
