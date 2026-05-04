@@ -91,6 +91,159 @@ function describeActivity(event) {
   return phase ? `Anton is ${phase}` : 'Anton is working';
 }
 
+// ─── Per-turn step persistence ───────────────────────────────────────────
+//
+// Anton's history file (the canonical conversation record) only stores
+// {role, content}. The streaming adapter builds richer step data —
+// scratchpad cells, artifacts, reasoning timing — but those are dropped
+// on persistence and would be lost on conversation reload, leaving the
+// chat with no Thinking block, no inline artifact cards, and an empty
+// Scratchpad modal.
+//
+// We sidecar the full step list in localStorage keyed by conversation
+// id → assistant turn index. Persistence is local to this install
+// (fine for a desktop app); promote to a server-side sidecar later if
+// cross-device sync matters.
+//
+// Schema (per turn):
+//   { steps: ThinkingStep[], startedAt: number }
+//
+// ThinkingStep shape mirrors `responseStreamAdapter`'s output, including
+// the `_isScratchpad` / `_scratchpadTabId` markers the ScratchpadModal
+// keys off so tabs reattach when the conversation is reopened.
+const CONV_TURNS_KEY = (cid) => `anton:conv-turns:${cid}`;
+const LEGACY_ARTIFACTS_KEY = (cid) => `anton:conv-artifacts:${cid}`;
+
+function readConvTurns(cid) {
+  if (!cid) return null;
+  try {
+    const raw = localStorage.getItem(CONV_TURNS_KEY(cid));
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    return data && typeof data === 'object' ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeConvTurns(cid, data) {
+  if (!cid) return;
+  try { localStorage.setItem(CONV_TURNS_KEY(cid), JSON.stringify(data)); }
+  catch {} // private mode / quota — fail silently
+}
+
+// One-time migration from the old artifact-only sidecar. Each entry
+// was an array of artifact-shape steps; promote it to the new shape.
+function migrateLegacyArtifacts(cid) {
+  if (!cid) return;
+  try {
+    const legacy = localStorage.getItem(LEGACY_ARTIFACTS_KEY(cid));
+    if (!legacy) return;
+    const map = JSON.parse(legacy);
+    if (!map || typeof map !== 'object') return;
+    const next = readConvTurns(cid) || {};
+    for (const [idx, arts] of Object.entries(map)) {
+      if (!Array.isArray(arts) || arts.length === 0) continue;
+      const existing = next[idx]?.steps || [];
+      next[idx] = { steps: [...existing, ...arts], startedAt: next[idx]?.startedAt || null };
+    }
+    writeConvTurns(cid, next);
+    localStorage.removeItem(LEGACY_ARTIFACTS_KEY(cid));
+  } catch {}
+}
+
+// Replay the server-persisted event log for one assistant turn
+// through the same reducer the live stream uses. The resulting
+// `steps` and `startedAt` are identical to what the client would
+// have built during a fresh stream — no parity drift.
+function reduceServerEvents(events, fallbackStartedAt) {
+  if (!Array.isArray(events) || events.length === 0) return null;
+  let state = initialStreamState();
+  for (const ev of events) {
+    try { state = reduceStream(state, ev); } catch {}
+  }
+  return {
+    steps: state.steps || [],
+    startedAt: state.startedAt || fallbackStartedAt || null,
+  };
+}
+
+// Walk a messages payload from the server and, for any assistant
+// turn that carries an `events` array (the new sidecar), derive
+// `steps`/`startedAt` via the live reducer. Drops the raw `events`
+// so React state doesn't carry the redundant log around.
+function hydrateMessagesFromServerEvents(messages) {
+  if (!Array.isArray(messages)) return messages;
+  return messages.map((m) => {
+    if (m.role !== 'assistant') return m;
+    const events = m.events;
+    if (!Array.isArray(events) || events.length === 0) return m;
+    const reduced = reduceServerEvents(events, m.startedAt);
+    const { events: _drop, ...rest } = m;
+    if (!reduced || reduced.steps.length === 0) return rest;
+    return {
+      ...rest,
+      steps: reduced.steps,
+      startedAt: rest.startedAt || reduced.startedAt,
+    };
+  });
+}
+
+// Persist the full step set for one assistant turn so reload restores
+// the Thinking block, scratchpad tabs, and inline artifact cards.
+// `turnIndex` is the 0-based position of this assistant message among
+// all assistant messages in the conversation.
+function persistTurnState(cid, turnIndex, steps, startedAt) {
+  if (!cid || !Array.isArray(steps) || steps.length === 0) return;
+  const map = readConvTurns(cid) || {};
+  // Strip any non-serialisable fields (refs, functions). The step
+  // shape is plain data otherwise.
+  const sanitized = steps.map((s) => ({
+    id: s.id,
+    label: s.label || null,
+    badge: s.badge || null,
+    icon: s.icon || null,
+    status: s.status || 'completed',
+    startedAt: s.startedAt ?? null,
+    completedAt: s.completedAt ?? null,
+    reasoningStartedAt: s.reasoningStartedAt ?? null,
+    executionStartedAt: s.executionStartedAt ?? null,
+    executionCompletedAt: s.executionCompletedAt ?? null,
+    data: s.data || null,
+    output: typeof s.output === 'string' ? s.output : null,
+    result: s.result || null,
+    stderr: s.stderr || null,
+    _isScratchpad: !!s._isScratchpad,
+    _scratchpadTabId: s._scratchpadTabId || null,
+  }));
+  map[turnIndex] = { steps: sanitized, startedAt: startedAt ?? null };
+  writeConvTurns(cid, map);
+}
+
+// Merge persisted step + timing data onto assistant messages by turn
+// index. Idempotent — if a message already has steps from a fresh
+// stream we don't overwrite (the live data is more accurate).
+function mergeConvTurns(cid, messages) {
+  if (!cid || !messages) return messages;
+  migrateLegacyArtifacts(cid);
+  const map = readConvTurns(cid);
+  if (!map) return messages;
+  let assistantIdx = 0;
+  return messages.map((m) => {
+    if (m.role !== 'assistant') return m;
+    const saved = map[assistantIdx];
+    assistantIdx += 1;
+    if (!saved || !Array.isArray(saved.steps) || saved.steps.length === 0) return m;
+    const hasLiveSteps = Array.isArray(m.steps) && m.steps.length > 0;
+    if (hasLiveSteps) return m;
+    return {
+      ...m,
+      steps: saved.steps,
+      startedAt: m.startedAt || saved.startedAt || null,
+    };
+  });
+}
+
 function appendActivity(messages, event) {
   const content = describeActivity(event);
   const cleaned = removeThinkingPlaceholder(messages);
@@ -462,10 +615,27 @@ function AppCore() {
       if (!task.messages || task.messages.length === 0) {
         fetchSession(id).then((fresh) => {
           if (!fresh || !Array.isArray(fresh.messages) || fresh.messages.length === 0) return;
+          // Two layers of restoration, in order of trust:
+          //   1. Server sidecar (`{cid}_turns.json`) — events for each
+          //      assistant turn, replayed through the same reducer the
+          //      live stream uses. Survives any client reset and
+          //      anyone reading the conversation gets the same view.
+          //   2. localStorage sidecar — legacy fallback for turns
+          //      created before the server sidecar shipped.
+          const fromServer = hydrateMessagesFromServerEvents(fresh.messages);
+          const enriched = mergeConvTurns(id, fromServer);
           setTasks((prev) => prev.map((t) =>
-            t.id === id ? { ...t, messages: fresh.messages } : t
+            t.id === id ? { ...t, messages: enriched } : t
           ));
         }).catch(() => {});
+      } else {
+        // Already preloaded — still hydrate once so reopening surfaces
+        // any data persisted in a prior session.
+        setTasks((prev) => prev.map((t) => {
+          if (t.id !== id) return t;
+          const fromServer = hydrateMessagesFromServerEvents(t.messages);
+          return { ...t, messages: mergeConvTurns(id, fromServer) };
+        }));
       }
     }
     setComposerAttachments([]);
@@ -708,9 +878,15 @@ function AppCore() {
         const finalContent = streamState.bodyText || assistantContent;
         const finalSteps = streamState.steps;
         const finalStartedAt = streamState.startedAt;
+        let assistantTurnIndex = 0;
         setTasks((prev) => prev.map((t) => {
           if (t.id !== finalId && t.id !== resolvedId && t.id !== tempId) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
+          // Count prior assistant turns BEFORE adding the new one so
+          // the persisted index lines up with what mergeConvTurns
+          // expects on reload (the merge walks assistant messages in
+          // the same order and looks up by index).
+          assistantTurnIndex = msgs.filter((m) => m.role === 'assistant').length;
           return finalContent
             ? { ...t, id: finalId, status: 'idle', messages: [...msgs, {
                 role: 'assistant',
@@ -721,6 +897,14 @@ function AppCore() {
             : { ...t, id: finalId, status: 'idle', messages: msgs };
         }));
         setActiveTaskId(finalId);
+        // Persist all step data (scratchpad cells, artifacts, timing)
+        // so reopening the conversation restores the Thinking block,
+        // inline artifact cards, and scratchpad tabs. Anton's own
+        // history file doesn't carry step metadata, so this is a
+        // sidecar in localStorage.
+        if (finalContent) {
+          persistTurnState(finalId, assistantTurnIndex, finalSteps, finalStartedAt);
+        }
         fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
       },
       onError(message, event) {
@@ -813,9 +997,11 @@ function AppCore() {
         const finalContent = streamState.bodyText || assistantContent;
         const finalSteps = streamState.steps;
         const finalStartedAt = streamState.startedAt;
+        let assistantTurnIndex = 0;
         setTasks((prev) => prev.map((t) => {
           if (t.id !== id) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
+          assistantTurnIndex = msgs.filter((m) => m.role === 'assistant').length;
           return finalContent
             ? { ...t, status: 'idle', messages: [...msgs, {
                 role: 'assistant',
@@ -825,6 +1011,10 @@ function AppCore() {
               }] }
             : { ...t, status: 'idle', messages: msgs };
         }));
+        if (finalContent) {
+          // Sidecar — see persistTurnState comment for the full schema.
+          persistTurnState(id, assistantTurnIndex, finalSteps, finalStartedAt);
+        }
         fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
       },
       onError(message, event) {

@@ -10,6 +10,65 @@ import { mountArtifactPreview, publishArtifact, unpublishArtifact } from '../../
 
 const FONT_BODY = "'Inter', system-ui, sans-serif";
 const FONT_DISPLAY = "'Josefin Sans', sans-serif";
+const FONT_MONO = "'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace";
+
+// Single-row "label: value [copy]" — used twice in the header (local
+// path + remote URL when published). Tiny inline copy state flips the
+// glyph to a check for ~1.4s after a successful copy.
+function PathRow({ label, value, accent = false }) {
+  const [copied, setCopied] = useState(false);
+  if (!value) return null;
+  const onCopy = async (e) => {
+    e.stopPropagation();
+    try { await navigator.clipboard?.writeText?.(value); } catch {}
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1400);
+  };
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6, minWidth: 0,
+      fontFamily: FONT_MONO, fontSize: 10.5,
+    }}>
+      <span style={{
+        flexShrink: 0,
+        color: 'var(--ink-4)', letterSpacing: '0.04em',
+        textTransform: 'uppercase',
+      }}>{label}:</span>
+      <span title={value} style={{
+        minWidth: 0, flex: 1,
+        color: accent ? 'var(--accent)' : 'var(--ink-3)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        {value}
+      </span>
+      <button
+        type="button"
+        onClick={onCopy}
+        title={copied ? 'Copied' : `Copy ${label}`}
+        aria-label={copied ? 'Copied' : `Copy ${label}`}
+        style={{
+          flexShrink: 0,
+          width: 20, height: 20, borderRadius: 4,
+          background: 'transparent', border: 0,
+          cursor: 'pointer',
+          color: copied ? 'var(--accent)' : 'var(--ink-4)',
+          display: 'inline-grid', placeItems: 'center',
+          transition: 'color 120ms ease, background 120ms ease',
+        }}
+        onMouseOver={(e) => {
+          if (!copied) e.currentTarget.style.color = 'var(--ink-2)';
+          e.currentTarget.style.background = 'var(--surface-2)';
+        }}
+        onMouseOut={(e) => {
+          e.currentTarget.style.color = copied ? 'var(--accent)' : 'var(--ink-4)';
+          e.currentTarget.style.background = 'transparent';
+        }}
+      >
+        {copied ? Ico.check(11) : Ico.copy(11)}
+      </button>
+    </div>
+  );
+}
 
 export function ArtifactViewer({ open, artifact, onClose, onChange }) {
   // Mounted preview URL — iframe loads this with `src=` so relative
@@ -127,7 +186,7 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
           <span style={{ display: 'inline-flex', color: 'var(--accent)', flexShrink: 0 }}>
             {Ico.doc(18)}
           </span>
-          <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
             <div style={{
               fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 15,
               color: 'var(--ink)',
@@ -135,18 +194,16 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
             }}>
               {artifact.title || artifact.path?.split('/').pop()}
             </div>
-            <div title={artifact.path} style={{
-              fontSize: 11, color: 'var(--ink-4)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {artifact.path}
-            </div>
+            <PathRow label="local" value={artifact.path} />
+            {publishedUrl && (
+              <PathRow label="remote" value={publishedUrl} accent />
+            )}
           </div>
           {publishedUrl && (
             <button
               type="button"
               onClick={onOpenPublished}
-              title={`Open published URL: ${publishedUrl}`}
+              title={`Open published URL in browser: ${publishedUrl}`}
               style={{
                 cursor: 'pointer',
                 background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
@@ -159,7 +216,12 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
               }}
             >
               <span style={{ width: 6, height: 6, borderRadius: 99, background: 'var(--accent)' }} />
-              Published
+              <span>Published</span>
+              {/* External-link glyph signals "click → opens in browser",
+                  matching the URL pill convention on the artifact card. */}
+              <span style={{ display: 'inline-flex', marginLeft: 1 }}>
+                {Ico.externalLink(11)}
+              </span>
             </button>
           )}
           {publishedUrl ? (

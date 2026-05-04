@@ -92,6 +92,26 @@ def _history_path(project: Optional[str], conversation_id: str) -> Path:
     return _episodes_dir(project) / f"{conversation_id}_history.json"
 
 
+def _turns_path(project: Optional[str], conversation_id: str) -> Path:
+    """Sidecar that holds the SSE event log per assistant turn.
+
+    Schema:
+        {
+          "by_assistant_turn": {
+            "0": {"started_at": <ms>, "events": [<sse-payload-dict>, ...]},
+            "1": {...}
+          }
+        }
+
+    The client runs its existing `responseStreamAdapter.reduceStream`
+    over the events to derive the same `steps` array it builds during
+    a live stream. Persisted server-side so reopening the conversation
+    (or switching machines) restores the Thinking block, scratchpad
+    cells, and inline artifact cards without any client-side state.
+    """
+    return _episodes_dir(project) / f"{conversation_id}_turns.json"
+
+
 # ---------------------------------------------------------------------------
 # Metadata persistence
 # ---------------------------------------------------------------------------
@@ -146,6 +166,192 @@ def _load_history(project: Optional[str], conversation_id: str) -> list[dict] | 
         return data if isinstance(data, list) else None
     except Exception:
         return None
+
+
+def _normalize_turns(payload: dict) -> tuple[dict, bool]:
+    """Recover from sidecars written before record_turn_events used the
+    displayable-assistant filter. Old sidecars may have entries keyed
+    by raw history indices like '12' even when the displayable count
+    was 1, leaving the read path unable to attach them.
+
+    Detection: if max(index) >= entry count, the keys are sparse and
+    we re-key sequentially in chronological order (by `started_at`,
+    falling back to the original index). Otherwise the sidecar is
+    already canonical and we leave it alone.
+
+    Returns (normalized_payload, changed). `changed=True` means the
+    caller should write the normalized version back to disk.
+    """
+    by_turn = payload.get("by_assistant_turn")
+    if not isinstance(by_turn, dict) or not by_turn:
+        return payload, False
+
+    items: list[tuple[int, dict]] = []
+    for k, v in by_turn.items():
+        try:
+            idx = int(k)
+        except (ValueError, TypeError):
+            continue
+        if isinstance(v, dict):
+            items.append((idx, v))
+    if not items:
+        return payload, False
+
+    max_idx = max(i for i, _ in items)
+    if max_idx < len(items):
+        # Dense, already canonical (0..len-1).
+        return payload, False
+
+    # Sparse — sort by started_at (descending=False, so earliest first)
+    # then renumber from 0. Ties or missing started_at fall back to the
+    # original index so order is at least stable.
+    items.sort(key=lambda kv: (
+        kv[1].get("started_at")
+        if isinstance(kv[1].get("started_at"), (int, float))
+        else kv[0]
+    ))
+    new_by_turn = {str(new_idx): entry for new_idx, (_, entry) in enumerate(items)}
+    return {**payload, "by_assistant_turn": new_by_turn}, True
+
+
+def load_turns(conversation_id: str) -> dict | None:
+    """Load the per-turn event sidecar for any conversation.
+
+    Returns the parsed `{by_assistant_turn: {...}}` dict, or None if no
+    sidecar exists yet (older conversations, or one that hasn't streamed
+    a turn since this feature shipped). Lazily normalizes old sparse
+    sidecars (from before `record_turn_events` filtered to displayable
+    assistant turns) and writes the canonical version back so future
+    reads are cheap.
+    """
+    located = _find_conversation_dir(conversation_id)
+    if not located:
+        return None
+    _, ep = located
+    path = ep / f"{conversation_id}_turns.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            return None
+    except Exception:
+        return None
+
+    normalized, changed = _normalize_turns(data)
+    if changed:
+        try:
+            _atomic_write(path, normalized)
+        except Exception:
+            logger.debug("Could not rewrite normalized turns sidecar", exc_info=True)
+    return normalized
+
+
+def _displayable_text_for(msg: object) -> str | None:
+    """Return the text the UI would render for this message, or None
+    if it gets filtered out (mirroring `_parse_for_display`).
+    """
+    if not isinstance(msg, dict):
+        return None
+    role = msg.get("role")
+    if role not in ("user", "assistant"):
+        return None
+    content = msg.get("content", "")
+    if not content:
+        return None
+    if isinstance(content, list):
+        text = "".join(
+            (block.get("text") or "")
+            for block in content
+            if isinstance(block, dict) and block.get("type") == "text"
+        )
+        return text if text else None
+    return str(content) if str(content) else None
+
+
+def _count_displayable_assistant_bubbles(history: list[dict]) -> int:
+    """Count merged assistant bubbles in the displayable history —
+    consecutive assistant text messages collapse into a single bubble
+    (matches `_parse_for_display`'s merge behavior).
+
+    Anton's session can emit multiple assistant text messages within a
+    single user→answer cycle (e.g., a brief acknowledgement followed by
+    the actual answer). The UI renders them as one bubble; the events
+    sidecar is keyed off that bubble index, so we have to count the
+    same way when persisting.
+    """
+    count = 0
+    last_was_assistant = False
+    for msg in history:
+        text = _displayable_text_for(msg)
+        if text is None:
+            continue
+        role = msg.get("role") if isinstance(msg, dict) else None
+        if role == "assistant":
+            if not last_was_assistant:
+                count += 1
+            last_was_assistant = True
+        else:
+            last_was_assistant = False
+    return count
+
+
+def record_turn_events(
+    conversation_id: str,
+    started_at_ms: int | None,
+    events: list[dict],
+) -> None:
+    """Persist `events` for the most recently completed assistant turn.
+
+    Called at the end of `/v1/responses` streams. Counts displayable
+    assistant turns in the on-disk history (matching the filter
+    `_parse_for_display` applies on read) so the persisted index is
+    always the same one the client uses to look up `events` per
+    message. Idempotent: re-recording an index overwrites it (so
+    retries write the latest events). All failures are swallowed —
+    the live stream must never block on this.
+    """
+    if not events:
+        return
+    located = _find_conversation_dir(conversation_id)
+    if not located:
+        return
+    project, ep = located
+    path = ep / f"{conversation_id}_turns.json"
+    payload: dict
+    if path.is_file():
+        try:
+            loaded = json.loads(path.read_text(encoding="utf-8"))
+            payload = loaded if isinstance(loaded, dict) else {}
+        except Exception:
+            payload = {}
+    else:
+        payload = {}
+    by_turn = payload.get("by_assistant_turn")
+    if not isinstance(by_turn, dict):
+        by_turn = {}
+
+    history = _load_history(project, conversation_id) or []
+    displayable_count = _count_displayable_assistant_bubbles(history)
+    # The stream just appended this turn's final assistant message,
+    # so `displayable_count - 1` is its 0-based bubble index in the
+    # merged display. Fall back to the next free slot if history is
+    # empty for some reason (partial save) — better to capture
+    # out-of-order than lose the events.
+    if displayable_count > 0:
+        turn_idx = displayable_count - 1
+    else:
+        turn_idx = len(by_turn)
+
+    by_turn[str(turn_idx)] = {
+        "started_at": started_at_ms,
+        "events": events,
+    }
+    payload["by_assistant_turn"] = by_turn
+    try:
+        _atomic_write(path, payload)
+    except Exception:
+        logger.debug("Could not persist turn events for %s", conversation_id, exc_info=True)
 
 
 def _ensure_meta(
@@ -626,9 +832,10 @@ def delete_conversation(conversation_id: str) -> bool:
     if located:
         _, ep = located
         # _meta.json + _history.json are written by the manager; the
-        # bare .jsonl is anton's raw episode log. All three need to go
-        # so the conversation truly disappears.
-        for suffix in ("_meta.json", "_history.json", ".jsonl"):
+        # bare .jsonl is anton's raw episode log; _turns.json is the
+        # cowork-side per-turn event sidecar. All four need to go so
+        # the conversation truly disappears.
+        for suffix in ("_meta.json", "_history.json", "_turns.json", ".jsonl"):
             p = ep / f"{conversation_id}{suffix}"
             if p.is_file():
                 try:
@@ -662,9 +869,10 @@ def move_conversation(conversation_id: str, target_project: str) -> dict | None:
     target_ep.mkdir(parents=True, exist_ok=True)
 
     moved = False
-    # Move all three file flavors so a moved conversation looks
-    # identical to one created in the target project.
-    for suffix in ("_meta.json", "_history.json", ".jsonl"):
+    # Move all file flavors so a moved conversation looks identical to
+    # one created in the target project — meta + history + turn events
+    # sidecar + raw episode log.
+    for suffix in ("_meta.json", "_history.json", "_turns.json", ".jsonl"):
         src = src_ep / f"{conversation_id}{suffix}"
         if not src.is_file():
             continue

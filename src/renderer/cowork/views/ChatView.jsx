@@ -18,6 +18,8 @@ import { OrbitProvider, useOrbitSlot } from '../lib/orbitRegistry';
 import { TaskMenu } from '../components/TaskMenu';
 import { ScratchpadModal } from '../components/thinking/ScratchpadModal';
 import { ProgressBox, WorkingFolderBox, ContextBox } from '../components/rail';
+import { ArtifactViewer } from '../components/artifact';
+import { revealArtifact } from '../api';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -185,27 +187,60 @@ function TextBlock({ text, id, complete = true }) {
 // at the end of an assistant turn — like mdb-ai surfaces results.
 function artifactStepToCard(step) {
   const data = step.data || {};
+  const path = data.file_path || data.path || '';
+  // Lower-cased extension (no leading dot) for HTML detection downstream.
+  const ext = (path.match(/\.([a-z0-9]+)$/i)?.[1] || '').toLowerCase();
   return {
     title: data.title || step.label || 'Artifact',
     kind: data.action ? `${data.action}` : 'live artifact',
     icon: 'doc',
-    file_path: data.file_path,
-    preview: data.file_path ? [{ heading: data.file_path }] : [],
+    path,
+    file_path: path,
+    ext: ext ? `.${ext}` : '',
+    preview: path ? [{ heading: path }] : [],
   };
 }
 
 // Renders any badge='Artifact' steps as inline ArtifactCards.
-function StepArtifacts({ steps }) {
+function StepArtifacts({ steps, onOpen }) {
   const artifacts = steps?.filter((s) => s.badge === 'Artifact') || [];
   if (artifacts.length === 0) return null;
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 4 }}>
-      {artifacts.map((s) => <ArtifactCard key={s.id} artifact={artifactStepToCard(s)} />)}
+      {artifacts.map((s) => (
+        <ArtifactCard key={s.id} artifact={artifactStepToCard(s)} onOpen={onOpen} />
+      ))}
     </div>
   );
 }
 
-function ArtifactCard({ artifact }) {
+function ArtifactCard({ artifact, onOpen }) {
+  const path = artifact.file_path || artifact.path;
+  // Match the Working folder card's behavior: HTML opens the in-app
+  // iframe viewer (so it can publish/unpublish + handle assets);
+  // anything else goes to the OS handler via the Electron bridge.
+  const isHtml = (artifact.ext || '').toLowerCase() === '.html'
+    || (path || '').toLowerCase().endsWith('.html');
+  const handleOpen = () => {
+    if (!path) return;
+    if (isHtml && onOpen) {
+      onOpen(artifact);
+      return;
+    }
+    try { window.antontron?.openPath?.(path); }
+    catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[artifact-open] failed', e);
+    }
+  };
+  const handleReveal = () => {
+    if (!path) return;
+    revealArtifact(path).catch((e) => {
+      // eslint-disable-next-line no-console
+      console.error('[artifact-reveal] failed', e);
+    });
+  };
+  const previewText = artifact.preview?.[0]?.heading || artifact.preview?.[0]?.text || path;
   return (
     <div style={{
       display: 'grid', gridTemplateColumns: '64px 1fr auto', alignItems: 'center', gap: 16,
@@ -228,31 +263,44 @@ function ArtifactCard({ artifact }) {
         <span style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink3 }}>
           {artifact.kind || 'live artifact'}
         </span>
-        {artifact.preview?.[0]?.text && (
-          <span style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: T.ink4, marginTop: 2, letterSpacing: '0.04em' }}>
-            {artifact.preview[0].heading || artifact.preview[0].text}
+        {previewText && (
+          <span title={previewText} style={{
+            fontFamily: FONT_MONO, fontSize: 10.5, color: T.ink4,
+            marginTop: 2, letterSpacing: '0.04em',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            {previewText}
           </span>
         )}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <SmallBtn>View</SmallBtn>
-        <SmallBtn primary>Open</SmallBtn>
+        <SmallBtn onClick={handleReveal} title="Reveal in Finder">Reveal</SmallBtn>
+        <SmallBtn primary disabled={!path} onClick={handleOpen} title={path ? `Open ${path}` : 'No file path'}>
+          Open
+        </SmallBtn>
       </div>
     </div>
   );
 }
 
-function SmallBtn({ primary, children }) {
+function SmallBtn({ primary, children, onClick, title, disabled }) {
   return (
-    <button style={{
-      all: 'unset', cursor: 'pointer',
-      display: 'inline-flex', alignItems: 'center', gap: 6,
-      padding: '6px 10px', borderRadius: 7,
-      background: primary ? T.accent : T.surface,
-      color: primary ? '#fff' : T.ink,
-      border: `1px solid ${primary ? T.accent : T.line2}`,
-      fontFamily: FONT_BODY, fontSize: 12, fontWeight: 500,
-    }}>{children}</button>
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); if (!disabled) onClick?.(); }}
+      title={title}
+      disabled={disabled}
+      style={{
+        all: 'unset', cursor: disabled ? 'not-allowed' : 'pointer',
+        display: 'inline-flex', alignItems: 'center', gap: 6,
+        padding: '6px 10px', borderRadius: 7,
+        background: primary ? T.accent : T.surface,
+        color: primary ? '#fff' : T.ink,
+        border: `1px solid ${primary ? T.accent : T.line2}`,
+        fontFamily: FONT_BODY, fontSize: 12, fontWeight: 500,
+        opacity: disabled ? 0.5 : 1,
+      }}
+    >{children}</button>
   );
 }
 
@@ -357,6 +405,15 @@ export default function ChatView({
   const [railOpen, setRailOpen] = useState(true);
   // Step id whose scratchpad cells are visible in the modal. null = closed.
   const [openScratchpadStepId, setOpenScratchpadStepId] = useState(null);
+  // Inline ArtifactCard → viewer. HTML artifacts open in the in-app
+  // iframe modal (matching the Working folder card's behaviour); other
+  // types route through the Electron OS handler via openPath.
+  const [previewArt, setPreviewArt] = useState(null);
+  const handleArtifactOpen = (artifact) => {
+    // The card already routes non-HTML artifacts to the OS; this only
+    // fires for HTML, so we can dispatch straight to the viewer.
+    setPreviewArt(artifact);
+  };
   // Task settings menu (kebab in header).
   const settingsBtnRef = useRef(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -665,7 +722,7 @@ export default function ChatView({
                   )}
                   <TextBlock text={m.content} id={m.id || `msg-${i}`} complete />
                   {m.artifact && <ArtifactCard artifact={m.artifact} />}
-                  <StepArtifacts steps={m.steps} />
+                  <StepArtifacts steps={m.steps} onOpen={handleArtifactOpen} />
                 </AnswerTurn>
               );
             })}
@@ -703,7 +760,7 @@ export default function ChatView({
                     <StreamCursor slotId="body:streaming" />
                   </div>
                 )}
-                <StepArtifacts steps={streamingMsg.steps} />
+                <StepArtifacts steps={streamingMsg.steps} onOpen={handleArtifactOpen} />
               </AnswerTurn>
             ) : isStreaming && (
               <AnswerTurn state="thinking" time={formatTime(Date.now())} showActions={false}>
@@ -821,6 +878,16 @@ export default function ChatView({
           ...(streamingMsg?.steps || []),
         ]}
         focusStepId={openScratchpadStepId}
+      />
+
+      {/* Inline ArtifactCard viewer — same modal the Live artifacts
+          page and the Working folder card use. The card only routes
+          HTML here; non-HTML opens straight in the OS via openPath. */}
+      <ArtifactViewer
+        open={!!previewArt}
+        artifact={previewArt}
+        onClose={() => setPreviewArt(null)}
+        onChange={(updated) => setPreviewArt(updated)}
       />
     </div>
   );

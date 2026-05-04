@@ -3,6 +3,8 @@
 // keypad). Vite dev would proxy /v1 → backend; packaged Electron runs
 // from file:// or app:// and must address the loopback server directly.
 
+import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
+
 const ANTON_SERVER_PORT = 26866;
 
 const API_ORIGIN = (() => {
@@ -83,17 +85,49 @@ function _humanTime(iso) {
   return `${Math.floor(secs / 604800)} weeks ago`;
 }
 
+// Replay the server-persisted SSE event log through the live stream
+// reducer to reconstruct `steps` + `startedAt` for each assistant
+// turn. The server saves raw events in a sidecar file and returns
+// them inline on `/conversations/{id}/messages`; doing the replay
+// here keeps reducer logic single-source (lib/responseStreamAdapter).
+function _hydrateAssistantEvents(messages) {
+  if (!Array.isArray(messages)) return messages || [];
+  return messages.map((m) => {
+    if (m?.role !== 'assistant') return m;
+    const events = m.events;
+    if (!Array.isArray(events) || events.length === 0) return m;
+    let state = initialStreamState();
+    for (const ev of events) {
+      try { state = reduceStream(state, ev); } catch {}
+    }
+    const { events: _drop, ...rest } = m;
+    if (!state.steps || state.steps.length === 0) return rest;
+    return {
+      ...rest,
+      steps: state.steps,
+      startedAt: rest.startedAt || state.startedAt || null,
+    };
+  });
+}
+
 function _conversationToTask(conv, messages = []) {
   // Server stores conversations under <project>/.anton/episodes/ and
   // returns the project NAME on each conversation meta. We carry both:
   //   projectName — the canonical id from the server
   //   projectPath — resolved later from the projects list (App.jsx)
+  //
+  // Each assistant message may carry an `events` array — the SSE log
+  // captured server-side for that turn. Replaying it through the live
+  // reducer gives us back `steps` + `startedAt` byte-for-byte. We do
+  // the replay at the api boundary so the rest of the app sees a
+  // consistent message shape regardless of whether the data came from
+  // a fresh stream or a server reload.
   return {
     id: conv.id,
     title: conv.title || conv.preview || conv.id || 'Untitled task',
     subtitle: _humanTime(conv.updated_at || conv.created_at),
     status: 'idle',
-    messages,
+    messages: _hydrateAssistantEvents(messages),
     projectName: conv.project || null,
     projectPath: conv.project_path || null,
     model: null,
