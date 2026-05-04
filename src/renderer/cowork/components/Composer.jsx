@@ -54,6 +54,10 @@ export default function Composer({
   // Used on the home (new task) composer where we want the user to
   // pick a project but not fuss with model selection.
   hideModel = false,
+  // When true, the send button is replaced with a stop button that
+  // calls onStop (cancel the in-flight stream + scratchpad).
+  streaming = false,
+  onStop,
 }) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
@@ -246,14 +250,28 @@ export default function Composer({
               wired through anton yet. We keep speechSupported state
               around so we can reinstate later by re-rendering the
               button (e.g. behind a `showMic` prop). */}
-          <button
-            className="send-btn"
-            disabled={disabled || !value.trim() || busy}
-            onClick={handleSend}
-            title="Send"
-          >
-            {Ico.send(15)}
-          </button>
+          {streaming && onStop ? (
+            <button
+              className="send-btn stop"
+              onClick={onStop}
+              title="Stop generation"
+              aria-label="Stop generation"
+              style={{
+                background: 'var(--danger)', borderColor: 'var(--danger)',
+              }}
+            >
+              {Ico.stop(13)}
+            </button>
+          ) : (
+            <button
+              className="send-btn"
+              disabled={disabled || !value.trim() || busy}
+              onClick={handleSend}
+              title="Send"
+            >
+              {Ico.send(15)}
+            </button>
+          )}
         </div>
       </div>
 

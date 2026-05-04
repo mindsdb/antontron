@@ -268,6 +268,19 @@ export async function createProject(name) {
 
 // publishArtifact + previewArtifact live further down in this file.
 // We only add the new unpublish endpoint here.
+export async function cancelScratchpad(name) {
+  if (!name) return null;
+  try {
+    return await req('/scratchpad/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
+    });
+  } catch {
+    // 404 = pad already gone, treat as success.
+    return { status: 'gone', name };
+  }
+}
+
 export async function unpublishArtifact(path) {
   // Idempotent — server 404 means "no record" which is the desired
   // end state.

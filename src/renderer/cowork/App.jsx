@@ -23,7 +23,7 @@ import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettin
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
          pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
          renameConversation, deleteConversation, moveConversation,
-         deleteProject } from './api';
+         deleteProject, cancelScratchpad } from './api';
 import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
 
 const ACCENT_VARS = {
@@ -137,6 +137,50 @@ function AppCore() {
   const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState(null);
   // Pending project delete — same pattern but for entire projects.
   const [pendingDeleteProject, setPendingDeleteProject] = useState(null);
+
+  // Live stream control — refs to the active fetch's AbortController
+  // and the latest scratchpad name so we can fire a Stop that aborts
+  // both the SSE read and the in-flight scratchpad cell.
+  const activeStreamCtrlRef = useRef(null);
+  const activeScratchpadRef = useRef(null);
+
+  const handleStopStream = useCallback(async () => {
+    // 1) Cancel the running scratchpad (if any) so anton stops
+    //    executing user code mid-cell.
+    const padName = activeScratchpadRef.current;
+    if (padName) {
+      try { await cancelScratchpad(padName); } catch {}
+    }
+    // 2) Abort the SSE fetch so the renderer stops accumulating events.
+    const ctrl = activeStreamCtrlRef.current;
+    if (ctrl) {
+      try { ctrl.abort(); } catch {}
+      activeStreamCtrlRef.current = null;
+    }
+    // 3) Roll the streaming placeholder into a final assistant
+    //    message marked as cancelled so the chat doesn't sit forever.
+    setTasks((prev) => prev.map((t) => {
+      const streaming = (t.messages || []).find((m) => m.role === '_streaming');
+      if (!streaming) return t;
+      const others = t.messages.filter((m) => m.role !== '_streaming');
+      const finalContent = (streaming.content || '').trim() + (streaming.content ? '\n\n_(stopped)_' : '_(stopped)_');
+      return {
+        ...t,
+        status: 'idle',
+        messages: [...others, {
+          role: 'assistant',
+          content: finalContent,
+          steps: streaming.steps || [],
+          startedAt: streaming.startedAt,
+        }],
+      };
+    }));
+  }, []);
+
+  // Per-task streaming state is derived inside ChatView (it has the
+  // task object via props). Don't compute it here — `activeTaskId` is
+  // declared further down and reading it before initialization throws
+  // a TDZ ReferenceError at first render.
   const [models] = useState(MOCK_DATA.models);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Theme (light | dark) — persisted in localStorage so the choice
@@ -536,16 +580,17 @@ function AppCore() {
       }));
     };
 
-    streamNewSession(text, {
+    activeStreamCtrlRef.current = streamNewSession(text, {
       projectName: effectiveProjectName,
       projectPath: effectiveProjectPath,
       model: selectedModel?.id,
       attachmentIds,
       onEvent(ev) {
         streamState = reduceStream(streamState, ev);
-        // flushSync forces an immediate paint so the UI updates per
-        // event rather than batching everything into one render at
-        // the end of the SSE chunk.
+        // Track latest in-progress scratchpad so the Stop button
+        // can cancel anton's current cell, not just abort our stream.
+        const open = streamState.steps.find((s) => s.status === 'in_progress' && s._isScratchpad);
+        if (open?._scratchpadTabId) activeScratchpadRef.current = open._scratchpadTabId;
         flushSync(() => flushStreamingMessage());
       },
       onChunk(chunk, sid) {
@@ -588,6 +633,8 @@ function AppCore() {
         }));
       },
       onDone(sid) {
+        activeStreamCtrlRef.current = null;
+        activeScratchpadRef.current = null;
         const finalId = sid || resolvedId;
         const finalContent = streamState.bodyText || assistantContent;
         const finalSteps = streamState.steps;
@@ -666,13 +713,15 @@ function AppCore() {
       }));
     };
 
-    streamMessage(id, text, {
+    activeStreamCtrlRef.current = streamMessage(id, text, {
       projectName: taskProjectName,
       projectPath: taskProjectPath,
       model: taskModel,
       attachmentIds,
       onEvent(ev) {
         streamState = reduceStream(streamState, ev);
+        const open = streamState.steps.find((s) => s.status === 'in_progress' && s._isScratchpad);
+        if (open?._scratchpadTabId) activeScratchpadRef.current = open._scratchpadTabId;
         flushSync(() => flushStreaming());
       },
       onChunk(chunk) {
@@ -682,6 +731,8 @@ function AppCore() {
         assistantContent += chunk;
       },
       onDone() {
+        activeStreamCtrlRef.current = null;
+        activeScratchpadRef.current = null;
         const finalContent = streamState.bodyText || assistantContent;
         const finalSteps = streamState.steps;
         const finalStartedAt = streamState.startedAt;
@@ -1048,6 +1099,7 @@ function AppCore() {
             onRenameTask={handleRenameTask}
             onDeleteTask={handleDeleteTask}
             onMoveTaskToProject={handleMoveTaskToProject}
+            onStop={handleStopStream}
             onOpenProject={(p) => {
               if (p) setSelectedProject(p);
               setRoute('projects');

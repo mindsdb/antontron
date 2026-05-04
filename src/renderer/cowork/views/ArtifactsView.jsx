@@ -1,163 +1,269 @@
-import Ico from '../components/Icons';
+// Artifacts grid — every artifact card surfaces its publish state
+// inline. HTML artifacts open in the in-app iframe viewer (which has
+// its own publish/unpublish controls); other types open in the OS.
+//
+// Published artifacts get an accent pill. The card actions row gives
+// quick-fire publish, unpublish, copy URL, and open-published.
+
 import { useState } from 'react';
-import { openArtifact, previewArtifact, revealArtifact } from '../api';
+import Ico from '../components/Icons';
+import {
+  openArtifact, revealArtifact,
+  publishArtifact, unpublishArtifact,
+} from '../api';
+import { ArtifactViewer } from '../components/artifact';
+
+const FONT_BODY    = "var(--font-body)";
+const FONT_DISPLAY = "var(--font-display)";
 
 function PageHeader({ title, subtitle }) {
   return (
     <div className="page-header">
       <div style={{ flex: 1 }}>
-        <h2 className="page-title">{title}</h2>
-        {subtitle && <div style={{ fontSize: 13, color: 'var(--frost-600)', marginTop: 4 }}>{subtitle}</div>}
+        <h2 className="page-title" style={{ fontFamily: FONT_DISPLAY }}>{title}</h2>
+        {subtitle && (
+          <div style={{ fontFamily: FONT_BODY, fontSize: 13, color: 'var(--ink-3)', marginTop: 4 }}>
+            {subtitle}
+          </div>
+        )}
       </div>
     </div>
   );
 }
 
-export default function ArtifactsView({ artifacts }) {
-  const [preview, setPreview] = useState(null);
-  const [error, setError] = useState('');
+function PublishedPill({ url, onOpen }) {
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onOpen?.(); }}
+      title={`Open published URL: ${url}`}
+      style={{
+        cursor: 'pointer', font: 'inherit',
+        background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
+        border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+        color: 'var(--accent)',
+        padding: '3px 8px', borderRadius: 999,
+        fontSize: 10.5, fontWeight: 600,
+        display: 'inline-flex', alignItems: 'center', gap: 5,
+        flexShrink: 0,
+        letterSpacing: '0.04em', textTransform: 'uppercase',
+      }}
+    >
+      <span style={{ width: 5, height: 5, borderRadius: 99, background: 'var(--accent)' }} />
+      Published
+    </button>
+  );
+}
 
-  const handlePreview = async (artifact) => {
-    setError('');
-    try {
-      const data = await previewArtifact(artifact.path);
-      setPreview(data);
-    } catch (err) {
-      setError(err.message || 'Preview unavailable');
-      await openArtifact(artifact.path);
+function ActionButton({ children, onClick, danger, primary, title }) {
+  const styleBase = {
+    cursor: 'pointer', font: 'inherit',
+    fontFamily: FONT_BODY, fontSize: 12, fontWeight: 500,
+    padding: '6px 10px', borderRadius: 7,
+    display: 'inline-flex', alignItems: 'center', gap: 5,
+    transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+  };
+  if (primary) Object.assign(styleBase, {
+    background: 'var(--accent)', color: '#fff', border: '1px solid var(--accent)',
+  });
+  else if (danger) Object.assign(styleBase, {
+    background: 'transparent', color: 'var(--danger)',
+    border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
+  });
+  else Object.assign(styleBase, {
+    background: 'transparent', color: 'var(--ink-2)', border: '1px solid var(--line)',
+  });
+  return (
+    <button
+      type="button"
+      onClick={(e) => { e.stopPropagation(); onClick?.(); }}
+      title={title}
+      style={styleBase}
+    >
+      {children}
+    </button>
+  );
+}
+
+function ArtifactBubble({ artifact, onOpenViewer, onChange }) {
+  const [busy, setBusy] = useState(false);
+  const isHtml = (artifact.ext || '').toLowerCase() === '.html'
+    || (artifact.path || '').toLowerCase().endsWith('.html');
+  const published = !!artifact.publishedUrl;
+
+  const onCopyUrl = async () => {
+    if (!published) return;
+    try { await navigator.clipboard?.writeText?.(artifact.publishedUrl); } catch {}
+  };
+  const onOpenPublished = async () => {
+    if (!published) return;
+    try { await window.antontron?.openExternal?.(artifact.publishedUrl); } catch {
+      window.open(artifact.publishedUrl, '_blank', 'noreferrer');
     }
+  };
+  const onPublish = async () => {
+    if (busy || !isHtml) return;
+    setBusy(true);
+    try {
+      const r = await publishArtifact(artifact.path);
+      if (r?.url) onChange?.({ ...artifact, publishedUrl: r.url });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[publish] failed', e);
+    } finally { setBusy(false); }
+  };
+  const onUnpublish = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await unpublishArtifact(artifact.path);
+      onChange?.({ ...artifact, publishedUrl: '' });
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[unpublish] failed', e);
+    } finally { setBusy(false); }
+  };
+
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={() => isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)}
+      onKeyDown={(e) => { if (e.key === 'Enter') (isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)); }}
+      style={{
+        cursor: 'pointer',
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 12, overflow: 'hidden',
+        transition: 'border-color 160ms ease, box-shadow 200ms ease, transform 160ms ease',
+        boxShadow: '0 1px 0 rgba(15,16,17,0.02)',
+      }}
+      onMouseOver={(e) => {
+        e.currentTarget.style.borderColor = 'var(--accent)';
+        e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02), 0 12px 28px rgba(15,16,17,0.08)';
+        e.currentTarget.style.transform = 'translateY(-1px)';
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.borderColor = 'var(--line)';
+        e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02)';
+        e.currentTarget.style.transform = 'translateY(0)';
+      }}
+    >
+      <div style={{
+        height: 96, background: artifact.bg || 'var(--surface-2)',
+        display: 'flex', alignItems: 'flex-end', padding: 12,
+        borderBottom: '1px solid var(--line)',
+        fontFamily: FONT_BODY, fontSize: 10.5,
+        color: 'var(--ink-3)', whiteSpace: 'pre', overflow: 'hidden',
+      }}>
+        {artifact.snippet}
+      </div>
+      <div style={{ padding: 14, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+          <span style={{
+            fontFamily: FONT_DISPLAY, fontSize: 14, fontWeight: 600,
+            color: 'var(--ink)', flex: 1, minWidth: 0,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{artifact.title}</span>
+          {published && (
+            <PublishedPill url={artifact.publishedUrl} onOpen={onOpenPublished} />
+          )}
+          {!published && artifact.live && (
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              fontFamily: FONT_BODY, fontSize: 11, color: 'var(--accent)', fontWeight: 500,
+            }}>
+              <span className="pulse-dot" style={{
+                width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)',
+              }} />
+              Live
+            </span>
+          )}
+        </div>
+        <div style={{
+          fontFamily: FONT_BODY, fontSize: 12, color: 'var(--ink-4)',
+        }}>
+          {artifact.kind} · {artifact.updated}
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {published ? (
+            <>
+              <ActionButton onClick={onCopyUrl} title="Copy public URL">Copy URL</ActionButton>
+              <ActionButton onClick={onOpenPublished} title="Open published URL">Open URL</ActionButton>
+              <ActionButton onClick={onUnpublish} danger title="Unpublish from Minds">
+                {busy ? 'Working…' : 'Unpublish'}
+              </ActionButton>
+            </>
+          ) : isHtml ? (
+            <ActionButton onClick={onPublish} primary title="Publish to Minds">
+              {busy ? 'Publishing…' : 'Publish'}
+            </ActionButton>
+          ) : null}
+          <ActionButton onClick={() => openArtifact(artifact.path)} title="Open in OS">Open</ActionButton>
+          <ActionButton onClick={() => revealArtifact(artifact.path)} title="Reveal in finder">Reveal</ActionButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function ArtifactsView({ artifacts: initial = [] }) {
+  // Local mirror so publish/unpublish updates the card without
+  // re-fetching the whole list.
+  const [list, setList] = useState(initial);
+  const [viewer, setViewer] = useState(null);
+
+  // Reflect prop changes (parent may refresh on stream completion).
+  if (list !== initial && list.length === 0 && initial.length > 0) {
+    // first hydration after mount — accept the prop
+    setList(initial);
+  }
+
+  const updateOne = (updated) => {
+    setList((prev) => prev.map((a) => a.path === updated.path ? { ...a, ...updated } : a));
+    setViewer((cur) => (cur && cur.path === updated.path ? { ...cur, ...updated } : cur));
   };
 
   return (
     <div className="scroll-clean" style={{ flex: 1, overflowY: 'auto' }}>
       <PageHeader
         title="Live artifacts"
-        subtitle="Documents, dashboards, and code that update as your tasks progress."
+        subtitle="Documents, dashboards, and code Anton produces. Publish HTML to share a live URL."
       />
 
-      {artifacts.length === 0 ? (
-        <div style={{ padding: '60px 32px', textAlign: 'center', color: 'var(--frost-600)' }}>
-          <div style={{ display: 'inline-flex', color: 'var(--stone-300)', marginBottom: 12 }}>{Ico.sparkle(32)}</div>
-          <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--text-strong)', marginBottom: 6 }}>No artifacts yet</div>
-          <div style={{ fontSize: 13 }}>When Anton creates documents, dashboards, or code outputs they'll appear here.</div>
+      {(list && list.length === 0) ? (
+        <div style={{ padding: '60px 32px', textAlign: 'center', color: 'var(--ink-3)' }}>
+          <div style={{ display: 'inline-flex', color: 'var(--ink-5)', marginBottom: 12 }}>{Ico.sparkle(32)}</div>
+          <div style={{ fontFamily: FONT_DISPLAY, fontSize: 15, fontWeight: 600, color: 'var(--ink)', marginBottom: 6 }}>
+            No artifacts yet
+          </div>
+          <div style={{ fontFamily: FONT_BODY, fontSize: 13 }}>
+            When Anton creates documents, dashboards, or code outputs they'll appear here.
+          </div>
         </div>
       ) : (
         <div style={{
           padding: 28,
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))',
           gap: 14,
         }}>
-          {artifacts.map((a) => (
-            <div key={a.id} data-artifact-path={a.path} style={{
-              background: 'var(--surface-0)', border: '1px solid var(--border-01)',
-              borderRadius: 12, overflow: 'hidden', boxShadow: 'var(--shadow-sm)',
-              cursor: 'pointer', transition: 'box-shadow .15s',
-            }}
-              onClick={() => handlePreview(a)}
-              onMouseOver={(e) => { e.currentTarget.style.boxShadow = '0 4px 16px rgba(0,0,0,0.10)'; }}
-              onMouseOut={(e) => { e.currentTarget.style.boxShadow = 'var(--shadow-sm)'; }}
-            >
-              <div style={{
-                height: 96, background: a.bg,
-                display: 'flex', alignItems: 'flex-end', padding: 12,
-                borderBottom: '1px solid var(--border-0)',
-                fontFamily: 'var(--font-mono)', fontSize: 10.5,
-                color: 'var(--frost-700)', whiteSpace: 'pre', overflow: 'hidden',
-              }}>
-                {a.snippet}
-              </div>
-              <div style={{ padding: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 600, color: 'var(--text-strong)', flex: 1 }}>{a.title}</span>
-                  {a.live && (
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 11, color: 'var(--sage-600)', fontWeight: 500 }}>
-                      <span className="pulse-dot" style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--sage-500)' }} />
-                      Live
-                    </span>
-                  )}
-                </div>
-                <div style={{ fontSize: 12, color: 'var(--frost-600)', marginTop: 4 }}>{a.kind} · {a.updated}</div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                  <button
-                    className="btn-secondary"
-                    data-artifact-action="preview"
-                    onClick={(e) => { e.stopPropagation(); handlePreview(a); }}
-                  >Preview</button>
-                  <button
-                    className="btn-secondary"
-                    data-artifact-action="open"
-                    onClick={(e) => { e.stopPropagation(); openArtifact(a.path); }}
-                  >Open</button>
-                  <button
-                    className="btn-secondary"
-                    data-artifact-action="reveal"
-                    onClick={(e) => { e.stopPropagation(); revealArtifact(a.path); }}
-                  >Reveal</button>
-                </div>
-              </div>
-            </div>
+          {(list || []).map((a) => (
+            <ArtifactBubble
+              key={a.id}
+              artifact={a}
+              onOpenViewer={setViewer}
+              onChange={updateOne}
+            />
           ))}
         </div>
       )}
 
-      {error && (
-        <div style={{ margin: '0 28px 16px', color: '#8F321A', fontSize: 12.5 }}>{error}</div>
-      )}
-
-      {preview && (
-        <div
-          style={{
-            position: 'fixed', inset: 0, zIndex: 300,
-            background: 'rgba(8,11,12,0.28)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            padding: 32,
-          }}
-          onClick={() => setPreview(null)}
-        >
-          <div
-            style={{
-              width: 'min(860px, 92vw)', maxHeight: '82vh',
-              background: 'var(--surface-0)',
-              borderRadius: 12,
-              boxShadow: '0 24px 80px rgba(0,0,0,0.28)',
-              border: '1px solid var(--border-01)',
-              display: 'flex', flexDirection: 'column',
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 10,
-              padding: '14px 16px', borderBottom: '1px solid var(--border-0)',
-            }}>
-              <div style={{ fontSize: 14, fontWeight: 650, color: 'var(--text-strong)', flex: 1 }}>{preview.title}</div>
-              <button className="btn-secondary" onClick={() => openArtifact(preview.path)}>Open</button>
-              <button className="btn-secondary" onClick={() => revealArtifact(preview.path)}>Reveal</button>
-              <button className="icon-btn" onClick={() => setPreview(null)} title="Close">{Ico.chevLeft(14)}</button>
-            </div>
-            <pre style={{
-              margin: 0, padding: 16, overflow: 'auto',
-              whiteSpace: 'pre-wrap', userSelect: 'text',
-              fontFamily: 'var(--font-mono)', fontSize: 12.5,
-              lineHeight: 1.55, color: 'var(--text-strong)',
-            }}>{preview.content}</pre>
-          </div>
-        </div>
-      )}
-
-      <div style={{
-        margin: '0 28px 28px',
-        padding: '12px 16px',
-        background: 'var(--stone-50)', border: '1px solid var(--border-0)',
-        borderRadius: 10, fontSize: 12.5, color: 'var(--frost-700)',
-        display: 'flex', gap: 10, alignItems: 'flex-start',
-      }}>
-        <span style={{ display: 'inline-flex', color: 'var(--primary-700)', marginTop: 1 }}>{Ico.sparkle(14)}</span>
-        <span>
-          <strong style={{ color: 'var(--text-strong)' }}>Anton artifacts</strong> are saved to{' '}
-          <code style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, background: 'var(--stone-150)', padding: '1px 5px', borderRadius: 4 }}>.anton/output/</code>{' '}
-          in your workspace. Enable <em>Proactive dashboards</em> in Settings to generate HTML reports automatically.
-        </span>
-      </div>
+      <ArtifactViewer
+        open={!!viewer}
+        artifact={viewer}
+        onClose={() => setViewer(null)}
+        onChange={updateOne}
+      />
     </div>
   );
 }

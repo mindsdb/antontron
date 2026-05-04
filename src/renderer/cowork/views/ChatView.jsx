@@ -349,6 +349,7 @@ export default function ChatView({
   onMoveTaskToProject,
   onOpenProject,
   onOpenProjectsList,
+  onStop,
   projects = [],
   sidebarCollapsed = false,
 }) {
@@ -699,6 +700,8 @@ export default function ChatView({
             placeholder="Reply…"
             metaReadOnly
             hideMeta
+            streaming={isStreaming}
+            onStop={onStop}
           />
         </div>
       </div>
