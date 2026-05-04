@@ -146,31 +146,22 @@ export function TaskMenu({
     }
   }, [open]);
 
-  if (!open) return null;
-
-  // Position the popover. We render once at a provisional position
-  // (below the trigger), measure the actual rendered height with a
-  // layout effect, then flip above if it doesn't fit. This keeps the
-  // menu's bottom edge a few px above the trigger when flipped, and
-  // doesn't leave a giant gap when only a couple of items show.
-  const MENU_WIDTH = 220;
-  const VW = typeof window !== 'undefined' ? window.innerWidth : 1200;
-  const VH = typeof window !== 'undefined' ? window.innerHeight : 800;
-  const wantedLeft = align === 'right'
-    ? (anchorRect?.right ?? 0) - MENU_WIDTH
-    : (anchorRect?.left ?? 0);
-  const left = Math.min(Math.max(8, wantedLeft), VW - MENU_WIDTH - 8);
-
+  // Position state — must be declared BEFORE any early return so
+  // hooks order stays stable across renders (React error #310).
   const [top, setTop] = useState(() => (anchorRect?.bottom ?? 0) + 4);
   const [measured, setMeasured] = useState(false);
 
+  // Reset measurement whenever the anchor or visible item set changes.
   useLayoutEffect(() => {
     setMeasured(false);
-  }, [anchorRect, hideMoveToProject, hideRename, onPin, onUnpin, showHeaderActions]);
+  }, [anchorRect, hideMoveToProject, hideRename, onPin, onUnpin, showHeaderActions, open]);
 
+  // After render, read the actual height and flip above the trigger
+  // if it doesn't fit below.
   useLayoutEffect(() => {
-    if (!popoverRef.current || !anchorRect) return;
+    if (!open || !popoverRef.current || !anchorRect) return;
     const h = popoverRef.current.offsetHeight;
+    const VH = typeof window !== 'undefined' ? window.innerHeight : 800;
     const spaceBelow = VH - 8 - (anchorRect.bottom + 4);
     const flip = h > spaceBelow;
     // Flipped: menu bottom sits 4px above trigger top → top = anchor.top - 4 - h
@@ -180,7 +171,17 @@ export function TaskMenu({
       : anchorRect.bottom + 4;
     setTop(next);
     setMeasured(true);
-  }, [anchorRect, VH, moveOpen]); // moveOpen so re-measures when submenu changes height
+  }, [open, anchorRect, moveOpen]);
+
+  if (!open) return null;
+
+  // Horizontal position — pure derived value, safe after the early return.
+  const MENU_WIDTH = 220;
+  const VW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const wantedLeft = align === 'right'
+    ? (anchorRect?.right ?? 0) - MENU_WIDTH
+    : (anchorRect?.left ?? 0);
+  const left = Math.min(Math.max(8, wantedLeft), VW - MENU_WIDTH - 8);
 
   const handleMoveHover = () => {
     cancelSubmenuTimer();
