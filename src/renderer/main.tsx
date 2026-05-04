@@ -1,6 +1,10 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+// Tailwind utilities first so any rule in globals.css/styles.css
+// outranks them on shared selectors. Used by ported components
+// (Markdown stack, ThinkingBlock) that ship in utility classes.
+import './cowork/styles/tailwind.css';
 // Load cowork's token system + button classes globally so the onboarding
 // screens (TermsConsent, Setup, Onboarding) share the same theme tokens
 // as the cowork app. Antontron's own styles.css aliases its legacy var

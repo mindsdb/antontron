@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
 import Ico from './components/Icons';
 // OnboardingShell removed — antontron's renderer handles terms/install/
 // provider setup. The cowork app is mounted by CoworkApp.tsx only after
@@ -20,6 +21,7 @@ import { fetchSessions, fetchProjects, fetchArtifacts, fetchSettings, fetchHealt
          attachProjectFile, deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
          pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA } from './api';
+import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
 
 const ACCENT_VARS = {
   aqua:  {},
@@ -430,11 +432,35 @@ function AppCore() {
 
     let assistantContent = '';
     let resolvedId = tempId;
+    // Adapter state — folded by every raw SSE event so the streaming
+    // message can carry structured ThinkingStep[] for the UI.
+    let streamState = initialStreamState();
+
+    const flushStreamingMessage = () => {
+      setTasks((prev) => prev.map((t) => {
+        if (t.id !== resolvedId && t.id !== tempId) return t;
+        const msgs = removeThinkingPlaceholder(stripStreaming(t.messages));
+        return { ...t, messages: [...msgs, {
+          role: '_streaming',
+          content: streamState.bodyText || assistantContent,
+          steps: streamState.steps,
+          startedAt: streamState.startedAt,
+          streamStatus: streamState.status,
+        }] };
+      }));
+    };
 
     streamNewSession(text, {
       projectPath: selectedProject?.path,
       model: selectedModel?.id,
       attachmentIds,
+      onEvent(ev) {
+        streamState = reduceStream(streamState, ev);
+        // flushSync forces an immediate paint so the UI updates per
+        // event rather than batching everything into one render at
+        // the end of the SSE chunk.
+        flushSync(() => flushStreamingMessage());
+      },
       onChunk(chunk, sid) {
         if (sid && sid !== resolvedId) {
           const previousId = resolvedId;
@@ -447,11 +473,8 @@ function AppCore() {
           setActiveTaskId(sid);
         }
         assistantContent += chunk;
-        setTasks((prev) => prev.map((t) => {
-          if (t.id !== resolvedId && t.id !== tempId) return t;
-          const msgs = removeThinkingPlaceholder(stripStreaming(t.messages));
-          return { ...t, messages: [...msgs, { role: '_streaming', content: assistantContent }] };
-        }));
+        // The adapter already accumulates bodyText; the chunk callback
+        // remains the source of truth for resolving conversation id.
       },
       onProgress(event, sid) {
         if (sid && sid !== resolvedId) {
@@ -479,11 +502,19 @@ function AppCore() {
       },
       onDone(sid) {
         const finalId = sid || resolvedId;
+        const finalContent = streamState.bodyText || assistantContent;
+        const finalSteps = streamState.steps;
+        const finalStartedAt = streamState.startedAt;
         setTasks((prev) => prev.map((t) => {
           if (t.id !== finalId && t.id !== resolvedId && t.id !== tempId) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
-          return assistantContent
-            ? { ...t, id: finalId, status: 'idle', messages: [...msgs, { role: 'assistant', content: assistantContent }] }
+          return finalContent
+            ? { ...t, id: finalId, status: 'idle', messages: [...msgs, {
+                role: 'assistant',
+                content: finalContent,
+                steps: finalSteps,
+                startedAt: finalStartedAt,
+              }] }
             : { ...t, id: finalId, status: 'idle', messages: msgs };
         }));
         setActiveTaskId(finalId);
@@ -520,40 +551,53 @@ function AppCore() {
     setComposerAttachments([]);
 
     let assistantContent = '';
+    let streamState = initialStreamState();
 
     const taskProjectPath = currentTask.projectPath || selectedProject?.path || null;
     const taskModel = currentTask.model || selectedModel?.id || null;
+
+    const flushStreaming = () => {
+      setTasks((prev) => prev.map((t) => {
+        if (t.id !== id) return t;
+        const msgs = removeThinkingPlaceholder(stripStreaming(t.messages));
+        return { ...t, messages: [...msgs, {
+          role: '_streaming',
+          content: streamState.bodyText || assistantContent,
+          steps: streamState.steps,
+          startedAt: streamState.startedAt,
+          streamStatus: streamState.status,
+        }] };
+      }));
+    };
 
     streamMessage(id, text, {
       projectPath: taskProjectPath,
       model: taskModel,
       attachmentIds,
+      onEvent(ev) {
+        streamState = reduceStream(streamState, ev);
+        flushSync(() => flushStreaming());
+      },
       onChunk(chunk) {
+        // The adapter accumulates bodyText already; this callback is
+        // redundant for content but cheap and useful as a fallback if
+        // the adapter ever fails to parse a delta.
         assistantContent += chunk;
-        setTasks((prev) => prev.map((t) => {
-          if (t.id !== id) return t;
-          const msgs = removeThinkingPlaceholder(stripStreaming(t.messages));
-          return { ...t, messages: [...msgs, { role: '_streaming', content: assistantContent }] };
-        }));
-      },
-      onProgress(event) {
-        setTasks((prev) => prev.map((t) => {
-          if (t.id !== id) return t;
-          return { ...t, messages: appendActivity(stripStreaming(t.messages), event) };
-        }));
-      },
-      onToolResult(event) {
-        setTasks((prev) => prev.map((t) => {
-          if (t.id !== id) return t;
-          return { ...t, messages: appendActivity(stripStreaming(t.messages), event) };
-        }));
       },
       onDone() {
+        const finalContent = streamState.bodyText || assistantContent;
+        const finalSteps = streamState.steps;
+        const finalStartedAt = streamState.startedAt;
         setTasks((prev) => prev.map((t) => {
           if (t.id !== id) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
-          return assistantContent
-            ? { ...t, status: 'idle', messages: [...msgs, { role: 'assistant', content: assistantContent }] }
+          return finalContent
+            ? { ...t, status: 'idle', messages: [...msgs, {
+                role: 'assistant',
+                content: finalContent,
+                steps: finalSteps,
+                startedAt: finalStartedAt,
+              }] }
             : { ...t, status: 'idle', messages: msgs };
         }));
         fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });

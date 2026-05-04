@@ -60,14 +60,15 @@ export default function HomeView({
         fontFamily: 'var(--font-display)',
         fontSize: 36, fontWeight: 700, letterSpacing: '-0.02em',
         color: 'var(--text-strong)',
-        margin: '0 0 28px', textAlign: 'center',
+        margin: '0 0 28px',
+        width: '100%', maxWidth: 'var(--composer-max-width, 640px)',
         animation: 'fadein-up .4s ease-out',
-        display: 'inline-flex', alignItems: 'center', gap: 16,
+        display: 'flex', alignItems: 'center', gap: 16,
       }}>
         <OrbitMorph
           size={42}
           state={activeTasks && activeTasks.length > 0 ? 'thinking' : 'idle'}
-          style={{ flexShrink: 0 }}
+          style={{ flexShrink: 0, marginLeft: -58 }}
         />
         <span>{greeting}</span>
       </h1>

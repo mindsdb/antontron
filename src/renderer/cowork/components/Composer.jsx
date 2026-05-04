@@ -46,7 +46,7 @@ export default function Composer({
   onAttachFiles,
   onAttachConnector,
   onRemoveAttachment,
-  placeholder = 'How can I help you today?',
+  placeholder = 'Hi Boss, how can I help you today?',
   disabled = false,
   metaReadOnly = false,
   hideMeta = false,

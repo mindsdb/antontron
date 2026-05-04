@@ -413,7 +413,8 @@ a[href],
   display: inline-flex; align-items: center; gap: 6px;
   height: 28px; padding: 0 10px; border-radius: 8px;
   border: 1px solid transparent; background: transparent;
-  color: var(--frost-700); font-size: 13px;
+  color: var(--frost-700);
+  font-family: var(--font-sans); font-size: 13px;
   transition: background .12s, border-color .12s, color .12s;
 }
 button.meta-pill { cursor: pointer; }

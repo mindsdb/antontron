@@ -8,10 +8,13 @@
    plus _streaming) and our real Composer + project/model state. Tokens come
    from CSS vars so the panel reads correctly in both light and dark themes. */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import Ico from '../components/Icons';
 import Composer from '../components/Composer';
 import { OrbitMorph } from '../components/ui';
+import { MarkdownContent } from '../components/markdown/MarkdownContent';
+import { ThinkingBlock } from '../components/thinking/ThinkingBlock';
+import { OrbitProvider, useOrbitSlot } from '../lib/orbitRegistry';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -139,14 +142,21 @@ function UserTurn({ content, attachments, time }) {
   );
 }
 
-// ─── Anton answer turn — content stack (OrbitMorph rail hidden for now) ──
-function AnswerTurn({ state = 'done', time, children, showActions = true, copyText }) {
+// ─── Anton answer turn — content stack ────────────────────────────────────
+// `slotIdHeader` lets the parent register this turn's ANTON label as an
+// orb anchor (used while the request is "thinking" with no steps yet).
+function AnswerTurn({ state = 'done', time, children, showActions = true, copyText, slotIdHeader }) {
+  const headerRef = useOrbitSlot(slotIdHeader || `__none__:${Math.random()}`);
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16, paddingBottom: 4 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 10 }}>
-        <span style={{
+        {/* Wrap the ANTON wordmark so the orb can anchor over it. The
+            slot only registers when slotIdHeader is provided. */}
+        <span ref={slotIdHeader ? headerRef : undefined} style={{
           fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 13,
           letterSpacing: '0.14em', textTransform: 'uppercase', color: T.ink,
+          // Reserve a little space so the orb has room when it lands here.
+          paddingLeft: slotIdHeader ? 28 : 0,
         }}>Anton</span>
         {time && (
           <span style={{ fontFamily: FONT_MONO, fontSize: 10.5, color: T.ink4, letterSpacing: '0.04em' }}>
@@ -160,19 +170,11 @@ function AnswerTurn({ state = 'done', time, children, showActions = true, copyTe
   );
 }
 
-function TextBlock({ text }) {
-  // Render **bold** inline.
-  const parts = String(text || '').split(/(\*\*[^*]+\*\*)/g);
-  return (
-    <p style={{
-      margin: 0, fontFamily: FONT_BODY, fontSize: 14.5, lineHeight: 1.65,
-      color: T.ink2, whiteSpace: 'pre-wrap', userSelect: 'text',
-    }}>
-      {parts.map((p, i) => p.startsWith('**')
-        ? <strong key={i} style={{ color: T.ink, fontWeight: 600 }}>{p.slice(2, -2)}</strong>
-        : p)}
-    </p>
-  );
+function TextBlock({ text, id, complete = true }) {
+  // Full markdown rendering — GFM tables, lists, code blocks (with
+  // chartjs/chart support), links, etc. via react-markdown + our
+  // MarkdownContent override map.
+  return <MarkdownContent text={text} id={id} complete={complete} />;
 }
 
 function ArtifactCard({ artifact }) {
@@ -226,10 +228,12 @@ function SmallBtn({ primary, children }) {
   );
 }
 
-// Streaming cursor — blinking accent caret.
-function StreamCursor() {
+// Streaming cursor — blinking accent caret. Doubles as the orb's body
+// anchor while text is being delivered.
+function StreamCursor({ slotId }) {
+  const ref = useOrbitSlot(slotId || `__none__:${Math.random()}`);
   return (
-    <span style={{
+    <span ref={slotId ? ref : undefined} style={{
       display: 'inline-block', width: 8, height: 14,
       background: T.accent, marginLeft: 4, verticalAlign: 'text-bottom',
       animation: 'cb 1s steps(2) infinite',
@@ -278,33 +282,45 @@ function RailCard({ title, defaultOpen = false, children }) {
   );
 }
 
-function ProgressList({ items }) {
-  if (!items?.length) {
+function ProgressList({ steps }) {
+  if (!steps?.length) {
     return <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink4, padding: '8px 0 4px' }}>
-      Activity appears here while Anton works.
+      Steps appear here while Anton works.
     </p>;
   }
+  // Inputs only — we surface the one_line_description (the human-
+  // readable title of each scratchpad cell or artifact). Code + output
+  // never show here per design; they live in the full expansion.
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8 }}>
-      {items.map((it, i) => (
-        <div key={i} style={{
-          display: 'flex', alignItems: 'flex-start', gap: 10,
-          fontFamily: FONT_BODY, fontSize: 12.5,
-          color: it.done ? T.ink4 : T.ink2,
-          textDecoration: it.done ? 'line-through' : 'none',
-        }}>
-          <span style={{
-            width: 14, height: 14, borderRadius: 99, marginTop: 2, flex: '0 0 auto',
-            background: it.done ? T.accent : 'transparent',
-            border: `1.4px solid ${it.done || it.current ? T.accent : T.line2}`,
-            display: 'grid', placeItems: 'center',
+      {steps.map((step) => {
+        const done = step.status === 'completed';
+        const current = step.status === 'in_progress';
+        const text = step.data?.one_line_description || step.label || step._scratchpadTabId || 'Step';
+        return (
+          <div key={step.id} title={text} style={{
+            display: 'flex', alignItems: 'flex-start', gap: 10,
+            fontFamily: FONT_BODY, fontSize: 12.5,
+            color: done ? T.ink4 : T.ink2,
           }}>
-            {it.done && <span style={{ color: '#fff', display: 'inline-flex' }}>{Ico.check(9)}</span>}
-            {it.current && <span style={{ width: 5, height: 5, borderRadius: 99, background: T.accent }} />}
-          </span>
-          <span>{it.text}</span>
-        </div>
-      ))}
+            <span style={{
+              width: 14, height: 14, borderRadius: 99, marginTop: 2, flex: '0 0 auto',
+              background: done ? T.accent : 'transparent',
+              border: `1.4px solid ${done || current ? T.accent : T.line}`,
+              display: 'grid', placeItems: 'center',
+            }}>
+              {done && <span style={{ color: '#fff', display: 'inline-flex' }}>{Ico.check(9)}</span>}
+              {current && <span style={{
+                width: 5, height: 5, borderRadius: 99, background: T.accent,
+              }} />}
+            </span>
+            <span style={{
+              flex: 1, minWidth: 0,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>{text}</span>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -414,39 +430,49 @@ export default function ChatView({
   const dialogMessageCount = visibleMessages.filter((m) => ['user', 'assistant', 'error'].includes(m.role)).length;
   const streamingMsg = task.messages.find((m) => m.role === '_streaming');
   const taskAttachments = task.attachments || visibleMessages.flatMap((m) => m.attachments || []);
-  const activityItems = visibleMessages
-    .filter((m) => m.role === 'activity')
-    .slice(-8)
-    .map((m) => ({ done: m.state !== 'running', current: m.state === 'running', text: m.content }));
+  // Source of truth for the rail Progress card: the live streaming
+  // message's steps if a request is in flight, otherwise the steps
+  // from the most recent assistant turn. Both come from the SSE
+  // adapter so the shape is identical.
+  const railSteps = (() => {
+    if (streamingMsg && streamingMsg.steps?.length) return streamingMsg.steps;
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      const m = visibleMessages[i];
+      if (m.role === 'assistant' && m.steps?.length) return m.steps;
+    }
+    return [];
+  })();
 
   useEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [task.messages.length, isStreaming]);
 
-  // Debug: log scroll geometry once messages are mounted so we can see
-  // whether the scroll element actually has bounded height vs content.
-  // Open DevTools (Cmd+Option+I) to see the output.
-  useEffect(() => {
-    const id = setTimeout(() => {
-      const el = scrollRef.current;
-      if (!el) return;
-      const r = el.getBoundingClientRect();
-      // eslint-disable-next-line no-console
-      console.log('[chat-scroll]', {
-        clientHeight: el.clientHeight,
-        scrollHeight: el.scrollHeight,
-        offsetHeight: el.offsetHeight,
-        rect: { top: r.top, bottom: r.bottom, height: r.height },
-        canScroll: el.scrollHeight > el.clientHeight,
-        parentHeight: el.parentElement?.getBoundingClientRect().height,
-        parentDisplay: el.parentElement && getComputedStyle(el.parentElement).display,
-      });
-    }, 300);
-    return () => clearTimeout(id);
-  }, [task.messages.length]);
+  // Outer ref + conv-column ref. The orb canvas binds to the conv
+  // column so the floating orb is naturally clipped to that area
+  // (can't leak into the rail visually when a slot is near the right
+  // edge). chatRef stays as the panel-level ancestor.
+  const chatRef = useRef(null);
+  const convRef = useRef(null);
+
+  // Compute which orb slot should be active right now and what state
+  // the orb should display. The lifecycle:
+  //   - response in flight, no steps yet → header slot, 'thinking'
+  //   - some step in_progress             → that step's row, 'thinking'
+  //   - all steps done, body streaming    → body caret, 'thinking'
+  //   - response done                     → no active slot, 'done'
+  const orbView = useMemo(() => {
+    if (!streamingMsg) return { state: null, activeSlot: null };
+    const steps = streamingMsg.steps || [];
+    const inProgress = steps.find((s) => s.status === 'in_progress');
+    const status = streamingMsg.streamStatus;
+    if (status === 'done') return { state: 'done', activeSlot: 'body:streaming' };
+    if (inProgress) return { state: 'thinking', activeSlot: `step:${inProgress.id}` };
+    if (streamingMsg.content) return { state: 'thinking', activeSlot: 'body:streaming' };
+    return { state: 'thinking', activeSlot: 'header:streaming' };
+  }, [streamingMsg]);
 
   return (
-    <div style={{
+    <div ref={chatRef} style={{
       flex: 1, minHeight: 0,
       display: 'grid',
       gridTemplateColumns: railOpen ? '1fr 320px' : '1fr 0px',
@@ -464,8 +490,15 @@ export default function ChatView({
       position: 'relative',
       overflow: 'hidden',
     }}>
+      <OrbitProvider
+        canvasRef={convRef}
+        scrollRef={scrollRef}
+        size={22}
+        state={orbView.state}
+        activeSlot={orbView.activeSlot}
+      >
       {/* ─── Conversation column ─── */}
-      <div style={{
+      <div ref={convRef} style={{
         position: 'relative', overflow: 'hidden',
         // Grid auto/1fr is more deterministic than nested flex+min-height
         // for the "header + scrollable body" layout — the 1fr row pins
@@ -586,20 +619,28 @@ export default function ChatView({
               }
               return (
                 <AnswerTurn key={i} state="done" time={formatTime(m.createdAt)} copyText={m.content}>
-                  <TextBlock text={m.content} />
+                  {m.steps?.length > 0 && (
+                    <ThinkingBlock steps={m.steps} startedAt={m.startedAt} isActive={false} />
+                  )}
+                  <TextBlock text={m.content} id={m.id || `msg-${i}`} complete />
                   {m.artifact && <ArtifactCard artifact={m.artifact} />}
                 </AnswerTurn>
               );
             })}
 
             {streamingMsg ? (
-              <AnswerTurn state="thinking" time={formatTime(Date.now())} showActions={false}>
-                <p style={{
-                  margin: 0, fontFamily: FONT_BODY, fontSize: 14.5, lineHeight: 1.65,
-                  color: T.ink2, whiteSpace: 'pre-wrap',
-                }}>
-                  {streamingMsg.content}<StreamCursor />
-                </p>
+              <AnswerTurn state="thinking" time={formatTime(Date.now())} showActions={false} slotIdHeader="header:streaming">
+                {streamingMsg.steps?.length > 0 && (
+                  <ThinkingBlock
+                    steps={streamingMsg.steps}
+                    startedAt={streamingMsg.startedAt}
+                    isActive={streamingMsg.streamStatus !== 'done' && streamingMsg.streamStatus !== 'streaming'}
+                  />
+                )}
+                <div style={{ position: 'relative' }}>
+                  <TextBlock text={streamingMsg.content} id="streaming" complete={false} />
+                  <StreamCursor slotId="body:streaming" />
+                </div>
               </AnswerTurn>
             ) : isStreaming && (
               <AnswerTurn state="thinking" time={formatTime(Date.now())} showActions={false}>
@@ -655,11 +696,16 @@ export default function ChatView({
         opacity: railOpen ? 1 : 0,
         transition: 'opacity 180ms ease',
         display: 'flex', flexDirection: 'column', gap: 12,
+        // overflowX hidden is defensive: when the grid column shrinks
+        // to 0 (collapsed), card content shouldn't visually spill
+        // back into the conversation column.
+        overflowX: 'hidden',
         overflowY: 'auto',
+        minWidth: 0,
         WebkitAppRegion: 'no-drag',
       }}>
         <RailCard title="Progress" defaultOpen>
-          <ProgressList items={activityItems} />
+          <ProgressList steps={railSteps} />
         </RailCard>
         <RailCard title="Working folder" defaultOpen>
           <WorkingFolder project={project} files={[]} />
@@ -671,6 +717,7 @@ export default function ChatView({
 
       {/* keyframes for the streaming cursor */}
       <style>{`@keyframes cb { 0%,49%{opacity:1} 50%,100%{opacity:0} }`}</style>
+      </OrbitProvider>
     </div>
   );
 }

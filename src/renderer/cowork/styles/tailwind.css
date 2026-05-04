@@ -1,0 +1,6 @@
+/* Tailwind utilities entry point. Loaded before globals.css so our
+   existing rules win on any shared selectors (utilities are still
+   available, just outranked by our explicit declarations). */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

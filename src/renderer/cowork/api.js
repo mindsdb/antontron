@@ -134,7 +134,7 @@ export async function fetchSession(id) {
 // callback shape the rest of the app already speaks. `conversationId` is
 // optional — omit it to start a new conversation; the caller learns the
 // new id via the first onChunk/onProgress/onDone callback's second arg.
-function _streamResponse(text, { conversationId, projectPath, model, attachmentIds = [], onChunk, onProgress, onToolResult, onDone, onError } = {}) {
+function _streamResponse(text, { conversationId, projectPath, model, attachmentIds = [], onChunk, onProgress, onToolResult, onDone, onError, onEvent } = {}) {
   const ctrl = new AbortController();
   (async () => {
     try {
@@ -172,6 +172,11 @@ function _streamResponse(text, { conversationId, projectPath, model, attachmentI
           if (!raw || raw === '[DONE]') continue;
           let msg;
           try { msg = JSON.parse(raw); } catch { continue; }
+
+          // Raw passthrough — used by the streamAdapter to build a
+          // structured ThinkingStep[] for the UI. Fires before the
+          // type-specific routing so existing callbacks still work.
+          onEvent?.(msg);
 
           switch (msg.type) {
             case 'response.created':

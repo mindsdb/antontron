@@ -437,7 +437,10 @@ function createWindow() {
     mainWindow.loadFile(getRendererPath());
   }
 
-  if (isDev && shouldOpenDevTools) {
+  // Auto-open DevTools on every launch — detached so it doesn't crop
+  // the renderer. Toggle via the View menu (Cmd+Option+I).
+  // Set ANTON_NO_DEVTOOLS=1 to suppress on launch.
+  if (process.env.ANTON_NO_DEVTOOLS !== '1') {
     mainWindow.webContents.once('did-finish-load', () => {
       mainWindow?.webContents.openDevTools({ mode: 'detach' });
     });
