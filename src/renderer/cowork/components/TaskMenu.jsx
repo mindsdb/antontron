@@ -9,7 +9,7 @@
 // Project list is fetched lazily once when "Move to project" hovers
 // open, then cached for the lifetime of the menu.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Ico from './Icons';
 
 function MenuButton({ icon, label, onClick, danger = false, hint, hasSubmenu = false, onMouseEnter, onMouseLeave }) {
@@ -148,26 +148,39 @@ export function TaskMenu({
 
   if (!open) return null;
 
-  // Position the popover. Default: anchor below the trigger. If the
-  // menu would extend past the viewport bottom, flip above. Same
-  // logic for horizontal — clamp into the viewport.
+  // Position the popover. We render once at a provisional position
+  // (below the trigger), measure the actual rendered height with a
+  // layout effect, then flip above if it doesn't fit. This keeps the
+  // menu's bottom edge a few px above the trigger when flipped, and
+  // doesn't leave a giant gap when only a couple of items show.
   const MENU_WIDTH = 220;
-  // Estimated max height — actual content is shorter when items are
-  // hidden; using 320 as the safety bound for the flip decision.
-  const MENU_MAX_HEIGHT = 320;
   const VW = typeof window !== 'undefined' ? window.innerWidth : 1200;
   const VH = typeof window !== 'undefined' ? window.innerHeight : 800;
-
   const wantedLeft = align === 'right'
     ? (anchorRect?.right ?? 0) - MENU_WIDTH
     : (anchorRect?.left ?? 0);
   const left = Math.min(Math.max(8, wantedLeft), VW - MENU_WIDTH - 8);
 
-  const wouldOverflowBottom = (anchorRect?.bottom ?? 0) + 4 + MENU_MAX_HEIGHT > VH - 8;
-  const top = wouldOverflowBottom
-    // Flip above the trigger.
-    ? Math.max(8, (anchorRect?.top ?? 0) - 4 - MENU_MAX_HEIGHT)
-    : (anchorRect?.bottom ?? 0) + 4;
+  const [top, setTop] = useState(() => (anchorRect?.bottom ?? 0) + 4);
+  const [measured, setMeasured] = useState(false);
+
+  useLayoutEffect(() => {
+    setMeasured(false);
+  }, [anchorRect, hideMoveToProject, hideRename, onPin, onUnpin, showHeaderActions]);
+
+  useLayoutEffect(() => {
+    if (!popoverRef.current || !anchorRect) return;
+    const h = popoverRef.current.offsetHeight;
+    const spaceBelow = VH - 8 - (anchorRect.bottom + 4);
+    const flip = h > spaceBelow;
+    // Flipped: menu bottom sits 4px above trigger top → top = anchor.top - 4 - h
+    // Normal:  menu top sits 4px below trigger bottom → top = anchor.bottom + 4
+    const next = flip
+      ? Math.max(8, anchorRect.top - 4 - h)
+      : anchorRect.bottom + 4;
+    setTop(next);
+    setMeasured(true);
+  }, [anchorRect, VH, moveOpen]); // moveOpen so re-measures when submenu changes height
 
   const handleMoveHover = () => {
     cancelSubmenuTimer();
@@ -199,6 +212,10 @@ export function TaskMenu({
         boxShadow: '0 12px 32px rgba(15,16,17,0.18), 0 1px 0 rgba(15,16,17,0.04)',
         padding: '4px 0',
         WebkitAppRegion: 'no-drag',
+        // Stay hidden until the layout effect measures the actual
+        // height and decides whether to flip — prevents a flash at
+        // the wrong position on initial render.
+        visibility: measured ? 'visible' : 'hidden',
       }}
       onClick={(e) => e.stopPropagation()}
     >
