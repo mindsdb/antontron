@@ -50,7 +50,7 @@ function MemoryRow({ entry, onOpen }) {
         </span>
       </span>
       {entry.modifiedAt && (
-        <span className="font-mono text-[10px] text-ink-4 mt-0.5">{relativeAge(entry.modifiedAt)}</span>
+        <span className="text-[10.5px] text-ink-4 mt-0.5">{relativeAge(entry.modifiedAt)}</span>
       )}
     </button>
   );
@@ -77,7 +77,7 @@ function MemoryModal({ open, onClose, entry }) {
             <span className="font-display text-[13px] font-semibold uppercase tracking-wider text-ink">
               {entry.scope || 'Memory'}
             </span>
-            <span className="font-mono text-[11px] text-ink-3 truncate" title={entry.relativePath}>
+            <span className="text-[12px] text-ink-3 truncate" title={entry.relativePath}>
               {entry.relativePath || entry.name}
             </span>
           </div>
@@ -146,7 +146,7 @@ export function ContextCard({ project }) {
         if (visible.length === 0) return null;
         return (
           <div key={section.scope} className="flex flex-col gap-0.5">
-            <span className="font-mono text-[10px] uppercase tracking-widest text-ink-4 px-1 mb-1">
+            <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
               {section.scope}
             </span>
             {visible.map((entry) => (

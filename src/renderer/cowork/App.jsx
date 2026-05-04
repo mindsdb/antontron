@@ -1010,6 +1010,7 @@ function AppCore() {
               handleSendFromHome(text);
             }}
             onSelectTask={selectTask}
+            onDeleteTask={handleDeleteTask}
           />
         )}
 

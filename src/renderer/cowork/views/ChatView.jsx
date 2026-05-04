@@ -15,11 +15,9 @@ import { OrbitMorph } from '../components/ui';
 import { MarkdownContent } from '../components/markdown/MarkdownContent';
 import { ThinkingBlock } from '../components/thinking/ThinkingBlock';
 import { OrbitProvider, useOrbitSlot } from '../lib/orbitRegistry';
-import { PhaseProgress } from '../components/thinking/PhaseProgress';
 import { TaskMenu } from '../components/TaskMenu';
 import { ScratchpadModal } from '../components/thinking/ScratchpadModal';
-import { WorkingFolderLive } from '../components/rail/WorkingFolderLive';
-import { ContextCard } from '../components/rail/ContextCard';
+import { ProgressBox, WorkingFolderBox, ContextBox } from '../components/rail';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -271,196 +269,14 @@ function StreamCursor({ slotId }) {
   );
 }
 
-// ─── Right rail: collapsible cards ────────────────────────────────────────
-//
-// Two visual modes:
-//   default — boxed card with border, header has a divider below
-//   slim    — borderless / no header divider; body padding tighter.
-//             Used for Context per the spec ("one line has no underline
-//             unlike the header of the chat").
-//
-// Body always has maxHeight + overflowY: auto so a long Working-folder
-// or Progress list scrolls inside its own card rather than pushing the
-// whole rail past the viewport.
-function RailCard({ title, defaultOpen = false, slim = false, maxBodyHeight = 320, children }) {
-  const [open, setOpen] = useState(!!defaultOpen);
-  return (
-    <div style={{
-      background: T.surface,
-      border: `1px solid ${T.line}`,
-      borderRadius: 12,
-      overflow: 'hidden',
-      flexShrink: 0,
-    }}>
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          cursor: 'pointer',
-          background: 'transparent',
-          border: 0,
-          padding: '11px 14px',
-          width: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          textAlign: 'left',
-          font: 'inherit',
-          color: 'inherit',
-        }}
-      >
-        <span style={{
-          fontFamily: FONT_BODY, fontSize: 13, fontWeight: 600,
-          color: T.ink, letterSpacing: '-0.005em',
-          minWidth: 0, flex: 1,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {title}
-        </span>
-        <span style={{ color: T.ink4, display: 'inline-flex', flexShrink: 0 }} title={open ? 'Collapse' : 'Expand'}>
-          {open ? Ico.chevDown(12) : Ico.chevRight(12)}
-        </span>
-      </button>
-      {open && (
-        <div style={{
-          padding: '4px 14px 14px',
-          // `slim` keeps the bubble surface + border but drops the
-          // top divider so the header reads as a single continuous
-          // line above the body (per spec for Context).
-          borderTop: slim ? 'none' : `1px solid ${T.line}`,
-          maxHeight: maxBodyHeight,
-          overflowY: 'auto',
-        }}>
-          {children}
-        </div>
-      )}
-    </div>
-  );
-}
+// Right-rail boxes (Progress/WorkingFolder/Context) live in
+// components/rail/. The local RailCard that used to live here was
+// removed when ChatView switched to those wrappers.
 
-function ProgressList({ steps }) {
-  if (!steps?.length) {
-    return <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink4, padding: '8px 0 4px' }}>
-      Steps appear here while Anton works.
-    </p>;
-  }
-  // Inputs only — we surface the one_line_description (the human-
-  // readable title of each scratchpad cell or artifact). Code + output
-  // never show here per design; they live in the full expansion.
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 8 }}>
-      {steps.map((step) => {
-        const done = step.status === 'completed';
-        const current = step.status === 'in_progress';
-        const text = step.data?.one_line_description || step.label || step._scratchpadTabId || 'Step';
-        return (
-          <div key={step.id} title={text} style={{
-            display: 'flex', alignItems: 'flex-start', gap: 10,
-            fontFamily: FONT_BODY, fontSize: 12.5,
-            color: done ? T.ink4 : T.ink2,
-          }}>
-            <span style={{
-              width: 14, height: 14, borderRadius: 99, marginTop: 2, flex: '0 0 auto',
-              background: done ? T.accent : 'transparent',
-              border: `1.4px solid ${done || current ? T.accent : T.line}`,
-              display: 'grid', placeItems: 'center',
-            }}>
-              {done && <span style={{ color: '#fff', display: 'inline-flex' }}>{Ico.check(9)}</span>}
-              {current && <span style={{
-                width: 5, height: 5, borderRadius: 99, background: T.accent,
-              }} />}
-            </span>
-            <span style={{
-              flex: 1, minWidth: 0,
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>{text}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-function WorkingFolder({ project, files = [], onOpenScratchpad }) {
-  return (
-    <div style={{ paddingTop: 8 }}>
-      {project && (
-        <div style={{
-          display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: 8,
-          marginBottom: 6, borderBottom: `1px solid ${T.line}`,
-        }}>
-          <span style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink, fontWeight: 500 }}>
-            {project.name}
-          </span>
-          <span style={{
-            fontFamily: FONT_MONO, fontSize: 10.5, color: T.ink4, letterSpacing: '0.04em',
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>{project.path}</span>
-        </div>
-      )}
-      {files.length ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-          {files.map((f) => (
-            <div key={f.name} style={{
-              display: 'grid', gridTemplateColumns: '18px 1fr auto', alignItems: 'center', gap: 8,
-              padding: '6px 4px', borderRadius: 6,
-            }}>
-              <span style={{ color: T.ink3, display: 'inline-flex' }}>{Ico.doc(14)}</span>
-              <span style={{
-                fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink,
-                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              }}>{f.name}</span>
-              <span style={{ fontFamily: FONT_MONO, fontSize: 10, color: T.ink4 }}>
-                {f.live ? <span style={{ color: T.accent }}>● live</span> : (f.size || '')}
-              </span>
-            </div>
-          ))}
-        </div>
-      ) : !project && (
-        <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink4, padding: '8px 0 4px' }}>
-          No project selected for this task.
-        </p>
-      )}
-      {onOpenScratchpad && (
-        <button onClick={onOpenScratchpad} style={{
-          all: 'unset', cursor: 'pointer',
-          display: 'flex', alignItems: 'center', gap: 6, marginTop: 10,
-          padding: '6px 8px', fontFamily: FONT_BODY, fontSize: 12, color: T.ink3,
-          width: 'calc(100% - 16px)',
-        }}>
-          <span style={{ display: 'inline-flex' }}>{Ico.folder(13)}</span>
-          <span>Open scratchpad</span>
-          <span style={{ color: T.ink4, marginLeft: 'auto', display: 'inline-flex' }}>{Ico.chevRight(11)}</span>
-        </button>
-      )}
-    </div>
-  );
-}
-
-function ContextSection({ attachments = [] }) {
-  if (!attachments.length) {
-    return <p style={{ fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink4, padding: '8px 0 4px' }}>
-      Attached files, URLs, and snippets appear here.
-    </p>;
-  }
-  return (
-    <div style={{ paddingTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {attachments.map((a) => (
-        <div key={a.id} style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink2,
-        }}>
-          <span style={{ color: T.ink3, display: 'inline-flex' }}>
-            {a.kind === 'url' ? Ico.globe(13) : a.kind === 'snippet' ? Ico.code(13) : Ico.doc(13)}
-          </span>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {a.name || a.kind || 'attachment'}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
+// ProgressList / WorkingFolder / ContextSection were the legacy
+// inline rail bodies; they're now folded into the rail box wrappers
+// (PhaseProgress / WorkingFolderLive / ContextCard) which are
+// composed via ProgressBox / WorkingFolderBox / ContextBox.
 
 // ─── Header crumb helpers ────────────────────────────────────────────────
 function CrumbSep() {
@@ -926,27 +742,18 @@ export default function ChatView({
             {Ico.panelCollapseRight(15)}
           </button>
         </div>
-        <RailCard title="Progress" defaultOpen maxBodyHeight={300}>
-          <PhaseProgress
-            steps={railSteps}
-            streamStatus={streamingMsg?.streamStatus || (railSteps.length ? 'done' : null)}
-            conversationId={task.id || ''}
-            onActivateStep={(step) => setOpenScratchpadStepId(step.id)}
-          />
-        </RailCard>
-        <RailCard title="Working folder" defaultOpen maxBodyHeight={320}>
-          <WorkingFolderLive
-            project={project}
-            isStreaming={isStreaming}
-            streamStartedAt={streamingMsg?.startedAt}
-          />
-        </RailCard>
-        {/* Context — slim header with no underline, expanded by
-            default per spec. The expander icon on the right doubles
-            as the collapse button. */}
-        <RailCard title="Context" defaultOpen slim maxBodyHeight={360}>
-          <ContextCard project={project} />
-        </RailCard>
+        <ProgressBox
+          steps={railSteps}
+          streamStatus={streamingMsg?.streamStatus}
+          conversationId={task.id || ''}
+          onActivateStep={(step) => setOpenScratchpadStepId(step.id)}
+        />
+        <WorkingFolderBox
+          project={project}
+          isStreaming={isStreaming}
+          streamStartedAt={streamingMsg?.startedAt}
+        />
+        <ContextBox project={project} />
       </aside>
 
       {/* keyframes for the streaming cursor */}

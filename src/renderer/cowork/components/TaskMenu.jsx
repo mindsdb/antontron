@@ -67,6 +67,11 @@ export function TaskMenu({
   onSchedule,
   onTurnIntoSkill,
   showHeaderActions = false,
+  // Per current spec: move/rename are temporarily hidden from every
+  // surface. Default to hidden so callers don't have to opt out;
+  // re-enable per call site when those flows ship.
+  hideMoveToProject = true,
+  hideRename = true,
 }) {
   const [moveOpen, setMoveOpen] = useState(false);
   const popoverRef = useRef(null);
@@ -143,13 +148,26 @@ export function TaskMenu({
 
   if (!open) return null;
 
-  // Position the popover. We use fixed positioning anchored to
-  // viewport coordinates from anchorRect. Fall back to (0,0) if the
-  // anchor is missing.
-  const top = (anchorRect?.bottom ?? 0) + 4;
-  const left = align === 'right'
-    ? Math.max(8, (anchorRect?.right ?? 0) - 220)
+  // Position the popover. Default: anchor below the trigger. If the
+  // menu would extend past the viewport bottom, flip above. Same
+  // logic for horizontal — clamp into the viewport.
+  const MENU_WIDTH = 220;
+  // Estimated max height — actual content is shorter when items are
+  // hidden; using 320 as the safety bound for the flip decision.
+  const MENU_MAX_HEIGHT = 320;
+  const VW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const VH = typeof window !== 'undefined' ? window.innerHeight : 800;
+
+  const wantedLeft = align === 'right'
+    ? (anchorRect?.right ?? 0) - MENU_WIDTH
     : (anchorRect?.left ?? 0);
+  const left = Math.min(Math.max(8, wantedLeft), VW - MENU_WIDTH - 8);
+
+  const wouldOverflowBottom = (anchorRect?.bottom ?? 0) + 4 + MENU_MAX_HEIGHT > VH - 8;
+  const top = wouldOverflowBottom
+    // Flip above the trigger.
+    ? Math.max(8, (anchorRect?.top ?? 0) - 4 - MENU_MAX_HEIGHT)
+    : (anchorRect?.bottom ?? 0) + 4;
 
   const handleMoveHover = () => {
     cancelSubmenuTimer();
@@ -201,82 +219,86 @@ export function TaskMenu({
         </>
       )}
 
-      <div
-        ref={moveItemRef}
-        onMouseEnter={handleMoveHover}
-        onMouseLeave={scheduleSubmenuClose}
-        style={{ position: 'relative' }}
-      >
-        <MenuButton
-          icon={Ico.moveTo(14)}
-          label="Move to project"
-          hasSubmenu
-          onClick={handleMoveHover}
-        />
-      </div>
-      {moveOpen && submenuPos && (
-        <div
-          ref={submenuRef}
-          onMouseEnter={() => { cancelSubmenuTimer(); cancelCloseTimer(); }}
-          onMouseLeave={() => { scheduleSubmenuClose(); scheduleClose(); }}
-          style={{
-            position: 'fixed',
-            top: submenuPos.top, left: submenuPos.left,
-            zIndex: 61,
-            width: 200,
-            maxHeight: 280, overflowY: 'auto',
-            background: 'var(--surface)',
-            border: '1px solid var(--line)',
-            borderRadius: 10,
-            boxShadow: '0 12px 32px rgba(15,16,17,0.18)',
-            padding: '4px 0',
-          }}
-        >
-          {(() => {
-            // Filter out the project the task is already in — listing it
-            // disabled creates a "nothing happens when I click" footgun.
-            const candidates = projects.filter((p) =>
-              p.name !== task?.projectName && p.path !== task?.projectPath
-            );
-            if (candidates.length === 0) {
-              return (
-                <div style={{ padding: '10px 14px', fontSize: 12.5, color: 'var(--ink-4)', fontFamily: 'var(--font-body)' }}>
-                  {projects.length === 0
-                    ? 'No projects available — Anton is still loading them.'
-                    : 'Create another project first to move this task.'}
-                </div>
-              );
-            }
-            return candidates.map((p) => (
-              <MenuButton
-                key={p.name}
-                label={p.name}
-                onClick={() => {
-                  // eslint-disable-next-line no-console
-                  console.log('[TaskMenu] move-to-project clicked', p.name, 'task=', task?.id);
-                  onMoveToProject?.(p);
-                  onClose?.();
-                }}
-              />
-            ));
-          })()}
-        </div>
+      {!hideMoveToProject && (
+        <>
+          <div
+            ref={moveItemRef}
+            onMouseEnter={handleMoveHover}
+            onMouseLeave={scheduleSubmenuClose}
+            style={{ position: 'relative' }}
+          >
+            <MenuButton
+              icon={Ico.moveTo(14)}
+              label="Move to project"
+              hasSubmenu
+              onClick={handleMoveHover}
+            />
+          </div>
+          {moveOpen && submenuPos && (
+            <div
+              ref={submenuRef}
+              onMouseEnter={() => { cancelSubmenuTimer(); cancelCloseTimer(); }}
+              onMouseLeave={() => { scheduleSubmenuClose(); scheduleClose(); }}
+              style={{
+                position: 'fixed',
+                top: submenuPos.top, left: submenuPos.left,
+                zIndex: 61,
+                width: 200,
+                maxHeight: 280, overflowY: 'auto',
+                background: 'var(--surface)',
+                border: '1px solid var(--line)',
+                borderRadius: 10,
+                boxShadow: '0 12px 32px rgba(15,16,17,0.18)',
+                padding: '4px 0',
+              }}
+            >
+              {(() => {
+                const candidates = projects.filter((p) =>
+                  p.name !== task?.projectName && p.path !== task?.projectPath
+                );
+                if (candidates.length === 0) {
+                  return (
+                    <div style={{ padding: '10px 14px', fontSize: 12.5, color: 'var(--ink-4)', fontFamily: 'var(--font-body)' }}>
+                      {projects.length === 0
+                        ? 'No projects available — Anton is still loading them.'
+                        : 'Create another project first to move this task.'}
+                    </div>
+                  );
+                }
+                return candidates.map((p) => (
+                  <MenuButton
+                    key={p.name}
+                    label={p.name}
+                    onClick={() => {
+                      onMoveToProject?.(p);
+                      onClose?.();
+                    }}
+                  />
+                ));
+              })()}
+            </div>
+          )}
+
+          <MenuDivider />
+        </>
       )}
 
-      <MenuDivider />
+      {(onPin || onUnpin) && (
+        <MenuButton
+          icon={Ico.pin(14)}
+          label={task?.pinned ? 'Unpin' : 'Pin'}
+          onClick={() => { (task?.pinned ? onUnpin : onPin)?.(); onClose?.(); }}
+        />
+      )}
+      {!hideRename && (
+        <MenuButton
+          icon={Ico.edit(14)}
+          label="Rename"
+          onClick={() => { onRename?.(); onClose?.(); }}
+        />
+      )}
 
-      <MenuButton
-        icon={Ico.pin(14)}
-        label={task?.pinned ? 'Unpin' : 'Pin'}
-        onClick={() => { (task?.pinned ? onUnpin : onPin)?.(); onClose?.(); }}
-      />
-      <MenuButton
-        icon={Ico.edit(14)}
-        label="Rename"
-        onClick={() => { onRename?.(); onClose?.(); }}
-      />
-
-      <MenuDivider />
+      {(!hideMoveToProject || !hideRename || onPin || onUnpin) && <MenuDivider />}
 
       <MenuButton
         icon={Ico.trash(14)}

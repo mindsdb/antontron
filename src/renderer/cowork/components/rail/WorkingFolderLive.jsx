@@ -109,7 +109,7 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
             {effectiveProject.name}
           </span>
           <span
-            className="font-mono text-[10.5px] text-ink-4 truncate cursor-pointer hover:text-ink-3"
+            className="text-[10.5px] text-ink-4 truncate cursor-pointer hover:text-ink-3"
             title={antonFolder ? `Open ${antonFolder}` : effectiveProject.path}
             onClick={() => antonFolder && onOpen(antonFolder)}
           >{effectiveProject.path}</span>
@@ -159,7 +159,7 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
                   <span className="text-ink-4 inline-flex">{Ico.doc(13)}</span>
                 )}
                 <span className="text-[12.5px] text-ink truncate">{f.title || (f.path?.split('/').pop() || '')}</span>
-                <span className="font-mono text-[10px] text-ink-4">
+                <span className="text-[10.5px] text-ink-4">
                   {timeAgo(f.updated) || formatBytes(f.size)}
                 </span>
               </button>

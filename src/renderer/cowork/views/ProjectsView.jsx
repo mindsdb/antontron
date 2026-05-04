@@ -14,8 +14,8 @@
 import { useEffect, useState } from 'react';
 import Ico from '../components/Icons';
 import Composer from '../components/Composer';
-import { WorkingFolderLive } from '../components/rail/WorkingFolderLive';
-import { ContextCard } from '../components/rail/ContextCard';
+import { WorkingFolderBox, ContextBox, ScheduledBox } from '../components/rail';
+import { TaskList } from '../components/task';
 
 function PageHeader({ title, subtitle, action }) {
   return (
@@ -122,6 +122,10 @@ function ProjectGrid({ projects, selectedProject, onOpenProject, onCreateProject
                 boxShadow: 'var(--sh-1, 0 1px 0 rgba(0,0,0,0.04))',
                 display: 'flex', flexDirection: 'column', gap: 12,
                 minHeight: 120,
+                // Pin width so children with overflow:hidden + ellipsis
+                // actually clip — without this the grid item happily
+                // grows to fit its widest child (e.g. a long path).
+                minWidth: 0, width: '100%', overflow: 'hidden',
               }}
               onClick={() => onOpenProject?.(p)}
               onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
@@ -134,13 +138,26 @@ function ProjectGrid({ projects, selectedProject, onOpenProject, onCreateProject
               }}>
                 {Ico.folder(18)}
               </div>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--ink)', flex: 1 }}>{p.name}</div>
-                </div>
+              {/* min-width:0 + width:100% so the inner ellipsis on
+                  the path actually triggers — without these the flex
+                  parent's min-width:auto lets the child expand to its
+                  natural content width and pushes the card wider. */}
+              <div style={{ minWidth: 0, width: '100%' }}>
                 <div style={{
+                  display: 'flex', alignItems: 'center', gap: 8,
+                  minWidth: 0,
+                }}>
+                  <div style={{
+                    fontFamily: 'var(--font-body)',
+                    fontSize: 14, fontWeight: 600, color: 'var(--ink)',
+                    flex: '1 1 0', minWidth: 0,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>{p.name}</div>
+                </div>
+                <div title={p.path} style={{
                   fontSize: 11.5, color: 'var(--ink-4)', marginTop: 4,
-                  fontFamily: 'var(--font-mono)',
+                  fontFamily: 'var(--font-body)',
+                  minWidth: 0, maxWidth: '100%',
                   overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                 }}>{p.path}</div>
               </div>
@@ -152,152 +169,16 @@ function ProjectGrid({ projects, selectedProject, onOpenProject, onCreateProject
   );
 }
 
-function turnsCount(task) {
-  if (Number.isFinite(task.turns)) return task.turns;
-  if (Array.isArray(task.messages)) {
-    return task.messages.filter((m) => m.role === 'user').length;
-  }
-  return null;
-}
+// TaskCard / turnsCount lived here previously; both now live in
+// components/task/ as the shared TaskCard + TaskList.
 
-function TaskCard({ task, onClick }) {
-  const subtitle = task.subtitle || task.preview || '';
-  const updated = relativeAge(task.updatedAt || task.updated_at || task.created_at);
-  const turns = turnsCount(task);
-  return (
-    <button
-      onClick={onClick}
-      style={{
-        all: 'unset', cursor: 'pointer',
-        display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) auto',
-        gap: 14, alignItems: 'flex-start',
-        background: 'var(--surface)',
-        border: '1px solid var(--line)',
-        borderRadius: 12,
-        padding: '14px 16px',
-        boxShadow: '0 1px 0 rgba(15,16,17,0.02)',
-        transition: 'border-color 120ms ease, box-shadow 120ms ease, transform 120ms ease',
-      }}
-      onMouseOver={(e) => {
-        e.currentTarget.style.borderColor = 'var(--accent)';
-        e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02), 0 6px 18px rgba(15,16,17,0.06)';
-        e.currentTarget.style.transform = 'translateY(-1px)';
-      }}
-      onMouseOut={(e) => {
-        e.currentTarget.style.borderColor = 'var(--line)';
-        e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02)';
-        e.currentTarget.style.transform = 'translateY(0)';
-      }}
-    >
-      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{
-          fontFamily: 'var(--font-body)', fontWeight: 600,
-          fontSize: 14, color: 'var(--ink)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>
-          {task.title || 'Untitled'}
-        </span>
-        {subtitle && (
-          <span style={{
-            fontFamily: 'var(--font-body)',
-            fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.4,
-            display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-          }}>
-            {subtitle}
-          </span>
-        )}
-      </div>
-      <div style={{
-        display: 'flex', flexDirection: 'column', alignItems: 'flex-end',
-        gap: 4, flexShrink: 0,
-      }}>
-        <span style={{ fontFamily: 'var(--font-body)', fontSize: 11.5, color: 'var(--ink-4)' }}>
-          {updated || '—'}
-        </span>
-        {turns != null && (
-          <span style={{
-            fontFamily: 'var(--font-body)', fontSize: 11.5, color: 'var(--ink-4)',
-            display: 'inline-flex', alignItems: 'center', gap: 4,
-          }}>
-            {turns} {turns === 1 ? 'turn' : 'turns'}
-          </span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-function ScheduledMini({ items }) {
-  if (!items.length) {
-    return (
-      <p style={{
-        fontFamily: 'var(--font-body)',
-        fontSize: 12.5, color: 'var(--ink-4)', padding: '8px 4px 4px',
-      }}>
-        No scheduled tasks for this project.
-      </p>
-    );
-  }
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 6 }}>
-      {items.map((s) => (
-        <div key={s.id} title={s.prompt || s.title || s.id} style={{
-          display: 'flex', alignItems: 'center', gap: 8,
-          fontFamily: 'var(--font-body)',
-          fontSize: 12.5, color: 'var(--ink-2)',
-        }}>
-          <span style={{ color: 'var(--ink-3)', display: 'inline-flex', flexShrink: 0 }}>
-            {Ico.clock(13)}
-          </span>
-          <span style={{
-            flex: 1, minWidth: 0,
-            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          }}>
-            {s.title || s.prompt || s.id}
-          </span>
-          {s.cadence && (
-            <span style={{ fontSize: 11, color: 'var(--ink-4)' }}>
-              {s.cadence}
-            </span>
-          )}
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function MiniCard({ title, children, slim = false }) {
-  return (
-    <div style={{
-      background: 'var(--surface)',
-      border: '1px solid var(--line)',
-      borderRadius: 12,
-      overflow: 'hidden',
-      flexShrink: 0,
-    }}>
-      <div style={{
-        padding: '11px 14px',
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        fontFamily: 'var(--font-body)', fontSize: 13, fontWeight: 600,
-        color: 'var(--ink)',
-      }}>
-        <span>{title}</span>
-      </div>
-      <div style={{
-        padding: '4px 14px 14px',
-        borderTop: slim ? 'none' : '1px solid var(--line)',
-        maxHeight: 320, overflowY: 'auto',
-      }}>
-        {children}
-      </div>
-    </div>
-  );
-}
+// MiniCard + ScheduledMini lived here previously. They've been
+// replaced by the shared rail boxes (WorkingFolderBox, ContextBox,
+// ScheduledBox) in components/rail/.
 
 function ProjectDetail({
   project, projects, tasks, scheduled, models, onSend, onSelectTask,
-  onShowAll, onCreateProject,
+  onDeleteTask, onShowAll, onCreateProject,
 }) {
   const projectTasks = (tasks || [])
     .filter((t) => t.projectName === project.name || t.projectPath === project.path)
@@ -305,51 +186,99 @@ function ProjectDetail({
   const projectSchedules = (scheduled || [])
     .filter((s) => (s.project || s.projectName) === project.name);
 
+  // Rail collapse mirror of ChatView's behavior — same in-rail
+  // collapse button + floating expand button on the conv col.
+  const [railOpen, setRailOpen] = useState(true);
+
   return (
-    <div className="scroll-clean" style={{ flex: 1, minHeight: 0, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-      {/* Header — Back to all projects + project name */}
+    <div style={{
+      flex: 1, minHeight: 0,
+      display: 'grid',
+      // Same minmax(0, 1fr) trick ChatView uses to prevent grid track
+      // expansion when long unbreakable content lands in the conv col.
+      gridTemplateColumns: railOpen ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr) 0px',
+      gridTemplateRows: '1fr',
+      transition: 'grid-template-columns 220ms cubic-bezier(.2,.7,.3,1)',
+      background: 'transparent',
+      fontFamily: 'var(--font-body)',
+      color: 'var(--ink-2)',
+      position: 'relative',
+      overflow: 'hidden',
+    }}>
+      {/* ─── Conversation column ─── */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '14px 28px',
-        borderBottom: '1px solid var(--line)',
-        flexShrink: 0,
+        position: 'relative', overflow: 'hidden',
+        display: 'grid',
+        gridTemplateRows: 'auto 1fr',
+        minWidth: 0, minHeight: 0,
       }}>
+        {/* Floating expand-rail button (mirrors ChatView). */}
         <button
-          onClick={onShowAll}
-          title="All projects"
+          type="button"
+          onClick={() => setRailOpen(true)}
+          title="Expand panel"
+          aria-label="Expand panel"
           style={{
-            all: 'unset', cursor: 'pointer',
-            display: 'inline-flex', alignItems: 'center', gap: 4,
+            position: 'absolute', top: 14, right: 14, zIndex: 10,
+            width: 28, height: 28, borderRadius: 6,
+            display: 'inline-grid', placeItems: 'center',
+            cursor: 'pointer', background: 'transparent', border: 0,
             color: 'var(--ink-3)',
-            fontFamily: 'var(--font-body)',
-            fontSize: 13, padding: '4px 6px', borderRadius: 5,
-            transition: 'color 120ms ease, background 120ms ease',
+            opacity: railOpen ? 0 : 1,
+            transform: railOpen ? 'translateX(8px)' : 'translateX(0)',
+            pointerEvents: railOpen ? 'none' : 'auto',
+            transition:
+              `opacity 280ms cubic-bezier(0.32,0.72,0,1) ${railOpen ? '0ms' : '120ms'}, ` +
+              `transform 360ms cubic-bezier(0.32,0.72,0,1) ${railOpen ? '0ms' : '80ms'}`,
+            WebkitAppRegion: 'no-drag',
           }}
           onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
           onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
         >
-          {Ico.chevLeft(13)} All projects
+          {Ico.panelExpandLeft(15)}
         </button>
-        <span style={{ color: 'var(--ink-4)', display: 'inline-flex' }}>{Ico.chevRight(12)}</span>
-        <span style={{
-          fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 17,
-          letterSpacing: '0.01em', color: 'var(--ink)',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-          flex: 1, minWidth: 0,
-        }}>{project.name}</span>
-      </div>
 
-      {/* Body — two columns: composer + task list / right rail */}
-      <div style={{
-        flex: 1, minHeight: 0,
-        display: 'grid',
-        gridTemplateColumns: 'minmax(0, 1fr) 320px',
-        gridTemplateRows: '1fr',
-        background: 'transparent',
-      }}>
-        {/* Left column — composer + task list */}
-        <div style={{ overflowY: 'auto', padding: '24px 28px 32px', display: 'flex', flexDirection: 'column', gap: 18 }}>
-          <div style={{ width: '100%', maxWidth: 720, alignSelf: 'center' }}>
+        {/* Header — Projects › [project] crumb. Same layout/styling
+            as ChatView so the project view reads as a sibling. */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '14px 28px',
+          borderBottom: '1px solid var(--line)',
+          background: 'transparent',
+          flexShrink: 0,
+          minWidth: 0, overflow: 'hidden',
+        }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            minWidth: 0, flex: '1 1 0',
+            overflow: 'hidden',
+          }}>
+            <Crumb
+              label="Projects"
+              onClick={onShowAll}
+              title="All projects"
+            />
+            <CrumbSep />
+            <span title={project.name} style={{
+              fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 14,
+              letterSpacing: '0.04em', color: 'var(--ink)',
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              minWidth: 0, flex: '1 1 0',
+            }}>{project.name}</span>
+          </div>
+        </div>
+
+        {/* Scrollable body — composer pinned at top, task list below */}
+        <div data-scroll="true" style={{
+          minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
+          padding: '32px 28px 60px',
+          background: 'transparent',
+          WebkitAppRegion: 'no-drag',
+        }}>
+          <div style={{
+            maxWidth: 720, margin: '0 auto',
+            display: 'flex', flexDirection: 'column', gap: 28,
+          }}>
             <Composer
               onSend={onSend}
               project={project}
@@ -367,64 +296,94 @@ function ProjectDetail({
               metaReadOnly
               placeholder={`Start a new task in ${project.name}…`}
             />
-          </div>
 
-          <div style={{ width: '100%', maxWidth: 760, alignSelf: 'center' }}>
-            <div style={{
-              display: 'flex', alignItems: 'baseline', gap: 8,
-              marginBottom: 12, paddingLeft: 4,
-            }}>
-              <span style={{
-                fontFamily: 'var(--font-display)', fontSize: 16,
-                fontWeight: 600, color: 'var(--ink)', letterSpacing: '-0.005em',
-              }}>
-                Tasks
-              </span>
-              <span style={{
-                fontFamily: 'var(--font-body)',
-                fontSize: 13, color: 'var(--ink-4)',
-              }}>
-                {projectTasks.length}
-              </span>
-            </div>
-            {projectTasks.length === 0 ? (
-              <div style={{
-                padding: 28, fontFamily: 'var(--font-body)', fontSize: 13, color: 'var(--ink-3)',
-                background: 'var(--surface)', border: '1px solid var(--line)',
-                borderRadius: 12, textAlign: 'center', lineHeight: 1.55,
-              }}>
-                No tasks in this project yet — type a prompt above to start one.
-              </div>
-            ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                {projectTasks.map((t) => (
-                  <TaskCard key={t.id} task={t} onClick={() => onSelectTask?.(t.id)} />
-                ))}
-              </div>
-            )}
+            <TaskList
+              tasks={projectTasks}
+              projects={projects || []}
+              emptyMessage={`No tasks in this project yet — type a prompt above to start one.`}
+              onSelectTask={onSelectTask}
+              onDeleteTask={onDeleteTask}
+            />
           </div>
         </div>
-
-        {/* Right column — working folder, context, scheduled */}
-        <aside style={{
-          padding: '14px 14px 22px',
-          display: 'flex', flexDirection: 'column', gap: 10,
-          overflowY: 'auto',
-          minWidth: 0,
-          WebkitAppRegion: 'no-drag',
-        }}>
-          <MiniCard title="Working folder">
-            <WorkingFolderLive project={project} isStreaming={false} streamStartedAt={null} />
-          </MiniCard>
-          <MiniCard title="Context" slim>
-            <ContextCard project={project} />
-          </MiniCard>
-          <MiniCard title="Scheduled">
-            <ScheduledMini items={projectSchedules} />
-          </MiniCard>
-        </aside>
       </div>
+
+      {/* ─── Right rail — same shape as ChatView, no Progress card ─── */}
+      <aside style={{
+        background: 'transparent',
+        padding: '14px 14px 22px',
+        visibility: railOpen ? 'visible' : 'hidden',
+        opacity: railOpen ? 1 : 0,
+        transition: 'opacity 180ms ease',
+        display: 'flex', flexDirection: 'column', gap: 10,
+        overflowX: 'hidden', overflowY: 'auto',
+        minWidth: 0,
+        WebkitAppRegion: 'no-drag',
+      }}>
+        {/* Rail header — collapse-to-right button at top-right */}
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
+          flexShrink: 0,
+        }}>
+          <button
+            type="button"
+            onClick={() => setRailOpen(false)}
+            title="Collapse panel"
+            aria-label="Collapse panel"
+            style={{
+              cursor: 'pointer', background: 'transparent', border: 0,
+              width: 26, height: 26, borderRadius: 6,
+              display: 'inline-grid', placeItems: 'center',
+              color: 'var(--ink-3)',
+              WebkitAppRegion: 'no-drag',
+            }}
+            onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
+          >
+            {Ico.panelCollapseRight(15)}
+          </button>
+        </div>
+        <WorkingFolderBox project={project} />
+        <ContextBox project={project} />
+        <ScheduledBox items={projectSchedules} />
+      </aside>
     </div>
+  );
+}
+
+// ── Header crumb helpers (mirror ChatView's CrumbButton/CrumbSep) ──
+function Crumb({ label, onClick, title, maxWidth }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      style={{
+        cursor: 'pointer', background: 'transparent', border: 0,
+        outline: 0, font: 'inherit',
+        fontFamily: 'var(--font-display)', fontWeight: 600, fontSize: 13,
+        letterSpacing: '0.04em', color: 'var(--ink-3)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        maxWidth, flexShrink: 1,
+        padding: '2px 6px', borderRadius: 5,
+        transition: 'color 120ms ease, background 120ms ease',
+        WebkitAppRegion: 'no-drag',
+      }}
+      onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+      onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function CrumbSep() {
+  return (
+    <span aria-hidden="true" style={{
+      color: 'var(--ink-4)', fontFamily: 'var(--font-display)',
+      fontSize: 14, lineHeight: 1, padding: '0 2px', flexShrink: 0,
+      userSelect: 'none',
+    }}>›</span>
   );
 }
 
@@ -438,6 +397,7 @@ export default function ProjectsView({
   onCreateProject,
   onSendInProject,
   onSelectTask,
+  onDeleteTask,
 }) {
   // Detail mode is local — App's selectedProject seeds it but the user
   // can flip back to the grid without losing their global selection.
@@ -467,6 +427,7 @@ export default function ProjectsView({
       models={models}
       onSend={onSendInProject}
       onSelectTask={onSelectTask}
+      onDeleteTask={onDeleteTask}
       onShowAll={() => setDetailProject(null)}
       onCreateProject={onCreateProject}
     />

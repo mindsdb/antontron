@@ -104,7 +104,12 @@ function _conversationToTask(conv, messages = []) {
 
 export async function fetchSessions() {
   try {
-    const list = await req('/conversations');
+    // Critical: pass `project=all` so we list conversations across
+    // every project, not just the active one. Without this, a task
+    // created in project A vanishes from `tasks` the moment we
+    // refresh while the user is "in" project B (because the server
+    // defaults to the active project's episodes/ dir).
+    const list = await req('/conversations?project=all&limit=200');
     const conversations = Array.isArray(list?.conversations) ? list.conversations : [];
     if (conversations.length === 0) return [];
     // Fan out to load each conversation's messages so the task view can render
