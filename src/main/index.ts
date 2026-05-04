@@ -432,7 +432,7 @@ function createWindow() {
 
   // In dev with Vite running, load from dev server; otherwise load built/cached files
   if (isDev) {
-    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.loadURL(process.env.VITE_RENDERER_URL || 'http://localhost:5173');
   } else {
     mainWindow.loadFile(getRendererPath());
   }

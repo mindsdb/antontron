@@ -62,9 +62,14 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Anton CoWork API", version="1.0.0", lifespan=lifespan)
 
+_renderer_url = os.environ.get("VITE_RENDERER_URL", "").rstrip("/")
+_allow_origins = ["http://localhost:5173", "http://127.0.0.1:5173", "app://-", "null"]
+if _renderer_url and _renderer_url not in _allow_origins:
+    _allow_origins.append(_renderer_url)
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173", "app://-", "null"],
+    allow_origins=_allow_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
