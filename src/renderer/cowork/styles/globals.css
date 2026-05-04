@@ -580,6 +580,17 @@ button.meta-pill:hover { background: var(--surface-0); border-color: var(--borde
   min-width: 0;
 }
 
+/* Two-pane variant — connectors list on the left, credentials /
+   connect form on the right. Used when the workflow renders inside
+   the Connect Apps and Data page (no left-rail subnav needed). */
+.customize-two-pane {
+  height: 100%;
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  background: var(--bg);
+  min-width: 0;
+}
+
 .customize-serif {
   font-family: "Times New Roman", Georgia, serif;
   font-weight: 500;

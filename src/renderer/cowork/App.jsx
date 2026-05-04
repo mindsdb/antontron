@@ -1434,7 +1434,10 @@ function AppCore() {
         )}
 
         {route === 'customize' && (
-          <CustomizeView onOpenSettings={() => setRoute('settings')} />
+          <CustomizeView
+            connectors={connectors}
+            onOpenSettings={() => setRoute('settings')}
+          />
         )}
 
         {route === 'settings' && (
