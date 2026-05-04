@@ -168,6 +168,141 @@ def _load_history(project: Optional[str], conversation_id: str) -> list[dict] | 
         return None
 
 
+def _sanitize_history_for_anthropic(history: list[dict]) -> tuple[list[dict], int]:
+    """Repair a conversation history so the Anthropic API accepts it
+    on the next turn.
+
+    Anthropic requires every assistant `tool_use` block to be followed
+    by a user message containing a matching `tool_result` block. When
+    a stream is stopped or errors mid-tool-use, anton may persist the
+    `tool_use` without ever appending the result — and the next call
+    fails with `400 invalid_request_error: tool_use ids were found
+    without tool_result blocks immediately after`.
+
+    This walks the history; for any assistant message with `tool_use`
+    blocks whose ids aren't acknowledged in the next user message,
+    we synthesize matching `tool_result` blocks marked as the call
+    being interrupted by the user. We never delete tool_use entries
+    (that'd lose context the model already committed to producing).
+
+    Returns (fixed_history, repair_count). repair_count > 0 means the
+    caller should write the result back to disk and drop the live
+    session cache so the next turn loads the repaired form.
+    """
+    if not isinstance(history, list):
+        return history, 0
+    fixed: list[dict] = []
+    repairs = 0
+    i = 0
+    n = len(history)
+    while i < n:
+        msg = history[i]
+        fixed.append(msg)
+        if not isinstance(msg, dict) or msg.get("role") != "assistant":
+            i += 1
+            continue
+        content = msg.get("content")
+        if not isinstance(content, list):
+            i += 1
+            continue
+        tool_use_ids = [
+            b.get("id") for b in content
+            if isinstance(b, dict) and b.get("type") == "tool_use" and b.get("id")
+        ]
+        if not tool_use_ids:
+            i += 1
+            continue
+
+        # Look at the next message — if it's a user message with
+        # tool_result blocks, gather the ids it acknowledges.
+        next_msg = history[i + 1] if i + 1 < n else None
+        next_content = (
+            next_msg.get("content")
+            if isinstance(next_msg, dict)
+            else None
+        )
+        ack_ids: set = set()
+        if isinstance(next_content, list):
+            for b in next_content:
+                if isinstance(b, dict) and b.get("type") == "tool_result":
+                    tid = b.get("tool_use_id")
+                    if tid:
+                        ack_ids.add(tid)
+
+        missing = [tid for tid in tool_use_ids if tid not in ack_ids]
+        if not missing:
+            i += 1
+            continue
+
+        repairs += len(missing)
+        synth_blocks = [
+            {
+                "type": "tool_result",
+                "tool_use_id": tid,
+                "content": "[interrupted by user — tool call did not complete]",
+                "is_error": True,
+            }
+            for tid in missing
+        ]
+        if (
+            isinstance(next_msg, dict)
+            and next_msg.get("role") == "user"
+            and isinstance(next_content, list)
+        ):
+            # Merge synthetic results into the existing user message
+            # so the conversation still flows cleanly.
+            next_msg["content"] = synth_blocks + next_content
+        else:
+            # Insert a new user message right after the assistant turn
+            # carrying the synthetic tool_result blocks.
+            fixed.append({
+                "role": "user",
+                "content": synth_blocks,
+            })
+        i += 1
+    return fixed, repairs
+
+
+def repair_history_if_needed(project: Optional[str], conversation_id: str) -> int:
+    """Sanitize the on-disk history for a conversation and drop any
+    cached live session so the next turn rebuilds against the repaired
+    form. Returns the number of tool_use ids that were patched.
+    """
+    history = _load_history(project, conversation_id)
+    if not history:
+        return 0
+    fixed, repairs = _sanitize_history_for_anthropic(history)
+    if repairs == 0:
+        return 0
+    try:
+        path = _history_path(project, conversation_id)
+        # Direct write — _atomic_write expects a dict; histories are
+        # arrays. Same atomic-rename pattern, slightly inlined.
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(fixed, f, ensure_ascii=False, indent=2)
+            os.replace(tmp, str(path))
+        except Exception:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+    except Exception:
+        logger.debug("Could not write repaired history for %s", conversation_id, exc_info=True)
+        return 0
+    # Drop the cached session so the next call loads the freshly
+    # repaired history rather than the in-memory broken version.
+    _live.pop(conversation_id, None)
+    logger.info(
+        "Repaired %d unpaired tool_use block(s) in %s before resuming",
+        repairs, conversation_id,
+    )
+    return repairs
+
+
 def _normalize_turns(payload: dict) -> tuple[dict, bool]:
     """Recover from sidecars written before record_turn_events used the
     displayable-assistant filter. Old sidecars may have entries keyed
@@ -618,6 +753,18 @@ async def chat_stream(
 
     cid = conversation_id or _new_conversation_id()
     _ensure_meta(project, cid)
+
+    # If a previous turn was stopped or errored mid-tool-use, the
+    # history may contain an assistant `tool_use` block without a
+    # matching user `tool_result`. The Anthropic API rejects that
+    # ("400 invalid_request_error: tool_use ids were found without
+    # tool_result blocks"). Patch any such gaps before we hand the
+    # conversation to anton's session — and drop the cached session
+    # so the repaired history is what the LLM sees.
+    try:
+        repair_history_if_needed(project, cid)
+    except Exception:
+        logger.debug("History repair pass failed", exc_info=True)
 
     session = await _resolve_session(cid, project, model)
 
