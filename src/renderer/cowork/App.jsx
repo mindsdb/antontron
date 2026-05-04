@@ -16,7 +16,7 @@ import CustomizeView from './views/CustomizeView';
 import SettingsView from './views/SettingsView';
 import UtilitiesView from './views/UtilitiesView';
 import SearchModal from './components/SearchModal';
-import { fetchSessions, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
+import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
          createProject, updateSettings, streamNewSession, streamMessage,
          uploadAttachments, createSnippetAttachment, createUrlAttachment, fetchProjectFiles,
          attachProjectFile, deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
@@ -346,6 +346,18 @@ function AppCore() {
         fetchPins().then((data) => setPins(data.pins || []));
         fetchSessions().then((data) => { if (Array.isArray(data)) setTasks(data); });
       }).catch(() => {});
+
+      // If this task didn't get its messages preloaded (we only fan
+      // out to the recent N at startup), fetch them now so the chat
+      // view doesn't render empty.
+      if (!task.messages || task.messages.length === 0) {
+        fetchSession(id).then((fresh) => {
+          if (!fresh || !Array.isArray(fresh.messages) || fresh.messages.length === 0) return;
+          setTasks((prev) => prev.map((t) =>
+            t.id === id ? { ...t, messages: fresh.messages } : t
+          ));
+        }).catch(() => {});
+      }
     }
     setComposerAttachments([]);
     setActiveTaskId(id);

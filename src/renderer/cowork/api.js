@@ -112,16 +112,21 @@ export async function fetchSessions() {
     const list = await req('/conversations?project=all&limit=200');
     const conversations = Array.isArray(list?.conversations) ? list.conversations : [];
     if (conversations.length === 0) return [];
-    // Fan out to load each conversation's messages so the task view can render
-    // history immediately. Cowork is a desktop app with small N — fine for now.
+    // Fan out for the most recent N — full message history isn't
+    // needed for the sidebar/projects-list rendering, but loading
+    // it eagerly for recent ones keeps clicks instant. Older tasks
+    // get an empty messages array; ChatView fetches them on open.
+    const EAGER = 50;
+    const eager = conversations.slice(0, EAGER);
     const messageBundles = await Promise.all(
-      conversations.map((c) =>
+      eager.map((c) =>
         req(`/conversations/${encodeURIComponent(c.id)}/messages`)
           .then((r) => Array.isArray(r?.messages) ? r.messages : [])
           .catch(() => [])
       )
     );
-    return conversations.map((c, i) => _conversationToTask(c, messageBundles[i]));
+    const messagesById = new Map(eager.map((c, i) => [c.id, messageBundles[i]]));
+    return conversations.map((c) => _conversationToTask(c, messagesById.get(c.id) || []));
   } catch {
     return [];
   }
