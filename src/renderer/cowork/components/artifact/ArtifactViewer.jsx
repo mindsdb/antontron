@@ -6,13 +6,16 @@
 
 import { useEffect, useState } from 'react';
 import Ico from '../Icons';
-import { previewArtifact, publishArtifact, unpublishArtifact } from '../../api';
+import { mountArtifactPreview, publishArtifact, unpublishArtifact } from '../../api';
 
 const FONT_BODY = "'Inter', system-ui, sans-serif";
 const FONT_DISPLAY = "'Josefin Sans', sans-serif";
 
 export function ArtifactViewer({ open, artifact, onClose, onChange }) {
-  const [content, setContent] = useState('');
+  // Mounted preview URL — iframe loads this with `src=` so relative
+  // `<script>` / `<link>` refs in the HTML resolve against a real URL.
+  // (srcdoc has no base URL → relative refs 404.)
+  const [previewUrl, setPreviewUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState('');
   const [publishedUrl, setPublishedUrl] = useState(artifact?.publishedUrl || '');
@@ -32,15 +35,20 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [open, onClose]);
 
-  // Load HTML when opened. Only fetched on demand so big artifacts
-  // don't bog down the rail rendering.
+  // Mount the artifact when opened. The server registers the parent
+  // dir under a token and returns a URL that serves the entry HTML;
+  // assets at sibling paths resolve naturally because they share the
+  // same URL prefix.
   useEffect(() => {
     if (!open || !artifact?.path) return;
     setLoading(true);
     setErr('');
-    setContent('');
-    previewArtifact(artifact.path)
-      .then((data) => setContent(data?.content || ''))
+    setPreviewUrl('');
+    mountArtifactPreview(artifact.path)
+      .then(({ url }) => {
+        if (!url) throw new Error('Preview mount returned no URL');
+        setPreviewUrl(url);
+      })
       .catch((e) => setErr(e?.message || 'Could not load artifact'))
       .finally(() => setLoading(false));
   }, [open, artifact?.path]);
@@ -227,12 +235,21 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
           ) : loading ? (
             <div style={{ padding: 28, color: 'var(--ink-3)', fontSize: 13 }}>Loading preview…</div>
           ) : (
-            <iframe
-              title={artifact.title || 'Artifact preview'}
-              srcDoc={content}
-              sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-              style={{ width: '100%', height: '100%', border: 0, background: '#fff' }}
-            />
+            // src= (not srcdoc) so relative asset refs resolve against
+            // the served URL. We deliberately drop `allow-same-origin`
+            // — the iframe shares the FastAPI origin otherwise, which
+            // would let a hostile artifact's JS hit /v1/sessions etc.
+            // Without same-origin, the iframe can still load its own
+            // assets (script/link/img tags work), but fetch() back to
+            // the API is CORS-blocked. Good tradeoff.
+            previewUrl ? (
+              <iframe
+                title={artifact.title || 'Artifact preview'}
+                src={previewUrl}
+                sandbox="allow-scripts allow-popups allow-forms allow-modals"
+                style={{ width: '100%', height: '100%', border: 0, background: '#fff' }}
+              />
+            ) : null
           )}
         </div>
       </div>

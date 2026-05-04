@@ -1231,7 +1231,7 @@ function AppCore() {
         )}
 
         {route === 'artifacts' && (
-          <ArtifactsView artifacts={artifacts} />
+          <ArtifactsView artifacts={artifacts} projects={projects} />
         )}
 
         {route === 'dispatch' && (

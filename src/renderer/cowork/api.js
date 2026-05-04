@@ -363,6 +363,25 @@ export async function previewArtifact(path) {
   return req(`/artifacts/preview?path=${encodeURIComponent(path)}`);
 }
 
+// Mount an HTML artifact's parent directory for iframe preview. Returns
+// `{ token, entry, relUrl }` — `entry` is the filename, `relUrl` is the
+// path the iframe should load (relative to BASE). Use this so relative
+// `<script>` / `<link>` refs in the HTML resolve against a real URL.
+export async function mountArtifactPreview(path) {
+  const data = await req('/artifacts/preview-mount', {
+    method: 'POST',
+    body: JSON.stringify({ path }),
+  });
+  return {
+    token: data?.token,
+    entry: data?.entry,
+    // Absolute URL the iframe can load directly. The server returns a
+    // path without scheme; combine with BASE so the renderer doesn't
+    // need to know the API origin.
+    url: data?.relUrl ? `${BASE}${data.relUrl}` : '',
+  };
+}
+
 export async function openArtifact(path) {
   return req('/artifacts/open', { method: 'POST', body: JSON.stringify({ path }) });
 }

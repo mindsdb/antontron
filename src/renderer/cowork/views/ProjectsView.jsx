@@ -323,20 +323,46 @@ function ViewToggle({ value, onChange }) {
   );
 }
 
-function FilterRow({ search, onSearchChange, sort, onSortChange, view, onViewChange, count, searchRef }) {
+function FilterRow({
+  search, onSearchChange, sort, onSortChange, view, onViewChange,
+  total, filtered, pinnedCount, searchRef,
+}) {
+  const filterActive = (search || '').trim().length > 0;
+  // Count line — reflects the current filter state. When the user is
+  // searching we show "Showing N of T" so the partial result stays
+  // legible; otherwise just the total. Pinned count rides along as a
+  // soft accent stat when present.
+  const countText = filterActive
+    ? `Showing ${filtered} of ${total}`
+    : `${total} ${total === 1 ? 'project' : 'projects'}`;
   return (
     <div style={{
       padding: '0 32px',
-      display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      display: 'flex', flexDirection: 'column', gap: 6,
     }}>
-      <SearchInput value={search} onChange={onSearchChange} inputRef={searchRef} />
-      <SortPill value={sort} onChange={onSortChange} />
-      <span style={{ flex: 1 }} />
-      <span style={{
+      {/* Top row — search + sort on the left, view toggle on the right */}
+      <div style={{
+        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+      }}>
+        <SearchInput value={search} onChange={onSearchChange} inputRef={searchRef} />
+        <SortPill value={sort} onChange={onSortChange} />
+        <span style={{ flex: 1 }} />
+        <ViewToggle value={view} onChange={onViewChange} />
+      </div>
+
+      {/* Count line — independent of the controls; updates on filter */}
+      <div style={{
         fontFamily: FONT_MONO, fontSize: 11,
         color: 'var(--ink-4)', letterSpacing: '0.04em',
-      }}>{count} {count === 1 ? 'project' : 'projects'}</span>
-      <ViewToggle value={view} onChange={onViewChange} />
+      }}>
+        {countText}
+        {pinnedCount > 0 && (
+          <>
+            {' · '}
+            <span style={{ color: 'var(--accent)' }}>{pinnedCount} pinned</span>
+          </>
+        )}
+      </div>
     </div>
   );
 }
@@ -1006,7 +1032,9 @@ export default function ProjectsView({
         onSortChange={setSort}
         view={view}
         onViewChange={setView}
-        count={visibleProjects.length}
+        total={projects.length}
+        filtered={visibleProjects.length}
+        pinnedCount={visibleProjects.filter((p) => pinned.has(p.name)).length}
         searchRef={searchRef}
       />
 
