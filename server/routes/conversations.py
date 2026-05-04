@@ -107,7 +107,10 @@ async def update_conversation(conversation_id: str, patch: ConversationPatch):
     target_project = updates.pop("project", None)
     meta = None
     if target_project is not None:
-        meta = conversation_manager.move_conversation(conversation_id, target_project)
+        try:
+            meta = conversation_manager.move_conversation(conversation_id, target_project)
+        except FileNotFoundError as exc:
+            raise HTTPException(status_code=404, detail=str(exc))
         if meta is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
 

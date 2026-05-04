@@ -109,6 +109,7 @@ export default function HomeView({
           onAttachFiles={onAttachFiles}
           onAttachConnector={onAttachConnector}
           onRemoveAttachment={onRemoveAttachment}
+          hideModel
         />
       )}
       <ActiveList tasks={activeTasks} onSelect={onSelectTask} onClear={onClearActive} />

@@ -232,22 +232,34 @@ export function TaskMenu({
             padding: '4px 0',
           }}
         >
-          {projects.length === 0 && (
-            <div style={{ padding: '10px 14px', fontSize: 12.5, color: 'var(--ink-4)' }}>
-              No other projects.
-            </div>
-          )}
-          {projects.map((p) => {
-            const isCurrent = p.name === task?.projectName || p.path === task?.projectPath;
-            return (
+          {(() => {
+            // Filter out the project the task is already in — listing it
+            // disabled creates a "nothing happens when I click" footgun.
+            const candidates = projects.filter((p) =>
+              p.name !== task?.projectName && p.path !== task?.projectPath
+            );
+            if (candidates.length === 0) {
+              return (
+                <div style={{ padding: '10px 14px', fontSize: 12.5, color: 'var(--ink-4)', fontFamily: 'var(--font-body)' }}>
+                  {projects.length === 0
+                    ? 'No projects available — Anton is still loading them.'
+                    : 'Create another project first to move this task.'}
+                </div>
+              );
+            }
+            return candidates.map((p) => (
               <MenuButton
                 key={p.name}
                 label={p.name}
-                onClick={() => { if (!isCurrent) { onMoveToProject?.(p); onClose?.(); } }}
-                hint={isCurrent ? 'current' : undefined}
+                onClick={() => {
+                  // eslint-disable-next-line no-console
+                  console.log('[TaskMenu] move-to-project clicked', p.name, 'task=', task?.id);
+                  onMoveToProject?.(p);
+                  onClose?.();
+                }}
               />
-            );
-          })}
+            ));
+          })()}
         </div>
       )}
 

@@ -177,7 +177,8 @@ export default function Sidebar({
     pinnedIds.has(t.id) ? { ...t, pinned: true } : t
   );
 
-  const recents = tasksWithPin.slice(0, 8);
+  // Recents excludes pinned items so a task isn't surfaced twice.
+  const recents = tasksWithPin.filter((t) => !pinnedIds.has(t.id)).slice(0, 8);
   const pinnedTasks = (pins || [])
     .filter((pin) => pin.type === 'task')
     .map((pin) => {

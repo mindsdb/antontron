@@ -50,6 +50,10 @@ export default function Composer({
   disabled = false,
   metaReadOnly = false,
   hideMeta = false,
+  // When true, suppress the model picker but keep the project picker.
+  // Used on the home (new task) composer where we want the user to
+  // pick a project but not fuss with model selection.
+  hideModel = false,
 }) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
@@ -238,17 +242,10 @@ export default function Composer({
             {Ico.plus(15)}
           </button>
           <div style={{ flex: 1 }} />
-          {speechSupported && (
-            <button
-              className={`composer-icon${listening ? ' listening' : ''}`}
-              onClick={listening ? stopListening : startListening}
-              disabled={disabled}
-              title={listening ? 'Stop voice input' : 'Voice input'}
-              aria-pressed={listening}
-            >
-              {Ico.mic(16)}
-            </button>
-          )}
+          {/* Mic / voice input intentionally hidden — voice flow isn't
+              wired through anton yet. We keep speechSupported state
+              around so we can reinstate later by re-rendering the
+              button (e.g. behind a `showMic` prop). */}
           <button
             className="send-btn"
             disabled={disabled || !value.trim() || busy}
@@ -319,9 +316,11 @@ export default function Composer({
                 {Ico.folder(14)}
                 <span>{project ? project.name : 'No project'}</span>
               </span>
-              <span className="meta-pill" title="Model is fixed for this task">
-                <span>{model?.name ?? 'Model'}</span>
-              </span>
+              {!hideModel && (
+                <span className="meta-pill" title="Model is fixed for this task">
+                  <span>{model?.name ?? 'Model'}</span>
+                </span>
+              )}
             </>
           ) : (
             <>
@@ -334,14 +333,16 @@ export default function Composer({
                 <span>{project ? project.name : 'Work in a project'}</span>
                 <span style={{ display: 'inline-flex', color: 'var(--frost-500)' }}>{Ico.chevDown(13)}</span>
               </button>
-              <button
-                className="meta-pill"
-                onClick={() => setOpenMenu(openMenu === 'model' ? null : 'model')}
-                title="Choose model"
-              >
-                <span>{model?.name ?? 'Select model'}</span>
-                <span style={{ display: 'inline-flex', color: 'var(--frost-500)' }}>{Ico.chevDown(13)}</span>
-              </button>
+              {!hideModel && (
+                <button
+                  className="meta-pill"
+                  onClick={() => setOpenMenu(openMenu === 'model' ? null : 'model')}
+                  title="Choose model"
+                >
+                  <span>{model?.name ?? 'Select model'}</span>
+                  <span style={{ display: 'inline-flex', color: 'var(--frost-500)' }}>{Ico.chevDown(13)}</span>
+                </button>
+              )}
             </>
           )}
         </div>

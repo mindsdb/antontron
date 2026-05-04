@@ -5,6 +5,7 @@ import Ico from './components/Icons';
 // provider setup. The cowork app is mounted by CoworkApp.tsx only after
 // those gates pass, so AppCore renders unconditionally here.
 import Sidebar from './components/Sidebar';
+import { ConfirmModal } from './components/ConfirmModal';
 import HomeView from './views/HomeView';
 import ChatView from './views/ChatView';
 import ProjectsView from './views/ProjectsView';
@@ -130,6 +131,9 @@ function AppCore() {
   const [connectors, setConnectors] = useState([]);
   const [composerAttachments, setComposerAttachments] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
+  // Pending delete confirm — task id whose delete is awaiting user
+  // confirmation in the modal. null = no modal.
+  const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState(null);
   const [models] = useState(MOCK_DATA.models);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   // Theme (light | dark) — persisted in localStorage so the choice
@@ -426,14 +430,26 @@ function AppCore() {
   };
 
   // Send from the home screen — creates a new session
-  const handleSendFromHome = (text) => {
+  const handleSendFromHome = async (text) => {
     const tempId = 'tmp-' + Date.now();
     const sendingAttachments = composerAttachments;
     const attachmentIds = sendingAttachments.map((attachment) => attachment.id);
     // Orphan fallback: if the user hasn't picked a project, route the
-    // task into "general" (server provisions it on startup). This way
-    // every task ends up under a real project — never a null one.
-    const generalProject = projects.find((p) => p.name === 'general');
+    // task into "general" (server provisions it on startup). If for
+    // any reason it isn't in the projects list yet (e.g. an upgrade
+    // from a build that didn't auto-create it), bootstrap it now.
+    let generalProject = projects.find((p) => p.name === 'general');
+    if (!selectedProject && !generalProject) {
+      try {
+        await createProject('general');
+        const fresh = await fetchProjects();
+        if (Array.isArray(fresh)) setProjects(fresh);
+        generalProject = (fresh || []).find((p) => p.name === 'general');
+      } catch (e) {
+        // eslint-disable-next-line no-console
+        console.warn('[handleSendFromHome] could not bootstrap general project', e);
+      }
+    }
     const effectiveProjectName = selectedProject?.name || 'general';
     const effectiveProjectPath = selectedProject?.path || generalProject?.path || null;
     const newT = {
@@ -690,28 +706,58 @@ function AppCore() {
     }
   };
 
-  const handleDeleteTask = async (taskId) => {
-    const ok = window.confirm('Delete this task and its history? This cannot be undone.');
-    if (!ok) return;
-    // Drop locally before the round-trip; if it leaves the active
-    // task, navigate home.
+  // Two-step delete: open the confirm modal, run the actual delete
+  // when the user confirms. Replaces the native window.confirm so the
+  // dialog matches the rest of the UX.
+  const handleDeleteTask = (taskId) => {
+    // eslint-disable-next-line no-console
+    console.log('[handleDeleteTask] open confirm for', taskId);
+    setPendingDeleteTaskId(taskId);
+  };
+  const performDeleteTask = async (taskId) => {
+    if (!taskId) return;
+    // eslint-disable-next-line no-console
+    console.log('[performDeleteTask] confirmed', taskId);
     setTasks((prev) => prev.filter((t) => t.id !== taskId));
     if (activeTaskId === taskId) {
       setActiveTaskId(null);
       setRoute('home');
     }
-    try { await deleteConversation(taskId); } catch {}
+    // Skip the server call for tasks that never got persisted (still
+    // wearing a tmp- id from before the first stream chunk arrived).
+    if (typeof taskId === 'string' && taskId.startsWith('tmp-')) {
+      // eslint-disable-next-line no-console
+      console.log('[performDeleteTask] tempId — local-only delete');
+      return;
+    }
+    try {
+      await deleteConversation(taskId);
+      // eslint-disable-next-line no-console
+      console.log('[performDeleteTask] server delete ok');
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[performDeleteTask] server delete failed', e);
+    }
     fetchPins().then((data) => setPins(data.pins || [])).catch(() => {});
   };
 
   const handleMoveTaskToProject = async (taskId, projectName) => {
+    // eslint-disable-next-line no-console
+    console.log('[handleMoveTaskToProject]', taskId, '→', projectName);
     if (!projectName) return;
     setTasks((prev) => prev.map((t) =>
       t.id === taskId
         ? { ...t, projectName, projectPath: projects.find((p) => p.name === projectName)?.path || t.projectPath }
         : t
     ));
-    try { await moveConversation(taskId, projectName); } catch {}
+    try {
+      await moveConversation(taskId, projectName);
+      // eslint-disable-next-line no-console
+      console.log('[handleMoveTaskToProject] server move ok');
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.error('[handleMoveTaskToProject] server move failed', e);
+    }
     // Refresh sessions so the server's canonical project mapping wins
     // if our optimistic guess was wrong.
     const fresh = await fetchSessions();
@@ -946,8 +992,17 @@ function AppCore() {
           <ProjectsView
             projects={projects}
             selectedProject={selectedProject}
-            onSelectProject={(p) => { setSelectedProject(p); setRoute('home'); }}
+            tasks={tasks}
+            scheduled={scheduled}
+            models={modelOptions}
+            onSelectProject={(p) => setSelectedProject(p)}
             onCreateProject={handleCreateProject}
+            onSendInProject={(text) => {
+              // Sending from project detail = same as home, but with
+              // selectedProject already pinned to this project.
+              handleSendFromHome(text);
+            }}
+            onSelectTask={selectTask}
           />
         )}
 
@@ -996,6 +1051,21 @@ function AppCore() {
         onClose={() => setSearchOpen(false)}
         onSearch={searchCowork}
         onSelect={handleSearchSelect}
+      />
+
+      <ConfirmModal
+        open={pendingDeleteTaskId != null}
+        title="Delete this task?"
+        message="The conversation history and any per-task scratchpad cells will be removed. This can't be undone."
+        confirmLabel="Delete"
+        cancelLabel="Keep"
+        destructive
+        onClose={() => setPendingDeleteTaskId(null)}
+        onConfirm={async () => {
+          const id = pendingDeleteTaskId;
+          setPendingDeleteTaskId(null);
+          await performDeleteTask(id);
+        }}
       />
 
       {/* Floating theme toggle (bottom-right). Lives outside the sidebar so
