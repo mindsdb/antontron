@@ -78,7 +78,7 @@ export default function App() {
           sidebar's icon buttons at z-index:1000 and blocks pointer events
           for the upper ~38px (causing the icons to feel "broken / only
           hoverable at the bottom"). */}
-      {isMac && page !== 'terminal' && <div className="titlebar-drag" />}
+      {isMac && (page === 'terms' || page === 'setup' || page === 'onboarding' || page === 'launching') && <div className="titlebar-drag" />}
 
       {page === 'loading' && (
         <div className="setup-container">

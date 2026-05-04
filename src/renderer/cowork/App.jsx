@@ -19,7 +19,7 @@ import { fetchSessions, fetchProjects, fetchArtifacts, fetchSettings, fetchHealt
          uploadAttachments, createSnippetAttachment, createUrlAttachment, fetchProjectFiles,
          attachProjectFile, deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
-         pauseSchedule, resumeSchedule, runScheduleNow, MOCK_DATA } from './api';
+         pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA } from './api';
 
 const ACCENT_VARS = {
   aqua:  {},
@@ -124,6 +124,7 @@ function AppCore() {
   const [artifacts, setArtifacts] = useState([]);
   const [scheduled, setScheduled] = useState([]);
   const [pins, setPins] = useState([]);
+  const [connectors, setConnectors] = useState([]);
   const [composerAttachments, setComposerAttachments] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [models] = useState(MOCK_DATA.models);
@@ -219,6 +220,9 @@ function AppCore() {
     fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
     fetchPins().then((data) => setPins(data.pins || []));
     fetchSchedules().then((data) => setScheduled(data.schedules || []));
+    fetchDatasources()
+      .then((data) => setConnectors(Array.isArray(data?.connections) ? data.connections : []))
+      .catch(() => setConnectors([]));
     fetchSettings().then((data) => {
       if (data && typeof data === 'object') {
         setSettings((prev) => ({ ...prev, ...data }));
@@ -378,6 +382,20 @@ function AppCore() {
   const handleAttachProjectFile = async (path) => {
     const data = await attachProjectFile({ project_path: attachmentProjectPath, path, session_id: attachmentSessionId });
     setComposerAttachments((prev) => [...prev, data.attachment]);
+  };
+
+  const handleAttachConnector = async (connector) => {
+    const label = connector.displayName || connector.engine;
+    const title = `Connector · ${connector.name}`;
+    const content = `Use the "${connector.name}" datasource (${label}) for this task. Connection metadata is loaded from the local data vault.`;
+    const data = await createSnippetAttachment({
+      title,
+      content,
+      project_path: attachmentProjectPath,
+      session_id: attachmentSessionId,
+    });
+    const attachment = data?.attachment ? { ...data.attachment, kind: 'connector', name: connector.name } : null;
+    if (attachment) setComposerAttachments((prev) => [...prev, attachment]);
   };
 
   const handleRemoveAttachment = async (id) => {
@@ -671,7 +689,11 @@ function AppCore() {
         className="icon-btn"
         style={{
           position: 'absolute',
-          top: 12, left: 88,
+          // Mirror the sidebar's collapse-icon position exactly so when
+          // the sidebar slides out, this hamburger appears in the same
+          // spot. Sidebar lives inside the 9px cowork shell padding,
+          // and its chrome row has padding-left: 88 → button at x:97.
+          top: 18, left: 97,
           zIndex: 10,
           WebkitAppRegion: 'no-drag',
           opacity: sidebarCollapsed ? 1 : 0,
@@ -737,7 +759,8 @@ function AppCore() {
       />
 
       <main style={{
-        flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column',
+        flex: 1, minWidth: 0, minHeight: 0,
+        display: 'flex', flexDirection: 'column',
         background: mainBg,
       }}>
         {route === 'home' && (
@@ -755,11 +778,9 @@ function AppCore() {
             projects={projects}
             models={modelOptions}
             attachments={composerAttachments}
+            connectors={connectors}
             onAttachFiles={handleAttachFiles}
-            onAttachUrl={handleAttachUrl}
-            onAttachSnippet={handleAttachSnippet}
-            onAttachProjectFile={handleAttachProjectFile}
-            onBrowseProjectFiles={handleBrowseProjectFiles}
+            onAttachConnector={handleAttachConnector}
             onRemoveAttachment={handleRemoveAttachment}
             configReady={health.config_ready ?? settings.configReady}
             configError={health.config_error ?? settings.configError}
@@ -775,14 +796,13 @@ function AppCore() {
             project={currentTaskProject}
             model={currentTaskModel}
             attachments={composerAttachments}
+            connectors={connectors}
             onAttachFiles={handleAttachFiles}
-            onAttachUrl={handleAttachUrl}
-            onAttachSnippet={handleAttachSnippet}
-            onAttachProjectFile={handleAttachProjectFile}
-            onBrowseProjectFiles={handleBrowseProjectFiles}
+            onAttachConnector={handleAttachConnector}
             onRemoveAttachment={handleRemoveAttachment}
             onPinTask={handlePinTask}
             onUnpinTask={handleUnpinTask}
+            sidebarCollapsed={sidebarCollapsed}
           />
         )}
 

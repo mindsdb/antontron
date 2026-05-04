@@ -403,8 +403,8 @@ function createWindow() {
   const shouldOpenDevTools = process.env.ANTON_OPEN_DEVTOOLS === '1';
 
   mainWindow = new BrowserWindow({
-    width: 1100,
-    height: 750,
+    width: 1200,
+    height: 800,
     minWidth: 800,
     minHeight: 500,
     icon,

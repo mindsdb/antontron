@@ -95,11 +95,11 @@ export default function Sidebar({
       className={`app-sidebar${collapsed ? ' collapsed' : ''}`}
       style={{
         flexShrink: 0, height: '100%',
-        background: 'var(--surface)',
+        background: 'var(--sidebar-bg, var(--surface))',
         border: '1px solid var(--line)',
         borderRadius: 14,
         boxShadow: 'var(--sh-2)',
-        width: collapsed ? 0 : 'clamp(280px, 26vw, 320px)',
+        width: collapsed ? 0 : 'clamp(240px, 24vw, 320px)',
         opacity: collapsed ? 0 : 1,
         transform: collapsed ? 'translateX(-16px)' : 'translateX(0)',
         transition:

@@ -39,8 +39,7 @@ export default function HomeView({
   greeting, showDots,
   activeTasks, onSelectTask, onClearActive,
   onSend, project, onProjectChange, model, onModelChange, projects, models,
-  attachments, onAttachFiles, onAttachUrl, onAttachSnippet, onAttachProjectFile,
-  onBrowseProjectFiles, onRemoveAttachment,
+  attachments, connectors, onAttachFiles, onAttachConnector, onRemoveAttachment,
   configReady, configError, onOpenSettings,
 }) {
   const blocked = configReady === false;
@@ -105,11 +104,9 @@ export default function HomeView({
           projects={projects}
           models={models}
           attachments={attachments}
+          connectors={connectors}
           onAttachFiles={onAttachFiles}
-          onAttachUrl={onAttachUrl}
-          onAttachSnippet={onAttachSnippet}
-          onAttachProjectFile={onAttachProjectFile}
-          onBrowseProjectFiles={onBrowseProjectFiles}
+          onAttachConnector={onAttachConnector}
           onRemoveAttachment={onRemoveAttachment}
         />
       )}
