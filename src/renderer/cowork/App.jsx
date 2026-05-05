@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import Ico from './components/Icons';
 import { pickConnectWelcome } from './lib/connectWelcomes';
+import { serverInfo, serverStart, serverStop } from './lib/host';
 // OnboardingShell removed — antontron's renderer handles terms/install/
 // provider setup. The cowork app is mounted by CoworkApp.tsx only after
 // those gates pass, so AppCore renders unconditionally here.
@@ -590,7 +591,7 @@ function AppCore() {
 
     const tick = async () => {
       try {
-        const info = await window.antontron?.serverInfo?.();
+        const info = await serverInfo();
         if (cancelled || !info) return;
         if (typeof info.running === 'boolean') setServerOnline(info.running);
         if (info.starting) {
@@ -1533,7 +1534,7 @@ function AppCore() {
           let actuallyRunning = serverOnline;
           let actuallyStarting = false;
           try {
-            const info = await window.antontron?.serverInfo?.();
+            const info = await serverInfo();
             if (info) {
               if (typeof info.running === 'boolean') actuallyRunning = info.running;
               if (typeof info.starting === 'boolean') actuallyStarting = info.starting;
@@ -1545,8 +1546,8 @@ function AppCore() {
           setServerBusy(true);
           try {
             const result = goingUp
-              ? await window.antontron?.serverStart?.()
-              : await window.antontron?.serverStop?.();
+              ? await serverStart()
+              : await serverStop();
             if (result) {
               setServerOnline(!!result.running);
               if (result.running) setTimeout(refreshData, 400);

@@ -2,13 +2,32 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+// Antontron's renderer ships in two shells: Electron (the desktop app)
+// and Web (browser, served by anton-local-environment / Lightsail). Both
+// build from the same `cowork/` tree but have different entry points
+// (main.tsx vs web-main.tsx) and HTML scaffolds (index.html vs web.html).
+//
+// `npm run build:renderer`     → Electron build, outputs to dist/renderer/
+// `npm run build:web`          → web build, outputs to dist/web/
+//
+// The web build sets BUILD_TARGET=web. In dev (`npm run dev`), only the
+// Electron entry runs; the web build is a one-shot artifact for the
+// reverse proxy to serve.
+const TARGET = process.env.BUILD_TARGET === 'web' ? 'web' : 'electron';
+
+const ENTRY_HTML = TARGET === 'web' ? 'web.html' : 'index.html';
+const OUT_DIR = TARGET === 'web' ? '../../dist/web' : '../../dist/renderer';
+
 export default defineConfig({
   plugins: [react()],
   root: __dirname,
   base: './',
   build: {
-    outDir: path.resolve(__dirname, '../../dist/renderer'),
+    outDir: path.resolve(__dirname, OUT_DIR),
     emptyOutDir: true,
+    rollupOptions: {
+      input: path.resolve(__dirname, ENTRY_HTML),
+    },
   },
   server: {
     port: Number(process.env.VITE_RENDERER_PORT || 5173),

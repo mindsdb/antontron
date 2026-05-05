@@ -23,6 +23,7 @@ import { ArtifactViewer } from '../components/artifact';
 import { DataVaultFormPanel } from '../components/datavault/DataVaultFormPanel';
 import { FormErrorBoundary } from '../components/datavault/FormErrorBoundary';
 import { revealArtifact } from '../api';
+import { openPath } from '../lib/host';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -311,7 +312,7 @@ function ArtifactCard({ artifact, onOpen }) {
       onOpen(artifact);
       return;
     }
-    try { window.antontron?.openPath?.(path); }
+    try { openPath(path); }
     catch (e) {
       // eslint-disable-next-line no-console
       console.error('[artifact-open] failed', e);

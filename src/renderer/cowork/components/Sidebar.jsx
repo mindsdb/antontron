@@ -2,17 +2,12 @@ import { useRef, useState } from 'react';
 import Ico from './Icons';
 import { Spinner } from './ui';
 import { TaskMenu } from './TaskMenu';
+import { isMac } from '../lib/host';
 
 // Platform-aware modifier symbol for keyboard hints. Mac uses ⌘ glyph,
-// Windows/Linux use Ctrl+ literal.
-const IS_MAC = (() => {
-  try {
-    if (typeof window !== 'undefined' && window.antontron && typeof window.antontron.getPlatform === 'function') {
-      return window.antontron.getPlatform() === 'darwin';
-    }
-  } catch {}
-  return /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
-})();
+// Windows/Linux use Ctrl+ literal. host.isMac() works in both Electron
+// (delegates to preload's getPlatform) and web (navigator.userAgentData).
+const IS_MAC = isMac();
 const MOD_LABEL = IS_MAC ? '⌘' : 'Ctrl+';
 const shortcut = (key) => `${MOD_LABEL}${key}`;
 

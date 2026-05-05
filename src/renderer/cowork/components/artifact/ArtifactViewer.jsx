@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from 'react';
 import Ico from '../Icons';
 import { mountArtifactPreview, publishArtifact, unpublishArtifact } from '../../api';
 import { copyText } from '../../lib/clipboard';
+import { openPath, openExternal, trashItem } from '../../lib/host';
 
 const FONT_BODY = "'Inter', system-ui, sans-serif";
 const FONT_DISPLAY = "'Josefin Sans', sans-serif";
@@ -233,7 +234,7 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
     }
   };
   const onOpenOS = async () => {
-    try { await window.antontron?.openPath?.(artifact.path); } catch {}
+    try { await openPath(artifact.path); } catch {}
   };
   const onTrash = async () => {
     if (busy) return;
@@ -243,7 +244,7 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
     setBusy(true);
     setErr('');
     try {
-      const result = await window.antontron?.trashItem?.(artifact.path);
+      const result = await trashItem(artifact.path);
       if (result && result.ok === false) {
         throw new Error(result.reason || 'Could not move to Trash.');
       }
@@ -257,7 +258,7 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
   };
   const onOpenPublished = async () => {
     if (!publishedUrl) return;
-    try { await window.antontron?.openExternal?.(publishedUrl); } catch {
+    try { await openExternal(publishedUrl); } catch {
       window.open(publishedUrl, '_blank', 'noreferrer');
     }
   };
