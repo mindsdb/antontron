@@ -1320,9 +1320,11 @@ export default function ProjectsView({
   }
 
   return (
+    // Background intentionally omitted so the gravity-field canvas
+    // painted behind the React root shows through. Earlier this was
+    // `background: 'var(--bg)'`, which masked the field on this view.
     <div className="scroll-clean" style={{
       flex: 1, overflowY: 'auto',
-      background: 'var(--bg)',
       display: 'flex', flexDirection: 'column',
     }}>
       <ProjectsHeader onNewProject={handleNewProject} />

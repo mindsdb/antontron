@@ -90,7 +90,7 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
   // updates with different text re-open the toast automatically.
   const showStatusToast = !!spec?.status_text && spec.status_text !== dismissedStatus;
 
-  const handleAction = async ({ id, kind, values, skipped }) => {
+  const handleAction = async ({ id, kind, values, skipped, authMethod }) => {
     if (!spec) return;
     setError('');
 
@@ -150,7 +150,13 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
       if (onSubmit) {
         onSubmit({
           formId: spec.form_id,
-          formSpec: spec,
+          // Spread the chosen auth_method into the spec we send so the
+          // server-side agent reads it from spec.auth_method (its
+          // existing entry point) AND keeps spec.selected_method for
+          // any logic that reads it directly.
+          formSpec: authMethod
+            ? { ...spec, auth_method: authMethod, selected_method: authMethod }
+            : spec,
           values: values || {},
           skipped: skipped || [],
         });

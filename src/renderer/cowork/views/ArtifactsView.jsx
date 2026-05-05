@@ -451,7 +451,40 @@ function PublishedUrlRow({ url, onOpen, onCopy }) {
 
 // ─── Card / Bubble (grid view) ───────────────────────────────────────────
 
-function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpublish: doUnpublish, busy }) {
+// Static path row used in place of the published URL pill when the
+// artifact is local-only. Mirrors the URL pill's surface so the card
+// keeps a consistent slot height as state flips between published
+// and not. Ellipsis-truncates a long path; full path lives in the
+// `title` attribute for hover. RTL trick on the path span keeps the
+// filename visible (truncates the front, not the back).
+function LocalPathRow({ path }) {
+  if (!path) return null;
+  return (
+    <div
+      title={path}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 10px', borderRadius: 8,
+        background: 'var(--surface-2)',
+        border: '1px solid var(--line)',
+        minWidth: 0,
+      }}
+    >
+      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--ink-4)' }}>
+        {Ico.folder(12)}
+      </span>
+      <span style={{
+        flex: 1, minWidth: 0,
+        fontFamily: FONT_MONO, fontSize: 11.5,
+        color: 'var(--ink-3)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        direction: 'rtl', textAlign: 'left',
+      }}>{path}</span>
+    </div>
+  );
+}
+
+function ArtifactBubble({ artifact, projects = [], onOpenViewer, onPublish: doPublish, onUnpublish: doUnpublish, onTrash, busy }) {
   const isHtml = isHtmlArtifact(artifact);
   const published = !!artifact.publishedUrl;
 
@@ -468,6 +501,7 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
 
   const Icon = iconForArtifact(artifact);
   const ext = extensionOf(artifact);
+  const projectLabel = projectNameOf(artifact, projects);
   return (
     <div
       role="button"
@@ -548,6 +582,25 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{artifact.title}</span>
         </div>
+        {/* project: <name> — sits above the type line so the workspace
+            origin reads first. Ellipsis-truncates so a long project
+            name can't push the card out of grid alignment; full name
+            is in `title` for hover. */}
+        <span
+          title={projectLabel}
+          style={{
+            fontFamily: FONT_MONO, fontSize: 11,
+            color: 'var(--ink-4)', letterSpacing: '0.04em',
+            display: 'flex', alignItems: 'baseline', gap: 4,
+            minWidth: 0,
+          }}
+        >
+          <span style={{ flexShrink: 0 }}>project:</span>
+          <span style={{
+            color: 'var(--ink-3)', minWidth: 0, flex: '0 1 auto',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{projectLabel}</span>
+        </span>
         <span style={{
           fontFamily: FONT_MONO, fontSize: 11,
           color: 'var(--ink-4)', letterSpacing: '0.04em',
@@ -556,13 +609,17 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
         </span>
       </div>
 
-      {/* URL pill (only when published) */}
-      {published && (
+      {/* Surface the public URL when published; fall back to the
+          local path (ellipsis-truncated) when not — every card now
+          shows where the artifact actually lives. */}
+      {published ? (
         <PublishedUrlRow
           url={artifact.publishedUrl}
           onOpen={onOpenPublished}
           onCopy={onCopyUrl}
         />
+      ) : (
+        <LocalPathRow path={artifact.path} />
       )}
 
       {/* Spacer pushes the meta + actions to the bottom of the card so
@@ -575,7 +632,7 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
       }}>
         {artifact.updated || '—'}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
         {published ? (
           <ActionButton onClick={() => doUnpublish?.(artifact)} danger title="Unpublish from Minds">
             {busy ? 'Working…' : 'Unpublish'}
@@ -585,8 +642,29 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
             {busy ? 'Publishing…' : 'Publish'}
           </ActionButton>
         ) : null}
-        <ActionButton onClick={() => openArtifact(artifact.path)} title="Open file">Open</ActionButton>
-        <ActionButton onClick={() => revealArtifact(artifact.path)} title="Reveal in Finder">Reveal</ActionButton>
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onTrash?.(artifact); }}
+          title="Delete artifact"
+          aria-label="Delete artifact"
+          style={{
+            cursor: 'pointer',
+            background: 'transparent',
+            border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
+            color: 'var(--danger)',
+            width: 30, height: 30, borderRadius: 7,
+            display: 'inline-grid', placeItems: 'center',
+            transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.background = 'color-mix(in srgb, var(--danger) 12%, transparent)';
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.background = 'transparent';
+          }}
+        >
+          {Ico.trash(13)}
+        </button>
       </div>
     </div>
   );
@@ -893,7 +971,8 @@ function Toast({ kind, message, onClose }) {
   const isError = kind === 'error';
   return (
     <div style={{
-      margin: '12px 32px 0',
+      // Position is owned by the parent wrapper now (fixed overlay),
+      // so this card carries no outer margin.
       padding: '10px 14px',
       borderRadius: 8,
       background: isError
@@ -1044,6 +1123,27 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
     }
   };
 
+  // Move the file to the OS Trash and drop it from the local list.
+  // Reuses the Electron `shell.trashItem` IPC the artifact viewer
+  // also calls, so the deletion is reversible from the user's
+  // Trash / Recycle Bin (no extra confirm modal needed).
+  const handleTrash = async (artifact) => {
+    if (!artifact?.path || busyPaths.has(artifact.path)) return;
+    setBusy(artifact.path, true);
+    try {
+      const result = await window.antontron?.trashItem?.(artifact.path);
+      if (result && result.ok === false) {
+        throw new Error(result.reason || 'Could not move to Trash.');
+      }
+      removeOne(artifact.path);
+      setToast({ kind: 'ok', message: 'Moved to Trash.' });
+    } catch (e) {
+      setToast({ kind: 'error', message: `Delete failed: ${e?.message || e}` });
+    } finally {
+      setBusy(artifact.path, false);
+    }
+  };
+
   // Filter + sort.
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1081,18 +1181,28 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
   const publishedCount = visible.filter((a) => a.publishedUrl).length;
 
   return (
+    // Background intentionally omitted so the gravity-field canvas
+    // painted behind the React root shows through.
     <div className="scroll-clean" style={{
       flex: 1, overflowY: 'auto',
-      background: 'var(--bg)',
       display: 'flex', flexDirection: 'column',
     }}>
       <ArtifactsHeader />
 
-      <Toast
-        kind={toast?.kind}
-        message={toast?.message}
-        onClose={() => setToast(null)}
-      />
+      {/* Toast floats over the page so it can't perturb the
+          subtitle → search spacing — exact same vertical rhythm
+          as Projects: header → 18px → FilterRow. */}
+      <div style={{
+        position: 'fixed', top: 24, right: 32, zIndex: 70,
+        pointerEvents: toast?.message ? 'auto' : 'none',
+        maxWidth: 420,
+      }}>
+        <Toast
+          kind={toast?.kind}
+          message={toast?.message}
+          onClose={() => setToast(null)}
+        />
+      </div>
 
       <div style={{ height: 18 }} />
 
@@ -1123,9 +1233,11 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
             <ArtifactBubble
               key={a.id || a.path}
               artifact={a}
+              projects={projects}
               onOpenViewer={setViewer}
               onPublish={handlePublish}
               onUnpublish={handleUnpublish}
+              onTrash={handleTrash}
               busy={busyPaths.has(a.path)}
             />
           ))}

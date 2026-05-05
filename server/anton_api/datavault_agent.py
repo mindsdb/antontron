@@ -62,6 +62,23 @@ def _format_patch_block(patch: dict) -> str:
     return f"\n\n```data-vault-form-patch\n{body}\n```\n\n"
 
 
+def _field_patch(form_id: str, method_id: str | None, name: str, value):
+    """Build a patch that targets a single field, scoped either to
+    the form's top-level fields[] (single-method) or to a specific
+    method's fields[] (multi-method). `value` is the per-field patch
+    object OR None (the latter signals deletion of the whole field).
+    """
+    if method_id:
+        return {
+            "form_id": form_id,
+            "methods": {method_id: {"fields": {name: value}}},
+        }
+    return {
+        "form_id": form_id,
+        "fields": {name: value},
+    }
+
+
 def _validate_shape(engine: str, credentials: dict, auth_method: str | None):
     """Look the engine up in anton's datasource registry.
 
@@ -313,24 +330,37 @@ async def process_submission_stream(
                 # smallest possible patch: just `fields[name].status`.
                 # The form-store merges this into the existing field
                 # by name, leaving every other property (label, type,
-                # value, error, etc) untouched.
+                # value, error, etc) untouched. For multi-method forms
+                # the patch is nested under methods[method_id].
                 name = (payload or {}).get("name")
                 if name:
                     status_val = (payload or {}).get("status")
-                    yield _patch_delta({
-                        "form_id": form_id,
-                        "fields": {name: {"status": status_val}},
-                    })
+                    method_id = (payload or {}).get("method_id")
+                    yield _patch_delta(_field_patch(form_id, method_id, name, {"status": status_val}))
             elif kind == "remove_field":
                 # Field deletion — `fields[name] = null` at the patch
                 # level is the form-store's "remove this whole field"
                 # signal (distinct from `fields[name].prop = null`
-                # which only clears one property).
-                if isinstance(payload, str) and payload:
-                    yield _patch_delta({
+                # which only clears one property). For multi-method
+                # forms the deletion nests inside the method's fields.
+                name = (payload or {}).get("name")
+                if name:
+                    method_id = (payload or {}).get("method_id")
+                    yield _patch_delta(_field_patch(form_id, method_id, name, None))
+            elif kind == "switch_method":
+                # Flip selected_method at the form level. Reason (if
+                # provided) becomes the form's status_text so the user
+                # sees a one-line explanation in the toast.
+                method_id = (payload or {}).get("method_id")
+                reason = (payload or {}).get("reason") or ""
+                if method_id:
+                    patch = {
                         "form_id": form_id,
-                        "fields": {payload: None},
-                    })
+                        "selected_method": method_id,
+                    }
+                    if reason:
+                        patch["status_text"] = reason
+                    yield _patch_delta(patch)
             elif kind == "scratchpad":
                 action = payload.get("action")
                 if action == "start":
@@ -415,8 +445,6 @@ async def process_submission_stream(
         # credential set.
         reason = final_outcome.follow_up or "We need a few more details before we can connect."
         yield _delta(f"\n\nI need a bit more info before I can finish: {reason}\n")
-        # Convert extra_fields list into the form-patch dict shape
-        # (fields keyed by name, top-level title/subtitle update).
         extra = {}
         for f in final_outcome.extra_fields:
             extra[f.get("name")] = {
@@ -426,14 +454,28 @@ async def process_submission_stream(
                 "placeholder": f.get("placeholder") or "",
                 "required": bool(f.get("required", True)),
             }
-        yield _patch_delta({
-            "form_id": form_id,
-            "subtitle": reason,
-            "status_text": None,
-            "_is_probing": False,
-            "form_error": None,
-            "fields": extra,
-        })
+        # Multi-method needs_input scopes the new fields under the
+        # method id anton tagged on the verdict; otherwise they go
+        # to the form's top-level fields[].
+        target_method = getattr(final_outcome, "method_id", None)
+        if target_method:
+            yield _patch_delta({
+                "form_id": form_id,
+                "subtitle": reason,
+                "status_text": None,
+                "_is_probing": False,
+                "form_error": None,
+                "methods": {target_method: {"fields": extra}},
+            })
+        else:
+            yield _patch_delta({
+                "form_id": form_id,
+                "subtitle": reason,
+                "status_text": None,
+                "_is_probing": False,
+                "form_error": None,
+                "fields": extra,
+            })
         yield _push("response.completed", {
             "type": "response.completed",
             "response": {"id": response_id, "status": "needs_input"},

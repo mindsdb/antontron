@@ -29,7 +29,7 @@
 // The host (the side panel) is responsible for posting to the
 // server and dispatching the chat continuation.
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Ico from '../Icons';
 
 const FONT_BODY    = 'var(--font-body)';
@@ -133,29 +133,71 @@ function FieldInput({ field, value, onChange, disabled }) {
 }
 
 export function DataVaultForm({ spec, busy = false, onAction }) {
-  // Local input state — initialized from the spec each time the
-  // form_id changes (i.e. anton emits a NEW form). For an updated
-  // form with the same form_id, we preserve user typing and only
-  // surface the new error/warning fields.
-  const initial = useMemo(() => {
+  // ── Multi-method shape ──────────────────────────────────────────
+  // A form can either be single-method (top-level `fields[]` array,
+  // legacy shape) or multi-method (`methods[]` array of method
+  // definitions, each with their own fields+actions). The user picks
+  // a method first, then fills in fields, then submits with an
+  // `auth_method` tag so the server probe knows which to test.
+  const isMultiMethod = Array.isArray(spec?.methods) && spec.methods.length > 0;
+  // Local override (user picked a method client-side). Falls back to
+  // whatever the server set in `spec.selected_method`. Cleared when
+  // a brand-new form arrives (new form_id) and when the user clicks
+  // "change" on the breadcrumb.
+  const [localSelectedMethod, setLocalSelectedMethod] = useState(null);
+  const activeMethodId = localSelectedMethod || spec?.selected_method || null;
+  const activeMethod = isMultiMethod
+    ? (spec.methods.find((m) => m.id === activeMethodId) || null)
+    : null;
+
+  // The fields the form is currently rendering — the active method's
+  // for multi-method, or the top-level fields[] for single-method.
+  const fields = isMultiMethod ? (activeMethod?.fields || []) : (spec?.fields || []);
+
+  // Per-(form, method) input state so flipping methods preserves
+  // anything typed under each one. Storing inside a Map keyed by
+  // `${form_id}::${method_id || 'default'}` keeps the state shape flat
+  // and easy to reset on a brand-new form.
+  const [valuesByKey, setValuesByKey] = useState({});
+  const [skippedByKey, setSkippedByKey] = useState({});
+
+  const initialFor = (fs) => {
     const out = {};
-    for (const f of (spec?.fields || [])) {
+    for (const f of (fs || [])) {
       out[f.name] = f.value ?? f.default ?? (f.type === 'boolean' ? false : '');
     }
     return out;
-  }, [spec?.form_id]);
+  };
 
-  const [values, setValues] = useState(initial);
-  const [skipped, setSkipped] = useState(new Set());
+  // Reset everything when a NEW form replaces the old one.
   const lastFormIdRef = useRef(spec?.form_id);
-
   useEffect(() => {
     if (spec?.form_id !== lastFormIdRef.current) {
       lastFormIdRef.current = spec?.form_id;
-      setValues(initial);
-      setSkipped(new Set());
+      setValuesByKey({});
+      setSkippedByKey({});
+      setLocalSelectedMethod(null);
     }
-  }, [spec?.form_id, initial]);
+  }, [spec?.form_id]);
+
+  const stateKey = `${spec?.form_id || ''}::${activeMethodId || 'default'}`;
+  const values = valuesByKey[stateKey] || initialFor(fields);
+  const skipped = skippedByKey[stateKey] || new Set();
+
+  const setValues = (updater) => {
+    setValuesByKey((prev) => {
+      const cur = prev[stateKey] || initialFor(fields);
+      const next = typeof updater === 'function' ? updater(cur) : updater;
+      return { ...prev, [stateKey]: next };
+    });
+  };
+  const setSkipped = (updater) => {
+    setSkippedByKey((prev) => {
+      const cur = prev[stateKey] || new Set();
+      const next = typeof updater === 'function' ? updater(cur) : updater;
+      return { ...prev, [stateKey]: next };
+    });
+  };
 
   if (!spec) return null;
 
@@ -262,6 +304,10 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
       kind: action.kind || 'primary',
       values: cleanValues,
       skipped: [...skipped],
+      // Tell the panel which method the user picked (multi-method
+      // forms only). The agent uses this to decide which probe path
+      // to test and to write into the saved connection.
+      authMethod: activeMethodId || null,
     });
   };
 
@@ -293,6 +339,31 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
           probing (`busy` is set by the host) and otherwise stays
           structurally identical to its idle state. */}
 
+      {/* Multi-method picker — shown when the form has methods[] and
+          no method is currently active (neither user-picked nor
+          server-pre-selected). User clicks a card to pick. */}
+      {isMultiMethod && !activeMethod && (
+        <MethodPicker
+          methods={spec.methods}
+          onPick={(id) => setLocalSelectedMethod(id)}
+          busy={busy}
+        />
+      )}
+
+      {/* Method breadcrumb — once a method is active, show a small
+          row above the fields with the method label and a "change"
+          link that re-opens the picker. */}
+      {isMultiMethod && activeMethod && (
+        <MethodBreadcrumb
+          method={activeMethod}
+          onChange={() => setLocalSelectedMethod(null)}
+          busy={busy}
+        />
+      )}
+
+      {/* Everything below is hidden until a method is chosen on a
+          multi-method form. Single-method forms never gate. */}
+      {(!isMultiMethod || activeMethod) && <>
       {/* Form-level banners */}
       {spec.form_error && (
         <div style={{
@@ -410,12 +481,14 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
         })}
       </div>
 
-      {/* Actions — always rendered too. Disabled while busy. */}
+      {/* Actions — always rendered too. Disabled while busy. The
+          active method's actions take precedence; falls back to the
+          form's top-level actions, then a generic Submit button. */}
       <div style={{
         display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap',
         paddingTop: 4,
       }}>
-        {(spec.actions || [{ id: 'submit', label: 'Submit', kind: 'primary' }]).map((a) => (
+        {(activeMethod?.actions || spec.actions || [{ id: 'submit', label: 'Submit', kind: 'primary' }]).map((a) => (
           <button
             key={a.id}
             type="button"
@@ -446,6 +519,124 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
           </button>
         ))}
       </div>
+      </>}
+    </div>
+  );
+}
+
+// ── Method picker ─────────────────────────────────────────────────
+//
+// Vertical stack of cards, one per method. Each card shows label,
+// description, and an optional "Recommended" pill. Click selects
+// the method (host pulls the choice into local state and the form
+// switches to the picked method's fields).
+function MethodPicker({ methods, onPick, busy }) {
+  return (
+    <div style={{
+      display: 'flex', flexDirection: 'column', gap: 8,
+    }}>
+      <div style={{
+        fontSize: 12.5, color: 'var(--ink-3)', marginBottom: 2,
+      }}>
+        Pick how you want to connect:
+      </div>
+      {methods.map((m) => (
+        <button
+          key={m.id}
+          type="button"
+          disabled={busy}
+          onClick={() => onPick?.(m.id)}
+          style={{
+            display: 'flex', flexDirection: 'column',
+            alignItems: 'stretch', textAlign: 'left',
+            gap: 6,
+            padding: '12px 14px',
+            borderRadius: 9,
+            background: m.recommended
+              ? 'color-mix(in srgb, var(--accent) 8%, var(--surface))'
+              : 'var(--surface-2)',
+            border: m.recommended
+              ? '1px solid color-mix(in srgb, var(--accent) 35%, transparent)'
+              : '1px solid var(--line)',
+            color: 'var(--ink)',
+            cursor: busy ? 'not-allowed' : 'pointer',
+            fontFamily: FONT_BODY,
+            transition: 'transform 120ms ease, background 120ms ease, border-color 120ms ease',
+          }}
+          onMouseOver={(e) => { if (!busy) e.currentTarget.style.transform = 'translateY(-1px)'; }}
+          onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
+        >
+          <div style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+          }}>
+            <span style={{
+              fontWeight: 600, fontSize: 13.5, color: 'var(--ink)',
+              letterSpacing: '-0.005em',
+            }}>{m.label || m.id}</span>
+            {m.recommended && (
+              <span style={{
+                fontSize: 10.5, fontFamily: FONT_MONO, letterSpacing: '0.04em',
+                color: 'var(--accent)',
+                padding: '2px 7px', borderRadius: 999,
+                background: 'color-mix(in srgb, var(--accent) 12%, transparent)',
+                border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
+                textTransform: 'uppercase',
+              }}>Recommended</span>
+            )}
+          </div>
+          {m.description && (
+            <div style={{
+              fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.45,
+            }}>{m.description}</div>
+          )}
+          {m.help_url && (
+            <div style={{
+              fontSize: 11.5, color: 'var(--accent)', marginTop: 2,
+            }}>
+              How to →
+            </div>
+          )}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Method breadcrumb ────────────────────────────────────────────
+//
+// Compact row above the fields once a method is active. Shows the
+// chosen method label + a "change" link that re-opens the picker.
+function MethodBreadcrumb({ method, onChange, busy }) {
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+      gap: 10,
+      padding: '6px 10px',
+      borderRadius: 7,
+      background: 'var(--surface-2)',
+      border: '1px solid var(--line)',
+      fontFamily: FONT_BODY, fontSize: 12,
+    }}>
+      <span style={{
+        display: 'inline-flex', alignItems: 'baseline', gap: 6,
+        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+      }}>
+        <span style={{ color: 'var(--ink-4)', fontFamily: FONT_MONO, fontSize: 10.5, letterSpacing: '0.04em' }}>
+          METHOD
+        </span>
+        <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{method.label || method.id}</span>
+      </span>
+      <button
+        type="button"
+        onClick={onChange}
+        disabled={busy}
+        style={{
+          background: 'transparent', border: 0, padding: 0,
+          color: busy ? 'var(--ink-4)' : 'var(--accent)',
+          fontFamily: FONT_BODY, fontSize: 12,
+          cursor: busy ? 'not-allowed' : 'pointer',
+        }}
+      >change</button>
     </div>
   );
 }

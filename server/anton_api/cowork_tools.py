@@ -204,7 +204,10 @@ def _ensure_form_id(spec: dict) -> dict:
         out["form_id"] = "fm_" + uuid.uuid4().hex[:10]
     if not out.get("title"):
         out["title"] = "Connect"
-    if "fields" not in out or not isinstance(out.get("fields"), list):
+    has_methods = isinstance(out.get("methods"), list) and out.get("methods")
+    if not has_methods and (
+        "fields" not in out or not isinstance(out.get("fields"), list)
+    ):
         out["fields"] = []
     return out
 
@@ -278,7 +281,7 @@ _REQUEST_CREDENTIALS_SCHEMA = {
         },
         "fields": {
             "type": "array",
-            "description": "Field specs the user fills in. Order matters — render top to bottom.",
+            "description": "Field specs the user fills in (single-method form). Order matters — render top to bottom. For services with MULTIPLE auth options (Gmail = OAuth + app-password + service-account, etc.) prefer `methods` instead.",
             "items": {
                 "type": "object",
                 "properties": {
@@ -308,6 +311,43 @@ _REQUEST_CREDENTIALS_SCHEMA = {
                 "required": ["name", "label", "type"],
             },
         },
+        "methods": {
+            "type": "array",
+            "description": (
+                "Use INSTEAD of `fields` when the engine supports multiple auth methods "
+                "(e.g. Gmail can be reached via OAuth, App Password, or Service Account). "
+                "The user picks one method first, then fills in just that method's fields. "
+                "Each method should have a clear label, a 1-2 sentence description, and "
+                "its own fields. Mark the easiest one with `recommended: true`. If the "
+                "user has already signalled a preference (\"I have an app password\"), "
+                "set `selected_method` at the form's top level so we skip the picker."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Stable id for this method (e.g. 'app_password', 'service_account', 'oauth_paste'). Anton's probe uses this id to decide which auth flow to test."},
+                    "label": {"type": "string", "description": "Card title (e.g. 'App Password')."},
+                    "description": {"type": "string", "description": "1-2 sentence description shown on the picker card. Mention prereqs and difficulty when relevant."},
+                    "recommended": {"type": "boolean", "description": "Mark the easiest/most common method. Renders a 'Recommended' pill on the card."},
+                    "help_url": {"type": "string", "description": "Optional doc link for setting this method up (e.g. 'How to generate an app password')."},
+                    "fields": {
+                        "type": "array",
+                        "description": "Fields specific to this method. Same shape as the top-level `fields` items.",
+                        "items": {"type": "object"},
+                    },
+                    "actions": {
+                        "type": "array",
+                        "description": "OPTIONAL — per-method action buttons (e.g. 'Open OAuth flow' for an OAuth method). Falls back to the form's top-level actions, then to a default Submit + Cancel pair.",
+                        "items": {"type": "object"},
+                    },
+                },
+                "required": ["id", "label", "fields"],
+            },
+        },
+        "selected_method": {
+            "type": "string",
+            "description": "Pre-pick a method id from `methods[]` (skips the picker, jumps straight to that method's fields). Set when the user has clearly indicated a preference. The user can still hit 'change' to re-open the picker.",
+        },
         "actions": {
             "type": "array",
             "description": "Optional. Defaults to a single primary 'Submit' action plus 'Cancel'. Use to surface custom actions like 'Try OAuth' or per-field skip shortcuts.",
@@ -323,7 +363,7 @@ _REQUEST_CREDENTIALS_SCHEMA = {
             },
         },
     },
-    "required": ["engine", "title", "fields"],
+    "required": ["engine", "title"],
 }
 
 
@@ -343,7 +383,16 @@ _REQUEST_CREDENTIALS_PROMPT = (
     "patch or full re-emit — that would echo credentials into chat history. The "
     "user re-types what they want to fix.\n"
     "5. On success, summarize what you connected and stop. Do NOT call "
-    "`request_credentials` again unless the user asks for another connection.\n"
+    "`request_credentials` again unless the user asks for another connection.\n\n"
+    "MULTI-METHOD SHAPE — for engines with several auth options (Gmail can be "
+    "reached via OAuth, App Password, or Service Account; Postgres might support "
+    "password auth + IAM, etc.) emit a `methods[]` array INSTEAD of `fields[]`. "
+    "Each method has its own id, label, description, and field list. Mark the "
+    "simplest one with `recommended: true`. The form panel renders a picker first; "
+    "the user chooses, then types only the fields for the chosen method. The "
+    "submission carries `auth_method` so the probe knows which one to test. If "
+    "the user has CLEARLY signalled a preference in chat (\"I already have an "
+    "app password\"), pre-set `selected_method` to skip the picker.\n\n"
     "STRICT RULES:\n"
     "- Field VALUES never appear in chat. Don't echo them, don't include them in "
     "any form spec, don't paraphrase them. The fetch tool is the only read path.\n"

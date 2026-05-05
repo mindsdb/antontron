@@ -38,13 +38,14 @@ logger = logging.getLogger(__name__)
 # Tuples of (kind, payload) so the handler can route without isinstance
 # checks. Kept dead simple — V1 only needs four kinds.
 
-# kind = 'text'         payload = str        (anton's prose, into chat)
-# kind = 'scratchpad'   payload = dict       (right rail, action=start|end|result)
-# kind = 'status'       payload = str        (form's live status row)
-# kind = 'field_status' payload = dict       ({name, status} — small line under the field; status=null clears)
-# kind = 'remove_field' payload = str        (field name to delete from the form)
-# kind = 'extra_field'  payload = dict       (patch the form with a new field)
-# kind = 'verdict'      payload = ProbeOutcome  (terminal: success/fail/needs_input)
+# kind = 'text'           payload = str        (anton's prose, into chat)
+# kind = 'scratchpad'     payload = dict       (right rail, action=start|end|result)
+# kind = 'status'         payload = str        (form's live status row)
+# kind = 'field_status'   payload = dict       ({name, status, method_id?})
+# kind = 'remove_field'   payload = dict       ({name, method_id?})
+# kind = 'extra_field'    payload = dict       ({fields, method_id?})  — added during probe
+# kind = 'switch_method'  payload = dict       ({method_id, reason?})
+# kind = 'verdict'        payload = ProbeOutcome  (terminal: success/fail/needs_input)
 
 
 @dataclass
@@ -58,6 +59,7 @@ class ProbeOutcome:
     error: str = ""             # the actual problem (failure path)
     extra_fields: list[dict] = field(default_factory=list)  # needs_input
     follow_up: str = ""         # short advice tied to the verdict
+    method_id: str | None = None  # multi-method: which method the verdict applies to
 
 
 def _write_credentials_env(credentials: dict) -> tuple[str, list[str]]:
@@ -96,17 +98,13 @@ def _write_credentials_env(credentials: dict) -> tuple[str, list[str]]:
     return path, var_names
 
 
-def _summarize_field_roster(form_spec: dict, filled_names: set[str], skipped: list[str]) -> str:
-    """Render the current form's fields as a compact bullet list so
-    anton can see what already exists (and in what state) before
-    deciding whether to add new fields, set per-field status, or
-    remove a field. Values themselves are NEVER included — just the
-    name + type + a small marker for filled/empty/skipped.
+def _summarize_field_list(fields: list, filled_names: set[str], skipped_set: set[str], indent: str = "  ") -> str:
+    """Render a field list as a compact bullet list. Used both for
+    single-method forms (top-level fields[]) and per-method blocks
+    on multi-method forms.
     """
-    fields = (form_spec or {}).get("fields") or []
     if not fields:
-        return "  (no fields in the current form)"
-    skipped_set = set(skipped or [])
+        return f"{indent}(no fields)"
     lines: list[str] = []
     for f in fields:
         if not isinstance(f, dict):
@@ -122,8 +120,48 @@ def _summarize_field_roster(form_spec: dict, filled_names: set[str], skipped: li
             state = "filled"
         else:
             state = "empty"
-        lines.append(f"  • `{name}` ({ftype}, {state}) — {label}")
-    return "\n".join(lines) if lines else "  (no fields)"
+        lines.append(f"{indent}• `{name}` ({ftype}, {state}) — {label}")
+    return "\n".join(lines) if lines else f"{indent}(no fields)"
+
+
+def _summarize_form(form_spec: dict, filled_names: set[str], skipped: list[str]) -> str:
+    """Render the form's structure for the prompt. Branches on shape:
+
+      • multi-method form → enumerate each method (id, label, recommended,
+        selected/yes-no, fields list)
+      • single-method form → top-level fields list (legacy shape)
+    """
+    skipped_set = set(skipped or [])
+    methods = (form_spec or {}).get("methods") or []
+    if methods:
+        selected = (form_spec or {}).get("selected_method")
+        lines: list[str] = []
+        lines.append("This is a MULTI-METHOD form. The user picks ONE method "
+                     "before submitting. Each method has its own field list.")
+        if selected:
+            lines.append(f"Currently selected method: `{selected}`")
+        else:
+            lines.append("No method selected yet — the user is on the picker.")
+        lines.append("")
+        for m in methods:
+            if not isinstance(m, dict):
+                continue
+            mid = m.get("id") or ""
+            mlabel = m.get("label") or mid
+            recommended = " (recommended)" if m.get("recommended") else ""
+            sel_marker = " ← selected" if mid == selected else ""
+            lines.append(f"Method `{mid}` — {mlabel}{recommended}{sel_marker}")
+            if m.get("description"):
+                lines.append(f"  {m['description']}")
+            lines.append(_summarize_field_list(
+                m.get("fields") or [], filled_names, skipped_set, indent="    ",
+            ))
+            lines.append("")
+        return "\n".join(lines).rstrip()
+
+    # Single-method (legacy) — just the top-level fields.
+    fields = (form_spec or {}).get("fields") or []
+    return _summarize_field_list(fields, filled_names, skipped_set)
 
 
 def _build_probe_prompt(
@@ -153,19 +191,36 @@ def _build_probe_prompt(
         if isinstance(f, dict) and f.get("name")
         and str(f["name"]).lower() in filled_names
     }
-    roster = _summarize_field_roster(form_spec, filled_original, skipped)
+    roster = _summarize_form(form_spec, filled_original, skipped)
+    selected_method = (form_spec or {}).get("selected_method") or (form_spec or {}).get("auth_method")
+    method_hint = (
+        f"\nThe user picked method `{selected_method}` — focus your "
+        f"probe on whatever auth flow that implies (e.g. app_password "
+        f"→ IMAP/SMTP; service_account → impersonation; oauth_paste → "
+        f"refresh-token exchange). If you decide a different method "
+        f"would clearly work better, you can call `switch_method` with "
+        f"a one-line reason.\n"
+    ) if selected_method else (
+        "\nNo method has been picked. Probe what the user submitted; "
+        "if there's no usable info, request_extra_field with the "
+        "minimum needed.\n"
+    )
     return (
         f"You are a connection prober for `{engine}`. Your only job is "
         f"to determine if the credentials we just collected actually "
         f"work, and report back via your tools.\n\n"
         f"The user-submitted credentials are in a temporary `.env` file:\n"
         f"  Path: `{env_path}`\n"
-        f"  Variable names: {', '.join(var_names) or '(none)'}\n\n"
+        f"  Variable names: {', '.join(var_names) or '(none)'}\n"
+        f"{method_hint}\n"
         f"——— CURRENT FORM ROSTER ———\n"
         f"These are the fields ALREADY in the form. Do NOT call "
         f"`request_extra_field` for any of these — they're already "
-        f"there (even if empty or skipped). Use exact names if you "
-        f"reference them via `set_field_status` or `remove_field`:\n"
+        f"there (even if empty or skipped). Use exact names when you "
+        f"reference them via `set_field_status` / `remove_field`. For "
+        f"multi-method forms, ALL field-edit tools (set_field_status, "
+        f"remove_field, request_extra_field) take a `method_id` "
+        f"parameter — pass the method whose fields you're touching.\n\n"
         f"{roster}\n\n"
         f"——— STEPS (follow in order) ———\n"
         f"1. Call `set_status` with a short message like \"Loading credentials…\".\n"
@@ -192,10 +247,13 @@ def _build_probe_prompt(
         f"status='Validating…') then later set_field_status(name='api_key', "
         f"status='OK') or set_field_status(name='api_key', status=null) to clear. "
         f"`name` MUST match an existing field from the roster above.\n"
-        f"• `remove_field(name)` — delete a field from the form. Use when a field "
-        f"is no longer relevant (e.g. user picked OAuth so the password field is "
-        f"obsolete, or the engine doesn't actually need what we asked for). The "
-        f"removal is final for this turn — only do this when you're sure.\n\n"
+        f"• `remove_field(name, method_id?)` — delete a field from the form. Use when "
+        f"a field is no longer relevant (e.g. user picked OAuth so the password field "
+        f"is obsolete). For multi-method forms pass the method_id.\n"
+        f"• `switch_method(method_id, reason)` — flip the multi-method form to a "
+        f"different method. Use only when the current method is clearly wrong (e.g. "
+        f"the user's API key looks like a service-account key but they're on the "
+        f"app_password method). Always include a one-line reason.\n\n"
         f"——— DON'T DUPLICATE ———\n"
         f"Before calling `request_extra_field`, scan the roster above and confirm "
         f"the field isn't already there under any name (including close variants — "
@@ -264,20 +322,29 @@ async def run_probe(
         name = (tc_input.get("name") or "").strip()
         if not name:
             return "ignored: missing field name"
-        # `status` may be intentionally null/empty to CLEAR an earlier
-        # status — pass through verbatim so the patch carries the
-        # right semantic (form-store treats null as "delete property").
         status = tc_input.get("status")
         if isinstance(status, str):
             status = status.strip()
-        pending.append(("field_status", {"name": name, "status": status}))
+        method_id = (tc_input.get("method_id") or "").strip() or None
+        pending.append(("field_status", {
+            "name": name, "status": status, "method_id": method_id,
+        }))
         return "ok"
 
     async def _remove_field(_session, tc_input):
         name = (tc_input.get("name") or "").strip()
         if not name:
             return "ignored: missing field name"
-        pending.append(("remove_field", name))
+        method_id = (tc_input.get("method_id") or "").strip() or None
+        pending.append(("remove_field", {"name": name, "method_id": method_id}))
+        return "ok"
+
+    async def _switch_method(_session, tc_input):
+        method_id = (tc_input.get("method_id") or "").strip()
+        if not method_id:
+            return "ignored: missing method_id"
+        reason = (tc_input.get("reason") or "").strip()
+        pending.append(("switch_method", {"method_id": method_id, "reason": reason}))
         return "ok"
 
     async def _report_success(_session, tc_input):
@@ -297,6 +364,10 @@ async def run_probe(
         if isinstance(fields, list):
             outcome.extra_fields = [f for f in fields if isinstance(f, dict) and f.get("name")]
         outcome.follow_up = (tc_input.get("reason") or "").strip()
+        # Track which method (if any) the extra fields belong to so
+        # the agent can build a method-scoped patch instead of
+        # appending to the top-level fields[] of a multi-method form.
+        outcome.method_id = (tc_input.get("method_id") or "").strip() or None
         return "ok"
 
     SET_FIELD_STATUS_TOOL = ToolDef(
@@ -304,9 +375,9 @@ async def run_probe(
         description=(
             "Update the small status line under a SPECIFIC field in "
             "the form (e.g. \"Validating…\" under the api_key field). "
-            "Use this for granular per-field feedback that's distinct "
-            "from the form-wide `set_status`. Pass `status=null` to "
-            "clear an earlier status. Never echo credential values."
+            "Pass `status=null` to clear. For multi-method forms, "
+            "include `method_id` so the patch lands on the right "
+            "method's field. Never echo credential values."
         ),
         input_schema={
             "type": "object",
@@ -314,12 +385,19 @@ async def run_probe(
                 "name": {
                     "type": "string",
                     "description": "Field name (must match an existing "
-                                   "field in the form, e.g. 'api_key').",
+                                   "field in the form/method, e.g. 'api_key').",
                 },
                 "status": {
                     "type": ["string", "null"],
                     "description": "Short status line (e.g. 'Validating…', "
                                    "'OK'). Pass null to clear.",
+                },
+                "method_id": {
+                    "type": "string",
+                    "description": "OPTIONAL — for multi-method forms, the "
+                                   "id of the method the field belongs to "
+                                   "(e.g. 'app_password'). Omit for "
+                                   "single-method forms.",
                 },
             },
             "required": ["name"],
@@ -332,8 +410,10 @@ async def run_probe(
         description=(
             "Permanently delete a field from the form. Use when a "
             "field is obsolete (e.g. user picked OAuth and the password "
-            "is no longer needed) or was a wrong ask. The `name` MUST "
-            "match an existing field from the roster."
+            "is no longer needed) or was a wrong ask. For multi-method "
+            "forms, pass `method_id` to scope the deletion to one "
+            "method's field list. The `name` MUST match an existing "
+            "field from the roster."
         ),
         input_schema={
             "type": "object",
@@ -342,10 +422,47 @@ async def run_probe(
                     "type": "string",
                     "description": "Name of the field to delete.",
                 },
+                "method_id": {
+                    "type": "string",
+                    "description": "OPTIONAL — for multi-method forms, the "
+                                   "method whose field list this deletion "
+                                   "applies to.",
+                },
             },
             "required": ["name"],
         },
         handler=_remove_field,
+    )
+
+    SWITCH_METHOD_TOOL = ToolDef(
+        name="switch_method",
+        description=(
+            "Flip the form to a different method (multi-method forms "
+            "only). Use when the current method's probe failed and a "
+            "different one would clearly work better — e.g. PostHog "
+            "rejected the personal API key, switch to project_api_key. "
+            "The user sees the method picker re-open with the new "
+            "method already selected and can change it again if they "
+            "disagree. Provide a one-line `reason` so the user "
+            "understands the suggestion."
+        ),
+        input_schema={
+            "type": "object",
+            "properties": {
+                "method_id": {
+                    "type": "string",
+                    "description": "Target method id (must exist in the "
+                                   "form's methods[] roster).",
+                },
+                "reason": {
+                    "type": "string",
+                    "description": "One-line explanation shown as a "
+                                   "status update.",
+                },
+            },
+            "required": ["method_id"],
+        },
+        handler=_switch_method,
     )
 
     SET_STATUS_TOOL = ToolDef(
@@ -423,7 +540,9 @@ async def run_probe(
             "need more fields from the user. The form panel re-opens "
             "with the new fields appended. Use this when the engine "
             "needs something the original form didn't ask for "
-            "(e.g. PostHog needs `project_id`)."
+            "(e.g. PostHog needs `project_id`). For multi-method "
+            "forms, pass `method_id` so the new fields land on the "
+            "right method's field list."
         ),
         input_schema={
             "type": "object",
@@ -450,6 +569,11 @@ async def run_probe(
                     "type": "string",
                     "description": "Short reason shown above the fields "
                                    "(e.g. 'PostHog also needs your project ID').",
+                },
+                "method_id": {
+                    "type": "string",
+                    "description": "OPTIONAL — for multi-method forms, the "
+                                   "method to attach the new fields to.",
                 },
             },
             "required": ["fields"],
@@ -483,6 +607,7 @@ async def run_probe(
             SET_STATUS_TOOL,
             SET_FIELD_STATUS_TOOL,
             REMOVE_FIELD_TOOL,
+            SWITCH_METHOD_TOOL,
             REPORT_SUCCESS_TOOL,
             REPORT_FAILURE_TOOL,
             REQUEST_EXTRA_FIELD_TOOL,

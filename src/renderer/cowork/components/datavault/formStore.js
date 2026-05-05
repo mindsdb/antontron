@@ -33,6 +33,45 @@ export function setForm(conversationId, spec) {
   }
 }
 
+// Merge a name-keyed patch map into an array of {name, ...} entries,
+// honouring the standard semantics:
+//   patch[name] = object → merge those properties into the matching
+//                          entry (null at property level clears prop)
+//   patch[name] = null   → delete the entry from the output
+//   missing name         → entry untouched
+//   new name + object    → append as a new entry
+//   new name + null      → silent no-op
+// Used both for the form's top-level `fields` array AND each method's
+// own `fields` array.
+function _mergeNamedList(existing, patchMap) {
+  const list = Array.isArray(existing) ? existing : [];
+  const out = [];
+  for (const item of list) {
+    if (Object.prototype.hasOwnProperty.call(patchMap, item.name)) {
+      const p = patchMap[item.name];
+      if (p === null) continue;
+      if (!p || typeof p !== 'object') { out.push(item); continue; }
+      const merged = { ...item };
+      for (const k of Object.keys(p)) {
+        if (p[k] === null) delete merged[k];
+        else merged[k] = p[k];
+      }
+      out.push(merged);
+    } else {
+      out.push(item);
+    }
+  }
+  for (const name of Object.keys(patchMap)) {
+    if (!list.some((item) => item.name === name)) {
+      const p = patchMap[name];
+      if (p && typeof p === 'object') {
+        out.push({ name, ...p });
+      }
+    }
+  }
+  return out;
+}
+
 function _shallowFormEqual(a, b) {
   if (a === b) return true;
   // Compare the form_id + a stringified field+actions snapshot.
@@ -83,40 +122,53 @@ export function patchForm(conversationId, patch) {
   }
 
   if (patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields)) {
-    const existing = Array.isArray(prev.fields) ? prev.fields : [];
-    // Pass 1 — merge patches into existing fields, OR drop fields
-    // whose patch is `null` (deletion semantic).
+    next.fields = _mergeNamedList(prev.fields, patch.fields);
+  }
+
+  // ── Methods (multi-method forms) ─────────────────────────────────
+  // Same key-by-id semantics as fields, plus an inner `fields` list
+  // each method owns. Patches look like:
+  //   { methods: { app_password: { label: "App Password", fields: {...} | null } } }
+  // and individual methods can be deleted with `methods[id] = null`.
+  if (patch.methods && typeof patch.methods === 'object' && !Array.isArray(patch.methods)) {
+    const existing = Array.isArray(prev.methods) ? prev.methods : [];
     const merged = [];
-    for (const f of existing) {
-      if (Object.prototype.hasOwnProperty.call(patch.fields, f.name)) {
-        const fieldPatch = patch.fields[f.name];
-        if (fieldPatch === null) continue; // deletion — skip from output
-        if (!fieldPatch || typeof fieldPatch !== 'object') {
-          merged.push(f);
-          continue;
+    for (const m of existing) {
+      if (Object.prototype.hasOwnProperty.call(patch.methods, m.id)) {
+        const mp = patch.methods[m.id];
+        if (mp === null) continue; // deletion
+        if (!mp || typeof mp !== 'object') { merged.push(m); continue; }
+        const out = { ...m };
+        for (const k of Object.keys(mp)) {
+          if (k === 'fields') continue; // handled below
+          if (mp[k] === null) delete out[k];
+          else out[k] = mp[k];
         }
-        const out = { ...f };
-        for (const k of Object.keys(fieldPatch)) {
-          if (fieldPatch[k] === null) delete out[k];
-          else out[k] = fieldPatch[k];
+        if (mp.fields && typeof mp.fields === 'object' && !Array.isArray(mp.fields)) {
+          out.fields = _mergeNamedList(m.fields, mp.fields);
         }
         merged.push(out);
       } else {
-        merged.push(f);
+        merged.push(m);
       }
     }
-    // Pass 2 — append any patch entries whose name didn't exist.
-    // `null` for a non-existent name is a silent no-op (nothing to
-    // delete, no shape to append).
-    for (const name of Object.keys(patch.fields)) {
-      if (!existing.some((f) => f.name === name)) {
-        const fp = patch.fields[name];
-        if (fp && typeof fp === 'object') {
-          merged.push({ name, ...fp });
+    // New methods appended in the order they appear in the patch.
+    for (const id of Object.keys(patch.methods)) {
+      if (!existing.some((m) => m.id === id)) {
+        const mp = patch.methods[id];
+        if (mp && typeof mp === 'object') {
+          // If the new method declares fields as a name-keyed map
+          // (consistent with patch shape), normalise into the
+          // array-of-objects shape the rest of the app expects.
+          const newMethod = { id, ...mp };
+          if (mp.fields && typeof mp.fields === 'object' && !Array.isArray(mp.fields)) {
+            newMethod.fields = _mergeNamedList([], mp.fields);
+          }
+          merged.push(newMethod);
         }
       }
     }
-    next.fields = merged;
+    next.methods = merged;
   }
 
   _byConversation.set(conversationId, next);

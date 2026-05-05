@@ -422,9 +422,10 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
   }
 
   return (
+    // Background intentionally omitted so the gravity-field canvas
+    // painted behind the React root shows through.
     <div className="scroll-clean" style={{
       flex: 1, overflowY: 'auto',
-      background: 'var(--bg)',
       display: 'flex', flexDirection: 'column',
     }}>
       <PageHeader onConnectNew={handleConnectNew} />
