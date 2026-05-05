@@ -501,6 +501,130 @@ export async function fetchPublishable() {
   return req('/publish');
 }
 
+// Submit a data-vault form and stream the cowork agent's response.
+//
+// Replaces the prior fire-and-forget POST. The agent endpoint:
+//   1. stages the values into the vault keyed by submission_id
+//   2. validates / probes the connection server-side
+//   3. emits a Response-API-compatible SSE stream with text deltas,
+//      a `data-vault-form-patch` block, and `response.completed` with
+//      a status field
+//
+// We pipe those events through the same callbacks the chat stream
+// uses, so the consumer (App.jsx) can treat the result as a fresh
+// assistant turn — no separate render path needed.
+//
+// Field VALUES never round-trip through the response.
+export function streamDataVaultSubmission({
+  formId, conversationId, formSpec, values, skipped,
+  onChunk, onProgress, onToolResult, onDone, onError, onEvent,
+} = {}) {
+  const ctrl = new AbortController();
+  (async () => {
+    try {
+      const res = await fetch(`${BASE}/datavault/submissions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          form_id: formId,
+          conversation_id: conversationId || null,
+          values: values || {},
+          skipped: skipped || [],
+          form_spec: formSpec || null,
+        }),
+        signal: ctrl.signal,
+      });
+      if (!res.ok) throw await responseError(res, `Form submit failed (${res.status})`);
+
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buffer = '';
+      let cid = conversationId || null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += dec.decode(value, { stream: true });
+        const events = buffer.split('\n\n');
+        buffer = events.pop() ?? '';
+        for (const block of events) {
+          const dataLine = block.split('\n').find((line) => line.startsWith('data:'));
+          if (!dataLine) continue;
+          const raw = dataLine.slice(5).trim();
+          if (!raw || raw === '[DONE]') continue;
+          let msg;
+          try { msg = JSON.parse(raw); } catch { continue; }
+
+          onEvent?.(msg);
+
+          switch (msg.type) {
+            case 'response.created':
+              cid = msg.conversation_id || cid;
+              break;
+            case 'response.output_text.delta':
+              onChunk?.(msg.delta || '', cid);
+              break;
+            case 'response.in_progress': {
+              const role = msg.thought_role || '';
+              if (role === 'thought.scratchpad.result') {
+                onToolResult?.({
+                  type: 'tool_result',
+                  name: msg.tool_name || '',
+                  action: msg.tool_action || '',
+                  content: msg.content || '',
+                }, cid);
+              } else {
+                onProgress?.({
+                  type: 'progress',
+                  phase: msg.phase || role.replace(/^thought\./, '') || 'progress',
+                  message: msg.message || msg.content || '',
+                  thoughtRole: role,
+                }, cid);
+              }
+              break;
+            }
+            case 'response.completed':
+              onDone?.(cid, msg);
+              return;
+            case 'response.failed':
+              onError?.(msg.error || msg.message || 'Form processing failed', msg);
+              return;
+            default:
+              break;
+          }
+        }
+      }
+      onDone?.(cid);
+    } catch (err) {
+      if (err.name !== 'AbortError') onError?.(err.message);
+    }
+  })();
+  return ctrl;
+}
+
+// Backwards-compatible non-streaming wrapper — kept so callers that
+// just need to stage values without streaming back can still do so.
+// (Currently unused by the form panel; might disappear in a cleanup.)
+export async function submitDataVaultForm({ formId, conversationId, values, skipped, formSpec }) {
+  // Fire the streaming endpoint but only consume the JSON body of
+  // the response — useful for tests/probes that don't want SSE.
+  const res = await fetch(`${BASE}/datavault/submissions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      form_id: formId,
+      conversation_id: conversationId || null,
+      values: values || {},
+      skipped: skipped || [],
+      form_spec: formSpec || null,
+    }),
+  });
+  if (!res.ok) throw await responseError(res, `Form submit failed (${res.status})`);
+  // Consume the stream and return a summary.
+  const text = await res.text();
+  return { status: 'streamed', body: text };
+}
+
 export async function publishArtifact(path) {
   return req('/publish', { method: 'POST', body: JSON.stringify({ path }) });
 }

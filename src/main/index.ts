@@ -437,10 +437,9 @@ function createWindow() {
     mainWindow.loadFile(getRendererPath());
   }
 
-  // DevTools are off by default. Set ANTON_DEVTOOLS=1 in the env to
-  // auto-open the inspector on launch (detached so it doesn't crop
-  // the renderer). Otherwise it stays closed and is reachable via the
-  // View menu (Cmd+Option+I) when needed.
+  // DevTools no longer auto-open on launch. Still reachable on demand
+  // via the View menu (Cmd+Option+I) when needed for debugging.
+  // Opt back in by setting ANTON_DEVTOOLS=1.
   if (process.env.ANTON_DEVTOOLS === '1') {
     mainWindow.webContents.once('did-finish-load', () => {
       mainWindow?.webContents.openDevTools({ mode: 'detach' });
@@ -893,6 +892,19 @@ function setupIPC() {
       const result = await shell.openPath(p);
       // shell.openPath returns '' on success, or an error string.
       if (result) return { ok: false, reason: result };
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, reason: e?.message || String(e) };
+    }
+  });
+
+  // Move a local file/folder to the OS Trash. Recoverable from the
+  // user's Trash/Recycle Bin — used by the artifact viewer's Delete
+  // action so an accidental click is undoable.
+  ipcMain.handle('shell:trash-item', async (_event, p: string) => {
+    if (typeof p !== 'string' || !p) return { ok: false, reason: 'empty path' };
+    try {
+      await shell.trashItem(p);
       return { ok: true };
     } catch (e: any) {
       return { ok: false, reason: e?.message || String(e) };

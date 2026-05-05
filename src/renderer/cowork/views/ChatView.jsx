@@ -20,6 +20,8 @@ import { TaskMenu } from '../components/TaskMenu';
 import { ScratchpadModal } from '../components/thinking/ScratchpadModal';
 import { ProgressBox, WorkingFolderBox, ContextBox } from '../components/rail';
 import { ArtifactViewer } from '../components/artifact';
+import { DataVaultFormPanel } from '../components/datavault/DataVaultFormPanel';
+import { FormErrorBoundary } from '../components/datavault/FormErrorBoundary';
 import { revealArtifact } from '../api';
 
 // Token shorthand mapped to our globals.css custom properties so the same
@@ -257,11 +259,11 @@ function AnswerTurn({ state = 'done', time, children, showActions = true, copyTe
   );
 }
 
-function TextBlock({ text, id, complete = true }) {
+function TextBlock({ text, id, complete = true, conversationId = null }) {
   // Full markdown rendering — GFM tables, lists, code blocks (with
-  // chartjs/chart support), links, etc. via react-markdown + our
-  // MarkdownContent override map.
-  return <MarkdownContent text={text} id={id} complete={complete} />;
+  // chartjs/chart and data-vault-form support), links, etc. via
+  // react-markdown + our MarkdownContent override map.
+  return <MarkdownContent text={text} id={id} complete={complete} conversationId={conversationId} />;
 }
 
 // Convert an artifact step (from the SSE adapter, badge='Artifact')
@@ -477,6 +479,7 @@ export default function ChatView({
   onRenameTask,
   onDeleteTask,
   onDeleteTurn,
+  onSubmitDataVaultForm,
   onMoveTaskToProject,
   onOpenProject,
   onOpenProjectsList,
@@ -841,7 +844,7 @@ export default function ChatView({
                       onActivateStep={(step) => setOpenScratchpadStepId(step.id)}
                     />
                   )}
-                  <TextBlock text={m.content} id={m.id || `msg-${i}`} complete />
+                  <TextBlock text={m.content} id={m.id || `msg-${i}`} complete conversationId={task.id} />
                   {m.artifact && <ArtifactCard artifact={m.artifact} />}
                   <StepArtifacts steps={m.steps} onOpen={handleArtifactOpen} />
                 </AnswerTurn>
@@ -878,7 +881,7 @@ export default function ChatView({
                 )}
                 {streamingMsg.content && (
                   <div style={{ position: 'relative' }}>
-                    <TextBlock text={streamingMsg.content} id="streaming" complete={false} />
+                    <TextBlock text={streamingMsg.content} id="streaming" complete={false} conversationId={task.id} />
                     <StreamCursor slotId="body:streaming" />
                   </div>
                 )}
@@ -971,6 +974,19 @@ export default function ChatView({
             {Ico.panelCollapseRight(15)}
           </button>
         </div>
+        {/* Data-vault form panel — mounts when the conversation has
+            an active data-vault-form spec; the form's submit/skip/
+            cancel actions become a synthetic chat continuation that
+            re-enters the stream so anton can iterate on the form.
+            Wrapped in an error boundary so a malformed form spec
+            (or render glitch) can't blank the chat surface. */}
+        <FormErrorBoundary>
+          <DataVaultFormPanel
+            conversationId={task.id || ''}
+            onContinue={(payload) => onSend?.(payload?.text || '[form action]')}
+            onSubmit={onSubmitDataVaultForm}
+          />
+        </FormErrorBoundary>
         <ProgressBox
           steps={railSteps}
           streamStatus={streamingMsg?.streamStatus}

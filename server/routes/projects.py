@@ -41,12 +41,12 @@ async def list_projects():
 
 @router.post("")
 async def create_project(req: CreateProjectRequest):
-    try:
-        return projects_store.create_project(req.name)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    # Sanitization always yields a usable name (falls back to
+    # "untitled-project") and a `-NN` suffix is appended on collision,
+    # so this endpoint never errors on naming. The response carries
+    # `requested` + `renamed` so the client can tell the user when the
+    # stored name differs from what they typed.
+    return projects_store.create_project(req.name)
 
 
 @router.get("/active")
@@ -67,11 +67,10 @@ async def rename_project(name: str, req: RenameProjectRequest):
     try:
         result = projects_store.rename_project(name, req.name)
     except ValueError as exc:
+        # Reserved for domain rules (e.g. "Cannot rename default project").
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     # Walk the renamed directory and rewrite every conversation's
     # `_meta.json` so the `project` field matches the new name. Without

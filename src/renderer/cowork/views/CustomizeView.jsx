@@ -342,11 +342,16 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
   }, [initialConnectors]);
 
   const handleConnectNew = () => {
+    // Delegate to the parent when one is provided — that's the
+    // current path: App.jsx opens a fresh chat with a synthesized
+    // greeting and routes the user there. Anton drives the rest
+    // via request_credentials. Falls back to the in-page apps
+    // directory only when no handler is wired (older callers).
+    if (onConnectNew) {
+      onConnectNew();
+      return;
+    }
     setShowWorkflow(true);
-    // Defer to the parent if it wants to do anything else (e.g. light
-    // up an analytics pixel). Default behavior — open in-place — is
-    // already handled by the local state flip above.
-    onConnectNew?.();
   };
 
   const handleWorkflowClose = async () => {

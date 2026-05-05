@@ -369,7 +369,7 @@ function FilterRow({
 
 // ─── Project menu (kebab popover) ────────────────────────────────────────
 
-function ProjectMenu({ open, anchorRect, project, pinned, isReserved, onClose, onOpen, onRename, onTogglePin, onReveal, onDelete }) {
+function ProjectMenu({ open, anchorRect, project, pinned, isReserved, undeletable = false, hideOpen = false, hidePin = false, onClose, onOpen, onRename, onTogglePin, onReveal, onDelete }) {
   const ref = useRef(null);
   // Measured layout for the flip-up-when-no-room-below trick — same
   // pattern TaskMenu uses for the sidebar/header kebabs. Without this,
@@ -416,10 +416,17 @@ function ProjectMenu({ open, anchorRect, project, pinned, isReserved, onClose, o
   const MENU_W = 200;
   const left = Math.min(window.innerWidth - MENU_W - 8, Math.max(8, anchorRect.right - MENU_W));
 
-  const Item = ({ label, icon, onClick, danger }) => (
+  const Item = ({ label, icon, onClick, danger, disabled, title }) => (
     <button
       type="button"
-      onClick={(e) => { e.stopPropagation(); onClick?.(); onClose?.(); }}
+      title={title}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (disabled) return;
+        onClick?.();
+        onClose?.();
+      }}
       style={{
         width: 'calc(100% - 8px)', margin: '0 4px',
         display: 'flex', alignItems: 'center', gap: 10,
@@ -428,9 +435,11 @@ function ProjectMenu({ open, anchorRect, project, pinned, isReserved, onClose, o
         fontFamily: FONT_BODY, fontSize: 13,
         color: danger ? 'var(--danger)' : 'var(--ink-2)',
         textAlign: 'left',
-        cursor: 'pointer',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
       }}
       onMouseOver={(e) => {
+        if (disabled) return;
         e.currentTarget.style.background = danger
           ? 'color-mix(in srgb, var(--danger) 12%, transparent)'
           : 'var(--surface-2)';
@@ -460,20 +469,25 @@ function ProjectMenu({ open, anchorRect, project, pinned, isReserved, onClose, o
       }}
       onClick={(e) => e.stopPropagation()}
     >
-      <Item label="Open" icon={Ico.folder(13)} onClick={() => onOpen?.(project)} />
-      <Item
-        label={pinned ? 'Unpin' : 'Pin'}
-        icon={Ico.pin(13)}
-        onClick={() => onTogglePin?.(project, !pinned)}
-      />
+      {!hideOpen && <Item label="Open" icon={Ico.folder(13)} onClick={() => onOpen?.(project)} />}
+      {!hidePin && (
+        <Item
+          label={pinned ? 'Unpin' : 'Pin'}
+          icon={Ico.pin(13)}
+          onClick={() => onTogglePin?.(project, !pinned)}
+        />
+      )}
       {!isReserved && <Item label="Rename…" icon={Ico.edit(13)} onClick={() => onRename?.(project)} />}
       <Item label="Show in Finder" icon={Ico.folder(13)} onClick={() => onReveal?.(project)} />
-      {!isReserved && (
-        <>
-          <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
-          <Item label="Delete…" icon={Ico.trash(13)} danger onClick={() => onDelete?.(project)} />
-        </>
-      )}
+      <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+      <Item
+        label="Delete…"
+        icon={Ico.trash(13)}
+        danger
+        disabled={undeletable}
+        title={undeletable ? "The General project can't be deleted — it's the orphan-fallback workspace." : undefined}
+        onClick={() => onDelete?.(project)}
+      />
     </div>
   );
 }
@@ -866,6 +880,17 @@ function CrumbSep() {
 function ProjectDetail({
   project, projects, tasks, scheduled, models, onSend, onSelectTask,
   onDeleteTask, onShowAll,
+  // Header kebab + inline rename — lets users rename / reveal / delete
+  // the active project without bouncing back to the grid. Pin is
+  // intentionally absent: the only pin store today is localStorage on
+  // the grid cards, and exposing the toggle here would imply the
+  // detail view participates in that state.
+  editing = false,
+  onRenameStart,
+  onRenameSubmit,
+  onRenameCancel,
+  onReveal,
+  onDelete,
 }) {
   const projectTasks = (tasks || [])
     .filter((t) => t.projectName === project.name || t.projectPath === project.path)
@@ -874,6 +899,29 @@ function ProjectDetail({
     .filter((s) => (s.project || s.projectName) === project.name);
 
   const [railOpen, setRailOpen] = useState(true);
+  const [titleHover, setTitleHover] = useState(false);
+  const [menuRect, setMenuRect] = useState(null);
+  const kebabRef = useRef(null);
+  const renameInputRef = useRef(null);
+  const isReserved = project.name === 'general' || project.name === 'default';
+  const showKebab = titleHover || !!menuRect;
+
+  // Focus + select-all the inline input on mount of the editing state.
+  useEffect(() => {
+    if (!editing) return;
+    const id = requestAnimationFrame(() => {
+      const el = renameInputRef.current;
+      if (!el) return;
+      el.focus();
+      try { el.select(); } catch {}
+    });
+    return () => cancelAnimationFrame(id);
+  }, [editing]);
+
+  const submitRename = () => {
+    const next = renameInputRef.current?.value ?? project.name;
+    onRenameSubmit?.(next);
+  };
 
   return (
     <div style={{
@@ -936,14 +984,97 @@ function ProjectDetail({
           }}>
             <Crumb label="Projects" onClick={onShowAll} title="All projects" />
             <CrumbSep />
-            <span title={project.name} style={{
-              fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
-              letterSpacing: '0.04em', color: 'var(--ink)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-              minWidth: 0, flex: '1 1 0',
-            }}>{project.name}</span>
+            <div
+              onMouseEnter={() => setTitleHover(true)}
+              onMouseLeave={() => setTitleHover(false)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4,
+                minWidth: 0, flex: '1 1 0',
+              }}
+            >
+              {editing ? (
+                <input
+                  ref={renameInputRef}
+                  type="text"
+                  defaultValue={project.name}
+                  onMouseDown={(e) => e.stopPropagation()}
+                  onClick={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    e.stopPropagation();
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      submitRename();
+                    } else if (e.key === 'Escape') {
+                      e.preventDefault();
+                      onRenameCancel?.();
+                    }
+                  }}
+                  onBlur={submitRename}
+                  spellCheck={false}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  style={{
+                    flex: '1 1 0', minWidth: 0,
+                    fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+                    letterSpacing: '0.04em', color: 'var(--ink)',
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--accent)',
+                    borderRadius: 5, padding: '2px 6px', outline: 'none',
+                  }}
+                />
+              ) : (
+                <span title={project.name} style={{
+                  fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+                  letterSpacing: '0.04em', color: 'var(--ink)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  minWidth: 0, flex: '0 1 auto',
+                }}>{project.name}</span>
+              )}
+              {!editing && (
+                <button
+                  ref={kebabRef}
+                  type="button"
+                  aria-label="Project menu"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    const rect = kebabRef.current?.getBoundingClientRect();
+                    setMenuRect(rect || null);
+                  }}
+                  style={{
+                    width: 22, height: 22, borderRadius: 5,
+                    background: 'transparent', border: 0,
+                    color: 'var(--ink-3)',
+                    display: 'inline-grid', placeItems: 'center',
+                    flexShrink: 0,
+                    opacity: showKebab ? 1 : 0,
+                    pointerEvents: showKebab ? 'auto' : 'none',
+                    cursor: 'pointer',
+                    transition: 'opacity .15s ease, color .15s ease, background .15s ease',
+                    WebkitAppRegion: 'no-drag',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--ink)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--ink-3)'; }}
+                >
+                  {Ico.moreVert(13)}
+                </button>
+              )}
+            </div>
           </div>
         </div>
+
+        <ProjectMenu
+          open={!!menuRect}
+          anchorRect={menuRect}
+          project={project}
+          isReserved={isReserved}
+          undeletable={project.name === 'general'}
+          hideOpen
+          hidePin
+          onClose={() => setMenuRect(null)}
+          onRename={() => onRenameStart?.(project)}
+          onReveal={() => onReveal?.(project)}
+          onDelete={() => onDelete?.(project)}
+        />
 
         <div data-scroll="true" style={{
           minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
@@ -1111,7 +1242,16 @@ export default function ProjectsView({
     setEditingProjectName(null);
     if (!next || next === oldName) return;
     try {
-      await renameProject(oldName, next);
+      const result = await renameProject(oldName, next);
+      const finalName = result?.name || next;
+      const finalPath = result?.path || detailProject?.path;
+      // If we're sitting in detail mode for the renamed project, swap
+      // the local detailProject so the breadcrumb shows the new name
+      // immediately — App.jsx's selectedProject won't update until the
+      // user re-enters the project from the grid.
+      if (detailProject?.name === oldName) {
+        setDetailProject({ ...detailProject, name: finalName, path: finalPath });
+      }
       // App-level listener refetches projects on this event.
       window.dispatchEvent(new CustomEvent('anton:projects-changed'));
     } catch (e) {
@@ -1163,6 +1303,18 @@ export default function ProjectsView({
         onSelectTask={onSelectTask}
         onDeleteTask={onDeleteTask}
         onShowAll={() => setDetailProject(null)}
+        editing={editingProjectName === detailProject.name}
+        onRenameStart={handleRenameStart}
+        onRenameSubmit={(rawNext) => handleRenameSubmit(detailProject.name, rawNext)}
+        onRenameCancel={handleRenameCancel}
+        onReveal={handleReveal}
+        onDelete={(proj) => {
+          // Bounce back to the grid first so we don't render a detail
+          // page for a project that's about to disappear, then defer
+          // the destructive call to App.jsx's confirmation flow.
+          setDetailProject(null);
+          onDeleteProject?.(proj);
+        }}
       />
     );
   }

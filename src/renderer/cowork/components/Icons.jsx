@@ -79,6 +79,9 @@ const Ico = {
   // External link — square with arrow exiting top-right. Universal
   // "opens in browser" affordance.
   externalLink: (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M14 4h6v6"/><path d="M10 14 20 4"/><path d="M19 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h6"/></svg>,
+  // Close glyph — used by the data-vault form panel and any other
+  // dismissable affordance. Plain × strokes.
+  close:    (s = 14) => <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>,
 };
 
 export default Ico;

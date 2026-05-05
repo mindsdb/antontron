@@ -655,8 +655,16 @@ async def _build_chat_session(
     # Console and pops a webbrowser, both of which die in the FastAPI
     # process. The wrapper exposes the same schema to the LLM but
     # routes through a server-aware handler.
-    from .cowork_tools import build_cowork_publish_tool
+    from .cowork_tools import (
+        build_cowork_publish_tool,
+        build_cowork_request_credentials_tool,
+        build_cowork_fetch_submission_tool,
+        build_cowork_update_form_tool,
+    )
     PUBLISH_TOOL = build_cowork_publish_tool()
+    REQUEST_CREDENTIALS_TOOL = build_cowork_request_credentials_tool()
+    FETCH_SUBMISSION_TOOL = build_cowork_fetch_submission_tool()
+    UPDATE_FORM_TOOL = build_cowork_update_form_tool()
 
     try:
         from anton.core.datasources.data_vault import LocalDataVault
@@ -748,7 +756,13 @@ async def _build_chat_session(
         history_store=history_store,
         session_id=conversation_id,
         proactive_dashboards=settings.proactive_dashboards,
-        tools=[CONNECT_DATASOURCE_TOOL, PUBLISH_TOOL],
+        tools=[
+            CONNECT_DATASOURCE_TOOL,
+            PUBLISH_TOOL,
+            REQUEST_CREDENTIALS_TOOL,
+            FETCH_SUBMISSION_TOOL,
+            UPDATE_FORM_TOOL,
+        ],
     )
     return ChatSession(config)
 

@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import Ico from './components/Icons';
+import { pickConnectWelcome } from './lib/connectWelcomes';
 // OnboardingShell removed — antontron's renderer handles terms/install/
 // provider setup. The cowork app is mounted by CoworkApp.tsx only after
 // those gates pass, so AppCore renders unconditionally here.
@@ -18,6 +19,7 @@ import UtilitiesView from './views/UtilitiesView';
 import SearchModal from './components/SearchModal';
 import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
          createProject, updateSettings, streamNewSession, streamMessage,
+         streamDataVaultSubmission,
          uploadAttachments, createSnippetAttachment, createUrlAttachment, fetchProjectFiles,
          attachProjectFile, deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
@@ -705,6 +707,38 @@ function AppCore() {
     setComposerAttachments([]);
     setRoute('home');
   };
+
+  // "+ Connect" entry — opens a brand-new task whose first message
+  // is a synthesized assistant greeting (random pick from a small
+  // bank). The user replies to that, kicking off the normal
+  // handleSendInTask → request_credentials flow on the server. The
+  // greeting is a client-only display seed; on conversation reload
+  // it won't reappear (anton's history starts at the first real
+  // user input), but the form panel + saved connection survive.
+  const handleStartConnectChat = () => {
+    const tempId = 'tmp-connect-' + Date.now();
+    const welcome = pickConnectWelcome();
+    setTasks((prev) => [{
+      id: tempId,
+      title: 'New connection',
+      subtitle: 'just now',
+      status: 'idle',
+      messages: [{
+        role: 'assistant',
+        content: welcome,
+        // Marker so future code can distinguish synthesized greetings
+        // from real assistant turns if needed (e.g. skip persisting).
+        _client_only: true,
+      }],
+      projectName: selectedProject?.name || 'general',
+      projectPath: selectedProject?.path || null,
+      model: selectedModel?.id || null,
+      attachments: [],
+    }, ...prev]);
+    setActiveTaskId(tempId);
+    setComposerAttachments([]);
+    setRoute('task');
+  };
   // Keep the ref synced so the Cmd/Ctrl+N keydown handler always calls
   // the latest newTask closure (which captures fresh setRoute/setTasks).
   useEffect(() => { newTaskRef.current = newTask; });
@@ -1081,6 +1115,92 @@ function AppCore() {
           return { ...t, status: 'error', messages: [...msgs, { role: 'error', content: message || 'Anton could not complete this task.', code: event?.code }] };
         }));
         fetchHealth().then((h) => setHealth(h));
+      },
+    });
+  };
+
+  // Submit a data-vault form. Drives a fresh assistant turn from the
+  // cowork agent endpoint instead of the LLM — same SSE stream shape,
+  // same React state machine. The user sees a normal Anton bubble
+  // appear after they submit; under the hood the LLM never read the
+  // values. Mirrors handleSendInTask but wired to streamDataVaultSubmission.
+  const handleSubmitDataVaultForm = ({ formId, formSpec, values, skipped }) => {
+    if (!currentTask) return;
+    const id = currentTask.id;
+
+    setTasks((prev) => prev.map((t) =>
+      t.id === id
+        ? { ...t, status: 'active' }
+        : t,
+    ));
+
+    let assistantContent = '';
+    let streamState = initialStreamState();
+
+    const flushStreaming = () => {
+      setTasks((prev) => prev.map((t) => {
+        if (t.id !== id) return t;
+        const msgs = removeThinkingPlaceholder(stripStreaming(t.messages));
+        return { ...t, messages: [...msgs, {
+          role: '_streaming',
+          content: streamState.bodyText || assistantContent,
+          steps: streamState.steps,
+          startedAt: streamState.startedAt,
+          streamStatus: streamState.status,
+        }] };
+      }));
+    };
+
+    activeStreamCtrlRef.current = streamDataVaultSubmission({
+      formId,
+      conversationId: id,
+      formSpec,
+      values,
+      skipped,
+      onEvent(ev) {
+        streamState = reduceStream(streamState, ev);
+        flushSync(() => flushStreaming());
+      },
+      onChunk(chunk) {
+        assistantContent += chunk;
+      },
+      onDone() {
+        activeStreamCtrlRef.current = null;
+        const finalContent = streamState.bodyText || assistantContent;
+        const finalSteps = streamState.steps;
+        const finalStartedAt = streamState.startedAt;
+        let assistantTurnIndex = 0;
+        setTasks((prev) => prev.map((t) => {
+          if (t.id !== id) return t;
+          const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
+          assistantTurnIndex = msgs.filter((m) => m.role === 'assistant').length;
+          return finalContent
+            ? { ...t, status: 'idle', messages: [...msgs, {
+                role: 'assistant',
+                content: finalContent,
+                steps: finalSteps,
+                startedAt: finalStartedAt,
+              }] }
+            : { ...t, status: 'idle', messages: msgs };
+        }));
+        if (finalContent) {
+          persistTurnState(id, assistantTurnIndex, finalSteps, finalStartedAt);
+        }
+        // A successful save changes the connectors list — refetch
+        // so the Connect Apps and Data page reflects it immediately.
+        fetchDatasources()
+          .then((data) => setConnectors(Array.isArray(data?.connections) ? data.connections : []))
+          .catch(() => {});
+      },
+      onError(message) {
+        setTasks((prev) => prev.map((t) => {
+          if (t.id !== id) return t;
+          const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
+          return { ...t, status: 'error', messages: [...msgs, {
+            role: 'error',
+            content: message || 'Form submission failed.',
+          }] };
+        }));
       },
     });
   };
@@ -1491,6 +1611,7 @@ function AppCore() {
             onDeleteTurn={(turnIdx) => handleDeleteTurnRequest(currentTask?.id, turnIdx)}
             onMoveTaskToProject={handleMoveTaskToProject}
             onStop={handleStopStream}
+            onSubmitDataVaultForm={handleSubmitDataVaultForm}
             onOpenProject={(p) => {
               if (p) setSelectedProject(p);
               setRoute('projects');
@@ -1556,6 +1677,7 @@ function AppCore() {
           <CustomizeView
             connectors={connectors}
             onOpenSettings={() => setRoute('settings')}
+            onConnectNew={handleStartConnectChat}
           />
         )}
 

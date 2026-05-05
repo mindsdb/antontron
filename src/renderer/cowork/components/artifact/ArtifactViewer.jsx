@@ -4,7 +4,7 @@
 // when the artifact has a live URL, plus Publish / Unpublish / Open
 // in OS actions.
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Ico from '../Icons';
 import { mountArtifactPreview, publishArtifact, unpublishArtifact } from '../../api';
 import { copyText } from '../../lib/clipboard';
@@ -77,7 +77,88 @@ function PathRow({ label, value, accent = false }) {
   );
 }
 
-export function ArtifactViewer({ open, artifact, onClose, onChange }) {
+// Small popover anchored to the kebab. Lives inside the modal so its
+// fixed-positioned chrome stacks correctly against the modal backdrop.
+function ActionsPopover({ open, anchorRect, onClose, items }) {
+  const ref = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e) => {
+      if (!ref.current?.contains(e.target)) onClose?.();
+    };
+    const onKey = (e) => { if (e.key === 'Escape') { e.stopPropagation(); onClose?.(); } };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey, true);
+    };
+  }, [open, onClose]);
+
+  if (!open || !anchorRect) return null;
+
+  const MENU_W = 200;
+  const VW = typeof window !== 'undefined' ? window.innerWidth : 1200;
+  const left = Math.min(VW - MENU_W - 8, Math.max(8, anchorRect.right - MENU_W));
+  const top = anchorRect.bottom + 6;
+
+  return (
+    <div
+      ref={ref}
+      onMouseDown={(e) => e.stopPropagation()}
+      style={{
+        position: 'fixed', top, left, zIndex: 90, width: MENU_W,
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 10,
+        boxShadow: '0 12px 32px rgba(15,16,17,0.28)',
+        padding: '4px 0',
+      }}
+    >
+      {items.map((it, i) =>
+        it.divider ? (
+          <div key={`d-${i}`} style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
+        ) : (
+          <button
+            key={it.label}
+            type="button"
+            disabled={it.disabled}
+            onClick={(e) => { e.stopPropagation(); it.onClick?.(); onClose?.(); }}
+            style={{
+              width: 'calc(100% - 8px)', margin: '0 4px',
+              display: 'flex', alignItems: 'center', gap: 10,
+              padding: '8px 10px', borderRadius: 5,
+              background: 'transparent', border: 0,
+              fontFamily: FONT_BODY, fontSize: 13,
+              color: it.danger ? 'var(--danger)' : 'var(--ink-2)',
+              textAlign: 'left',
+              cursor: it.disabled ? 'not-allowed' : 'pointer',
+              opacity: it.disabled ? 0.55 : 1,
+            }}
+            onMouseOver={(e) => {
+              if (it.disabled) return;
+              e.currentTarget.style.background = it.danger
+                ? 'color-mix(in srgb, var(--danger) 12%, transparent)'
+                : 'var(--surface-2)';
+            }}
+            onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            {it.icon && (
+              <span style={{
+                display: 'inline-flex', flexShrink: 0,
+                color: it.danger ? 'var(--danger)' : 'var(--ink-3)',
+              }}>{it.icon}</span>
+            )}
+            <span style={{ flex: 1 }}>{it.label}</span>
+          </button>
+        ),
+      )}
+    </div>
+  );
+}
+
+export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) {
   // Mounted preview URL — iframe loads this with `src=` so relative
   // `<script>` / `<link>` refs in the HTML resolve against a real URL.
   // (srcdoc has no base URL → relative refs 404.)
@@ -86,6 +167,8 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
   const [err, setErr] = useState('');
   const [publishedUrl, setPublishedUrl] = useState(artifact?.publishedUrl || '');
   const [busy, setBusy] = useState(false);
+  const [menuRect, setMenuRect] = useState(null);
+  const kebabRef = useRef(null);
 
   // Refresh state when the artifact changes (e.g. user opens a
   // different one without closing first).
@@ -151,6 +234,26 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
   };
   const onOpenOS = async () => {
     try { await window.antontron?.openPath?.(artifact.path); } catch {}
+  };
+  const onTrash = async () => {
+    if (busy) return;
+    // No confirmation modal — `shell.trashItem` is recoverable from the
+    // user's Trash, so a click is reversible. The viewer closes once
+    // the file is gone so we don't leave a dead preview on screen.
+    setBusy(true);
+    setErr('');
+    try {
+      const result = await window.antontron?.trashItem?.(artifact.path);
+      if (result && result.ok === false) {
+        throw new Error(result.reason || 'Could not move to Trash.');
+      }
+      onDelete?.(artifact.path);
+      onClose?.();
+    } catch (e) {
+      setErr(e?.message || 'Delete failed');
+    } finally {
+      setBusy(false);
+    }
   };
   const onOpenPublished = async () => {
     if (!publishedUrl) return;
@@ -268,18 +371,27 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
             </button>
           )}
           <button
+            ref={kebabRef}
             type="button"
-            onClick={onOpenOS}
-            title="Open in OS"
+            aria-label="More actions"
+            title="More actions"
+            onClick={(e) => {
+              e.stopPropagation();
+              setMenuRect(menuRect ? null : kebabRef.current?.getBoundingClientRect() || null);
+            }}
             style={{
               cursor: 'pointer',
-              background: 'transparent', border: '1px solid var(--line)',
+              background: menuRect ? 'var(--surface-2)' : 'transparent',
+              border: '1px solid var(--line)',
               color: 'var(--ink-2)',
-              padding: '6px 12px', borderRadius: 8,
-              fontSize: 12.5, fontWeight: 500,
+              width: 32, height: 30, borderRadius: 8,
+              display: 'inline-grid', placeItems: 'center',
+              transition: 'background .12s ease, color .12s ease',
             }}
+            onMouseOver={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; e.currentTarget.style.color = 'var(--ink)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = menuRect ? 'var(--surface-2)' : 'transparent'; e.currentTarget.style.color = 'var(--ink-2)'; }}
           >
-            Open in OS
+            {Ico.moreVert(15)}
           </button>
           <button
             type="button"
@@ -295,6 +407,33 @@ export function ArtifactViewer({ open, artifact, onClose, onChange }) {
             }}
           >×</button>
         </div>
+
+        <ActionsPopover
+          open={!!menuRect}
+          anchorRect={menuRect}
+          onClose={() => setMenuRect(null)}
+          items={[
+            {
+              label: 'Open in OS',
+              icon: Ico.externalLink(13),
+              onClick: onOpenOS,
+            },
+            {
+              label: publishedUrl ? 'Unpublish' : 'Publish',
+              icon: Ico.upload(13),
+              disabled: busy,
+              onClick: publishedUrl ? onUnpublish : onPublish,
+            },
+            { divider: true },
+            {
+              label: 'Delete',
+              icon: Ico.trash(13),
+              danger: true,
+              disabled: busy,
+              onClick: onTrash,
+            },
+          ]}
+        />
 
         {/* Body — iframe with srcdoc, sandbox just enough to render
             ECharts/Chart.js etc. but not touch the parent app. */}
