@@ -1763,7 +1763,12 @@ body.gf-theme-dark  { background: #0a1426; }
   left: 2px;
   font-size: 13px;
   font-weight: 700;
-  color: var(--bg-primary);
+  color: #0E0F10;
+}
+
+body[data-theme="dark"] .terms-checkbox:checked::after,
+body.gf-theme-dark .terms-checkbox:checked::after {
+  color: #F2F6FF;
 }
 
 .terms-checkbox-text {
