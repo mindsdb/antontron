@@ -14,7 +14,6 @@ import ScheduledView from './views/ScheduledView';
 import ArtifactsView from './views/ArtifactsView';
 import DispatchView from './views/DispatchView';
 import CustomizeView from './views/CustomizeView';
-import ConnectAppsView from './views/ConnectAppsView';
 import SettingsView from './views/SettingsView';
 import UtilitiesView from './views/UtilitiesView';
 import SearchModal from './components/SearchModal';
@@ -1673,10 +1672,6 @@ function AppCore() {
 
         {route === 'dispatch' && (
           <DispatchView onSetUpLater={() => setRoute('home')} />
-        )}
-
-        {route === 'connect-apps' && (
-          <ConnectAppsView />
         )}
 
         {route === 'customize' && (

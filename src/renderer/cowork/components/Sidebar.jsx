@@ -280,7 +280,6 @@ export default function Sidebar({
               work. The page now lists connected apps + datasources in
               a Projects-style grid. */}
           <NavItem icon={Ico.link(15)}    label="Connect Apps and Data" onClick={() => onNavigate('customize')}    active={activeRoute === 'customize'} />
-          <NavItem icon={Ico.grid(15)}   label="Connect Apps"          onClick={() => onNavigate('connect-apps')} active={activeRoute === 'connect-apps'} />
         </div>
 
         {/* Anton group — visually grouped panel for the brain-style nav */}

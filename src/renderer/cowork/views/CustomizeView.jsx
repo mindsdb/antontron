@@ -1,61 +1,179 @@
-// Connect Apps and Data — the page that lists everything the user has
-// hooked Anton up with. Mirrors the Projects page layout (header +
-// filter row + grid of cards + empty state). The "+ Connect" CTA
-// routes to the existing connect-data workflow at route='connect'.
-//
-// Replaces the previous directory-of-planned-connectors page; only
-// real, configured connections show up here. Empty state nudges the
-// user to wire something up.
+// Connect Apps and Data — lists OAuth app tiles at the top, followed by
+// a grid of every connected datasource. The "+ Connect" tile opens a chat
+// with Anton to connect any data source via the credential workflow.
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import Ico from '../components/Icons';
-import { deleteDatasource, fetchDatasources } from '../api';
-import ConnectWorkflowView from './ConnectWorkflowView';
+import {
+  deleteDatasource, fetchDatasources,
+  fetchIntegrations, startGoogleDriveAuth, disconnectGoogleDrive,
+} from '../api';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
 const FONT_MONO    = "var(--font-mono)";
 
-// ─── Header ──────────────────────────────────────────────────────────────
+const POLL_INTERVAL_MS = 3000;
+const POLL_TIMEOUT_MS  = 2 * 60 * 1000;
 
-function ConnectButton({ onClick, large = false }) {
+// ─── Google Drive logo ───────────────────────────────────────────────────
+
+function GoogleDriveLogo({ size = 36 }) {
   return (
-    <button
-      type="button"
-      className="btn-primary"
-      onClick={onClick}
-      style={large ? { fontSize: 13.5 } : undefined}
-    >
-      {Ico.plus(14)} Connect
-    </button>
+    <svg width={size} height={size} viewBox="0 0 87.3 78" xmlns="http://www.w3.org/2000/svg">
+      <path d="m6.6 66.85 3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8h-27.5c0 1.55.4 3.1 1.2 4.5z" fill="#0066da"/>
+      <path d="m43.65 25-13.75-23.8c-1.35.8-2.5 1.9-3.3 3.3l-25.4 44a9.06 9.06 0 0 0 -1.2 4.5h27.5z" fill="#00ac47"/>
+      <path d="m73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5h-27.502l5.852 11.5z" fill="#ea4335"/>
+      <path d="m43.65 25 13.75-23.8c-1.35-.8-2.9-1.2-4.5-1.2h-18.5c-1.6 0-3.15.45-4.5 1.2z" fill="#00832d"/>
+      <path d="m59.8 53h-32.3l-13.75 23.8c1.35.8 2.9 1.2 4.5 1.2h50.8c1.6 0 3.15-.45 4.5-1.2z" fill="#2684fc"/>
+      <path d="m73.4 26.5-12.7-22c-.8-1.4-1.95-2.5-3.3-3.3l-13.75 23.8 16.15 27h27.45c0-1.55-.4-3.1-1.2-4.5z" fill="#ffba00"/>
+    </svg>
   );
 }
 
-function PageHeader({ onConnectNew }) {
+// ─── App tiles ───────────────────────────────────────────────────────────
+
+function AppTile({ title, logo, status, connecting, onConnect, onDisconnect }) {
+  const isConnected = status === 'connected';
   return (
     <div style={{
-      padding: '28px 32px 0',
-      display: 'flex', flexDirection: 'column', gap: 18,
+      display: 'flex',
+      alignItems: 'center',
+      gap: 16,
+      padding: '18px 20px',
+      borderRadius: 10,
+      background: 'var(--surface)',
+      border: '1px solid var(--line)',
+    }}>
+      <div style={{ flexShrink: 0 }}>{logo}</div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)', marginBottom: 3 }}>
+          {title}
+        </div>
+      </div>
+      <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+        {isConnected ? (
+          <>
+            <span style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5,
+              fontSize: 12, fontWeight: 600, color: 'var(--success)',
+              background: 'rgba(34,160,94,0.1)',
+              border: '1px solid rgba(34,160,94,0.25)',
+              borderRadius: 20, padding: '4px 10px',
+            }}>
+              {Ico.check(12)} Connected
+            </span>
+            <button
+              className="btn"
+              onClick={onDisconnect}
+              style={{ fontSize: 12, padding: '4px 12px' }}
+            >
+              Disconnect
+            </button>
+          </>
+        ) : (
+          <button
+            className="btn btn-primary"
+            onClick={onConnect}
+            disabled={connecting}
+            style={{ fontSize: 13, padding: '6px 16px', opacity: connecting ? 0.7 : 1 }}
+          >
+            {connecting ? 'Connecting…' : 'Connect'}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ConnectWithAntonTile({ onClick }) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 16,
+      padding: '18px 20px',
+      borderRadius: 10,
+      background: 'var(--surface)',
+      border: '1px solid var(--line)',
     }}>
       <div style={{
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        gap: 24, minWidth: 0,
+        flexShrink: 0,
+        width: 40, height: 40,
+        borderRadius: 10,
+        background: 'var(--surface-2)',
+        border: '1px solid var(--line)',
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        color: 'var(--ink-3)',
       }}>
-        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <h1 style={{
-            margin: 0,
-            fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600,
-            letterSpacing: '-0.005em', color: 'var(--ink)',
-          }}>Connect Apps and Data</h1>
-          <p style={{
-            margin: 0, fontFamily: FONT_BODY, fontSize: 13.5,
-            color: 'var(--ink-3)', lineHeight: 1.5,
-          }}>
-            Connect Anton to the tools you already use, and automate work there.
-          </p>
-        </div>
-        <ConnectButton onClick={onConnectNew} />
+        {Ico.database(20)}
       </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontWeight: 600, fontSize: 14, color: 'var(--ink)' }}>
+          Connect Data Source Interactively
+        </div>
+      </div>
+      <div style={{ flexShrink: 0 }}>
+        <button
+          className="btn btn-primary"
+          onClick={onClick}
+          style={{ fontSize: 13, padding: '6px 16px' }}
+        >
+          Connect
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── Collapsible section ─────────────────────────────────────────────────
+
+function CollapsibleSection({ title, defaultOpen = true, children }) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 7,
+          width: '100%', background: 'transparent', border: 0,
+          padding: '0 0 12px 0', cursor: 'pointer',
+          fontFamily: FONT_DISPLAY, fontSize: 15, fontWeight: 600,
+          color: 'var(--ink)', textAlign: 'left',
+        }}
+      >
+        <span style={{
+          display: 'inline-flex', color: 'var(--ink-3)',
+          transform: open ? 'rotate(0deg)' : 'rotate(-90deg)',
+          transition: 'transform 180ms ease',
+        }}>
+          {Ico.chevDown(13)}
+        </span>
+        {title}
+      </button>
+      {open && children}
+    </div>
+  );
+}
+
+// ─── Header ──────────────────────────────────────────────────────────────
+
+function PageHeader() {
+  return (
+    <div style={{ padding: '28px 32px 0' }}>
+      <h1 style={{
+        margin: 0,
+        fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600,
+        letterSpacing: '-0.005em', color: 'var(--ink)',
+        marginBottom: 4,
+      }}>Connect Apps and Data</h1>
+      <p style={{
+        margin: 0, fontFamily: FONT_BODY, fontSize: 13.5,
+        color: 'var(--ink-3)', lineHeight: 1.5,
+      }}>
+        Connect Anton to the tools you already use, and automate work there.
+      </p>
     </div>
   );
 }
@@ -87,14 +205,6 @@ function SearchInput({ value, onChange, inputRef }) {
           color: 'var(--ink-2)',
         }}
       />
-      <span style={{
-        flexShrink: 0,
-        padding: '1px 5px', borderRadius: 3,
-        background: 'var(--surface-3)',
-        border: '1px solid var(--line-2)',
-        fontFamily: FONT_MONO, fontSize: 10,
-        color: 'var(--ink-4)',
-      }}>⌘K</span>
     </div>
   );
 }
@@ -184,14 +294,10 @@ function FilterRow({ search, onSearchChange, sort, onSortChange, total, filtered
     ? `Showing ${filtered} of ${total}`
     : `${total} ${total === 1 ? 'connection' : 'connections'}`;
   return (
-    <div style={{
-      padding: '0 32px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
+    <div style={{ padding: '0 32px', display: 'flex', flexDirection: 'column', gap: 6 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
         <SearchInput value={search} onChange={onSearchChange} inputRef={searchRef} />
         <SortPill value={sort} onChange={onSortChange} />
-        <span style={{ flex: 1 }} />
       </div>
       <div style={{
         fontFamily: FONT_MONO, fontSize: 11,
@@ -233,14 +339,10 @@ function ConnectionCard({ connection, onDelete }) {
         minHeight: 120,
         display: 'flex', flexDirection: 'column', gap: 10,
         transition: 'background .15s ease, border-color .15s ease',
-        position: 'relative',
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-        <span style={{
-          display: 'inline-flex', flexShrink: 0,
-          color: 'var(--ink-3)',
-        }}>
+        <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--ink-3)' }}>
           {Ico.database(14)}
         </span>
         <span style={{
@@ -296,81 +398,50 @@ function ConnectionCard({ connection, onDelete }) {
   );
 }
 
-// ─── Empty state ─────────────────────────────────────────────────────────
-
-function EmptyState({ onConnectNew }) {
-  return (
-    <div style={{
-      flex: 1, minHeight: 360,
-      display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-      gap: 14, padding: '40px 24px',
-    }}>
-      <span style={{ display: 'inline-flex', color: 'var(--ink-4)' }}>{Ico.link(32)}</span>
-      <div style={{ fontFamily: FONT_DISPLAY, fontSize: 18, fontWeight: 600, color: 'var(--ink)' }}>
-        No apps connected yet
-      </div>
-      <div style={{
-        fontFamily: FONT_BODY, fontSize: 13.5, color: 'var(--ink-3)',
-        maxWidth: 380, textAlign: 'center', lineHeight: 1.5,
-      }}>
-        Connectors shape how Anton works with you. Hook up the apps and
-        databases you already use, and Anton will automate work there.
-      </div>
-      <ConnectButton onClick={onConnectNew} large />
-    </div>
-  );
-}
-
 // ─── Composed view ───────────────────────────────────────────────────────
 
 export default function CustomizeView({ connectors: initialConnectors = [], onConnectNew }) {
-  const [list, setList] = useState(Array.isArray(initialConnectors) ? initialConnectors : []);
-  const [search, setSearch] = useState('');
-  const [sort, setSort] = useState('recent');
+  const [list, setList]               = useState(Array.isArray(initialConnectors) ? initialConnectors : []);
+  const [search, setSearch]           = useState('');
+  const [sort, setSort]               = useState('recent');
+  const [integrations, setIntegrations] = useState([]);
+  const [connectingId, setConnectingId] = useState(null);
+  const [oauthError, setOauthError]   = useState(null);
   const searchRef = useRef(null);
-  // Sub-view: when true, the connect-data workflow renders in place
-  // (the apps directory + per-app credential form). Hitting "Back"
-  // from inside the workflow returns to this listing. Local-only —
-  // the App-level route stays at 'customize' so the sidebar's active
-  // state is correct throughout.
-  const [showWorkflow, setShowWorkflow] = useState(false);
+  const pollRef   = useRef(null);
 
-  // Fetch fresh on mount so OAuth connections made via "Connect Apps"
-  // tab are visible without requiring a full app reload.
+  const loadDatasources = async () => {
+    try {
+      const data = await fetchDatasources();
+      const items = Array.isArray(data?.connections) ? data.connections : [];
+      setList(items);
+      return items;
+    } catch {
+      return list;
+    }
+  };
+
+  const loadIntegrations = async () => {
+    try {
+      const data  = await fetchIntegrations();
+      const items = data?.items || [];
+      setIntegrations(items);
+      return items;
+    } catch {
+      return integrations;
+    }
+  };
+
   useEffect(() => {
-    fetchDatasources()
-      .then((data) => setList(Array.isArray(data?.connections) ? data.connections : []))
-      .catch(() => setList(Array.isArray(initialConnectors) ? initialConnectors : []));
+    loadDatasources();
+    loadIntegrations();
+    return () => clearInterval(pollRef.current);
   }, []);
 
-  // Keep local mirror in sync with prop changes — refresh after add /
-  // remove flips the App-level state.
+  // Keep local mirror in sync with prop changes.
   useEffect(() => {
     setList(Array.isArray(initialConnectors) ? initialConnectors : []);
   }, [initialConnectors]);
-
-  const handleConnectNew = () => {
-    // Delegate to the parent when one is provided — that's the
-    // current path: App.jsx opens a fresh chat with a synthesized
-    // greeting and routes the user there. Anton drives the rest
-    // via request_credentials. Falls back to the in-page apps
-    // directory only when no handler is wired (older callers).
-    if (onConnectNew) {
-      onConnectNew();
-      return;
-    }
-    setShowWorkflow(true);
-  };
-
-  const handleWorkflowClose = async () => {
-    setShowWorkflow(false);
-    // Returning from the workflow likely added/removed connections —
-    // refetch so the listing reflects whatever changed.
-    try {
-      const fresh = await fetchDatasources();
-      setList(Array.isArray(fresh?.connections) ? fresh.connections : []);
-    } catch {}
-  };
 
   // ⌘K focuses the search input.
   useEffect(() => {
@@ -384,17 +455,68 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
     return () => window.removeEventListener('keydown', onKey);
   }, []);
 
+  const handleConnect = async (integrationId, startAuth) => {
+    setOauthError(null);
+    try {
+      const result = await startAuth();
+      if (!result?.authUrl) {
+        setOauthError('Could not start auth. Is the server running?');
+        return;
+      }
+      window.open(result.authUrl, '_blank');
+      const startedAt = result.startedAt || '';
+      setConnectingId(integrationId);
+
+      const deadline = Date.now() + POLL_TIMEOUT_MS;
+      pollRef.current = setInterval(async () => {
+        if (Date.now() > deadline) {
+          clearInterval(pollRef.current);
+          setConnectingId(null);
+          return;
+        }
+        const items = await loadIntegrations();
+        const item  = items.find((i) => i.id === integrationId);
+        const lastSuccessAt = item?.oauth?.lastSuccessAt || '';
+        if (lastSuccessAt && (!startedAt || lastSuccessAt >= startedAt)) {
+          clearInterval(pollRef.current);
+          setConnectingId(null);
+          loadDatasources();
+        }
+      }, POLL_INTERVAL_MS);
+    } catch (e) {
+      setOauthError(e?.message || 'Something went wrong.');
+      setConnectingId(null);
+    }
+  };
+
+  const handleDisconnect = async (integrationId, disconnectFn) => {
+    clearInterval(pollRef.current);
+    setConnectingId(null);
+    setOauthError(null);
+    setIntegrations((prev) =>
+      prev.map((i) => i.id === integrationId
+        ? { ...i, status: 'available', connections: [], connectionCount: 0 }
+        : i)
+    );
+    try {
+      await disconnectFn();
+      await Promise.all([loadIntegrations(), loadDatasources()]);
+    } catch (e) {
+      setOauthError(e?.message || 'Disconnect failed.');
+      await Promise.all([loadIntegrations(), loadDatasources()]);
+    }
+  };
+
   const handleDelete = async (connection) => {
     try {
       await deleteDatasource(connection.engine, connection.name);
-      const fresh = await fetchDatasources();
-      setList(Array.isArray(fresh?.connections) ? fresh.connections : []);
+      await loadDatasources();
     } catch (e) {
-      // eslint-disable-next-line no-console
-      console.error('[connectors] delete failed', e);
       alert(`Could not disconnect: ${e?.message || e}`);
     }
   };
+
+  const gdrive = integrations.find((i) => i.id === 'google_drive');
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -422,52 +544,82 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
 
   const total = list.length;
 
-  // While the workflow is open, hand the whole content area over to it.
-  // The workflow has its own header with a "Back" button that calls
-  // handleWorkflowClose, which refetches and pops back to the listing.
-  if (showWorkflow) {
-    return <ConnectWorkflowView onClose={handleWorkflowClose} />;
-  }
-
   return (
     <div className="scroll-clean" style={{
       flex: 1, overflowY: 'auto',
       background: 'var(--bg)',
       display: 'flex', flexDirection: 'column',
     }}>
-      <PageHeader onConnectNew={handleConnectNew} />
+      <PageHeader />
 
-      <div style={{ height: 18 }} />
+      <div style={{ padding: '24px 32px 60px', display: 'flex', flexDirection: 'column', gap: 28 }}>
 
-      {total > 0 && (
-        <FilterRow
-          search={search}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={setSort}
-          total={total}
-          filtered={visible.length}
-          searchRef={searchRef}
-        />
-      )}
-
-      {total === 0 ? (
-        <EmptyState onConnectNew={handleConnectNew} />
-      ) : (
-        <div style={{
-          padding: '6px 32px 60px',
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14,
-          marginTop: 18,
-        }}>
-          {visible.map((c) => (
-            <ConnectionCard
-              key={`${c.engine}-${c.name}`}
-              connection={c}
-              onDelete={handleDelete}
+        {/* Section 1: Connect Data Sources */}
+        <CollapsibleSection title="Connect Data Sources">
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 10 }}>
+            {oauthError && (
+              <div style={{
+                gridColumn: '1 / -1',
+                padding: '10px 14px', borderRadius: 8,
+                background: 'rgba(255,82,82,0.1)',
+                border: '1px solid rgba(255,82,82,0.25)',
+                color: 'var(--danger)', fontSize: 13,
+              }}>
+                {oauthError}
+              </div>
+            )}
+            <AppTile
+              title="Google Drive"
+              logo={<GoogleDriveLogo size={40} />}
+              status={gdrive?.status}
+              connecting={connectingId === 'google_drive'}
+              onConnect={() => handleConnect('google_drive', startGoogleDriveAuth)}
+              onDisconnect={() => handleDisconnect('google_drive', disconnectGoogleDrive)}
             />
-          ))}
-        </div>
-      )}
+            <ConnectWithAntonTile onClick={onConnectNew} />
+          </div>
+        </CollapsibleSection>
+
+        {/* Section 2: Connected Data Sources */}
+        <CollapsibleSection title="Connected Data Sources">
+          {total > 0 ? (
+            <>
+              <FilterRow
+                search={search}
+                onSearchChange={setSearch}
+                sort={sort}
+                onSortChange={setSort}
+                total={total}
+                filtered={visible.length}
+                searchRef={searchRef}
+              />
+              <div style={{
+                marginTop: 14,
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                gap: 14,
+              }}>
+                {visible.map((c) => (
+                  <ConnectionCard
+                    key={`${c.engine}-${c.name}`}
+                    connection={c}
+                    onDelete={handleDelete}
+                  />
+                ))}
+              </div>
+            </>
+          ) : (
+            <div style={{
+              padding: '20px 0',
+              fontFamily: FONT_BODY, fontSize: 13.5,
+              color: 'var(--ink-4)',
+            }}>
+              No datasources connected yet.
+            </div>
+          )}
+        </CollapsibleSection>
+
+      </div>
     </div>
   );
 }
