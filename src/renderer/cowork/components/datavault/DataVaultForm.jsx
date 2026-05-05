@@ -192,12 +192,28 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
           </div>
         </div>
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-          {(spec.actions || [{ id: 'dismiss', label: 'Close', kind: 'cancel' }]).map((a) => (
+          {/* On success we always offer two routes:
+                 • secondary "Close" — just dismiss the panel
+                 • primary "View connectors" — jump to the Connect
+                   Apps and Data page where the user can rename,
+                   remove, or attach the new connection. The host
+                   wires `view_connectors` to its navigate handler.
+              The spec's own `actions` list overrides this default
+              when present, so the probe can customise the wording
+              if it wants (e.g. "Open dashboard"). */}
+          {(spec.actions && spec.actions.length > 0
+            ? spec.actions
+            : [
+                { id: 'dismiss', label: 'Close', kind: 'cancel' },
+                { id: 'view_connectors', label: 'View connectors →', kind: 'primary' },
+              ]
+          ).map((a) => (
             <button
               key={a.id}
               type="button"
               onClick={() => onAction?.({ id: a.id, kind: a.kind || 'cancel' })}
-              style={{
+              className={a.kind === 'primary' ? 'btn-primary' : undefined}
+              style={a.kind === 'primary' ? undefined : {
                 background: 'transparent',
                 border: '1px solid var(--line)',
                 color: 'var(--ink-2)',
@@ -270,34 +286,12 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
         </div>
       </div>
 
-      {/* Live probe strip — anton patches `_is_probing: true` and a
-          short `status_text` between scratchpad steps so the user sees
-          the connection attempt advance in the panel. Fields collapse
-          out of the way; if the probe ends in failure anton clears
-          `_is_probing` and sets `form_error`, restoring the input grid. */}
-      {spec._is_probing && (
-        <div style={{
-          display: 'flex', alignItems: 'center', gap: 10,
-          padding: '10px 12px', borderRadius: 8,
-          background: 'color-mix(in srgb, var(--accent) 10%, var(--surface))',
-          border: '1px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-          color: 'var(--ink-2)', fontSize: 12.5,
-        }}>
-          <span
-            aria-hidden
-            style={{
-              width: 12, height: 12, flex: '0 0 12px',
-              borderRadius: '50%',
-              border: '2px solid color-mix(in srgb, var(--accent) 30%, transparent)',
-              borderTopColor: 'var(--accent)',
-              animation: 'dvf-spin 720ms linear infinite',
-            }}
-          />
-          <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {spec.status_text || 'Working…'}
-          </span>
-        </div>
-      )}
+      {/* Note: live status (`status_text`) is rendered as a
+          dismissible TOAST by DataVaultFormPanel — sitting outside
+          the form body so per-step status updates don't displace
+          the fields. The form itself just disables inputs while
+          probing (`busy` is set by the host) and otherwise stays
+          structurally identical to its idle state. */}
 
       {/* Form-level banners */}
       {spec.form_error && (
@@ -317,10 +311,10 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
         }}>{spec.form_warning}</div>
       )}
 
-      {/* Fields — collapsed while a live probe is in flight; restored
-          if anton ends the probe with a failure (so the user can fix
-          and resubmit). */}
-      {!spec._is_probing && (
+      {/* Fields — always rendered. While a probe is in flight the
+          host disables inputs via `busy`, so the layout stays put
+          and the user can still see what they entered (without it
+          jumping out of view when the status row appears). */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {(spec.fields || []).map((f) => {
           const isSkipped = skipped.has(f.name);
@@ -415,11 +409,8 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
           );
         })}
       </div>
-      )}
 
-      {/* Actions — also hidden during probe (no point in re-submitting
-          while a probe is mid-flight). */}
-      {!spec._is_probing && (
+      {/* Actions — always rendered too. Disabled while busy. */}
       <div style={{
         display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap',
         paddingTop: 4,
@@ -455,7 +446,6 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
           </button>
         ))}
       </div>
-      )}
     </div>
   );
 }

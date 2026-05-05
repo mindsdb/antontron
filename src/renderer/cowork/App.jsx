@@ -1612,6 +1612,7 @@ function AppCore() {
             onMoveTaskToProject={handleMoveTaskToProject}
             onStop={handleStopStream}
             onSubmitDataVaultForm={handleSubmitDataVaultForm}
+            onNavigateToConnectors={() => navigate('connect')}
             onOpenProject={(p) => {
               if (p) setSelectedProject(p);
               setRoute('projects');

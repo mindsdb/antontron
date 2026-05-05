@@ -392,6 +392,10 @@ async def process_submission_stream(
         # Brief verdict line for the chat (form panel shows the rest).
         summary = final_outcome.summary or "Connection works."
         yield _delta(f"\n\n{summary}\n")
+        # Don't include `actions` — the form widget renders a
+        # default pair on success: "Close" + "View connectors →"
+        # (the latter wired by the panel host to navigate to the
+        # Connect Apps and Data page).
         yield _patch_delta({
             "form_id": form_id,
             "title": f"Connected — {saved_slug}",
@@ -400,7 +404,6 @@ async def process_submission_stream(
             "form_error": None,
             "_is_probing": False,
             "_is_success": True,
-            "actions": [{"id": "dismiss", "label": "Close", "kind": "cancel"}],
         })
         yield _push("response.completed", {
             "type": "response.completed",

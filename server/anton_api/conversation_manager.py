@@ -31,11 +31,35 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import tempfile
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, AsyncGenerator, AsyncIterator, Optional
+
+
+_TITLE_MAX_LEN = 160
+_TITLE_WHITESPACE_RE = re.compile(r"\s+")
+
+
+def sanitize_title(value: object) -> str | None:
+    """Normalize a user-provided conversation title.
+
+    - Strips outer whitespace.
+    - Collapses internal whitespace runs (newlines, tabs, repeats) to
+      a single space, so a pasted multi-line block doesn't blow up the
+      sidebar row height.
+    - Caps at 160 chars (the UI typically truncates well before this).
+    Returns `None` if the result is empty so callers can preserve the
+    existing title rather than blanking it.
+    """
+    if not isinstance(value, str):
+        return None
+    cleaned = _TITLE_WHITESPACE_RE.sub(" ", value).strip()
+    if not cleaned:
+        return None
+    return cleaned[:_TITLE_MAX_LEN].strip()
 
 from anton_api import projects_store
 
@@ -1078,7 +1102,19 @@ def update_conversation(conversation_id: str, **patch) -> dict | None:
         meta = {}
     allowed = {"title"}
     for k, v in patch.items():
-        if k in allowed and v is not None:
+        if k not in allowed or v is None:
+            continue
+        if k == "title":
+            cleaned = sanitize_title(v)
+            # Empty-after-sanitization → preserve the existing title
+            # instead of blanking it. Callers that genuinely want a
+            # reset can pass an explicit "" via a future field; for
+            # now treat empty as a no-op so a stray rename to "  " is
+            # harmless rather than wiping the conversation label.
+            if cleaned is None:
+                continue
+            meta[k] = cleaned
+        else:
             meta[k] = v
     meta["id"] = conversation_id
     if not meta.get("project"):
