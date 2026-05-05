@@ -1,17 +1,21 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
 import Ico from '../components/Icons';
+import {
+  PageHeader,
+  FilterRow,
+  SearchInput,
+  SortPill,
+  useCollectionShortcut,
+} from '../components/collection';
 
-function PageHeader({ title, subtitle, action }) {
-  return (
-    <div className="page-header">
-      <div style={{ flex: 1 }}>
-        <h2 className="page-title">{title}</h2>
-        {subtitle && <div style={{ fontSize: 13, color: 'var(--frost-600)', marginTop: 4 }}>{subtitle}</div>}
-      </div>
-      {action}
-    </div>
-  );
-}
+// Sort options for the scheduled-tasks collection. Next-run-first
+// keeps the page actionable; name + created-at are the predictable
+// fallbacks shared with every other collection.
+const SORT_OPTIONS = [
+  { id: 'next',    label: 'Next run' },
+  { id: 'name',    label: 'Name' },
+  { id: 'created', label: 'Recently created' },
+];
 
 function toLocalInput(value) {
   if (!value) return '';
@@ -52,6 +56,38 @@ export default function ScheduledView({
   });
 
   const pendingCatchup = useMemo(() => scheduled.filter((item) => item.catchupPending), [scheduled]);
+
+  // Search + sort — same pattern as the other collection views. We
+  // filter on title + prompt + project path so the search field
+  // catches whichever facet the user remembers. Sort defaults to
+  // "next run" since that's the most actionable column.
+  const [search, setSearch] = useState('');
+  const [sort, setSort] = useState('next');
+  const searchRef = useRef(null);
+  useCollectionShortcut(searchRef);
+
+  const visible = useMemo(() => {
+    const q = (search || '').trim().toLowerCase();
+    const matches = (item) => {
+      if (!q) return true;
+      const haystack = [item.title, item.prompt, item.projectPath]
+        .filter(Boolean).join(' ').toLowerCase();
+      return haystack.includes(q);
+    };
+    const filtered = scheduled.filter(matches);
+    const ts = (raw) => {
+      if (raw == null) return 0;
+      if (typeof raw === 'number') return raw;
+      const t = Date.parse(raw);
+      return Number.isFinite(t) ? t : 0;
+    };
+    const cmp = {
+      next:    (a, b) => ts(a.nextRunAt) - ts(b.nextRunAt),
+      name:    (a, b) => (a.title || '').localeCompare(b.title || ''),
+      created: (a, b) => ts(b.createdAt) - ts(a.createdAt),
+    }[sort] || (() => 0);
+    return [...filtered].sort(cmp);
+  }, [scheduled, search, sort]);
 
   function resetForm() {
     setEditing(null);
@@ -121,16 +157,47 @@ export default function ScheduledView({
   }
 
   return (
-    <div className="scroll-clean" style={{ flex: 1, overflowY: 'auto' }}>
+    <div className="scroll-clean" style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
       <PageHeader
-        title="Scheduled"
+        title="Scheduled tasks"
         subtitle="Local scheduled Anton tasks run while Anton CoWork is open. Missed runs wait for approval."
-        action={
+        actions={
           <button className="btn-primary" onClick={() => { resetForm(); setShowForm(true); }}>
             {Ico.plus(14)} Schedule task
           </button>
         }
       />
+
+      <div style={{ height: 18 }} />
+
+      {scheduled.length > 0 && (
+        <FilterRow
+          search={
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              inputRef={searchRef}
+              placeholder="Search scheduled tasks"
+            />
+          }
+          sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
+          counts={
+            <>
+              {(search || '').trim().length > 0
+                ? `Showing ${visible.length} of ${scheduled.length}`
+                : `${scheduled.length} scheduled ${scheduled.length === 1 ? 'task' : 'tasks'}`}
+              {pendingCatchup.length > 0 && (
+                <>
+                  {' · '}
+                  <span style={{ color: 'var(--accent)' }}>
+                    {pendingCatchup.length} need{pendingCatchup.length === 1 ? 's' : ''} approval
+                  </span>
+                </>
+              )}
+            </>
+          }
+        />
+      )}
 
       {pendingCatchup.length > 0 && (
         <div className="catchup-banner">
@@ -190,7 +257,7 @@ export default function ScheduledView({
       )}
 
       <div style={{ padding: '20px 28px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {scheduled.map((item) => (
+        {visible.map((item) => (
           <div key={item.id} className="schedule-row">
             <span className="schedule-icon">{Ico.clock(15)}</span>
             <div style={{ minWidth: 0 }}>

@@ -15,6 +15,14 @@ import { WorkingFolderBox, ContextBox, ScheduledBox } from '../components/rail';
 import { TaskList } from '../components/task';
 import { ProjectCard } from '../components/project/ProjectCard';
 import {
+  PageHeader,
+  FilterRow,
+  SearchInput,
+  SortPill,
+  ViewToggle,
+  useCollectionShortcut,
+} from '../components/collection';
+import {
   createProject as createProjectApi,
   renameProject,
   revealProjectInFinder,
@@ -137,74 +145,8 @@ function NewProjectButton({ onClick }) {
   );
 }
 
-function ProjectsHeader({ onNewProject }) {
-  return (
-    <div style={{
-      padding: '28px 32px 0',
-      display: 'flex', flexDirection: 'column', gap: 18,
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        gap: 24, minWidth: 0,
-      }}>
-        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <h1 style={{
-            margin: 0,
-            fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600,
-            letterSpacing: '-0.005em', color: 'var(--ink)',
-          }}>Projects</h1>
-          <p style={{
-            margin: 0, fontFamily: FONT_BODY, fontSize: 13.5,
-            color: 'var(--ink-3)', lineHeight: 1.5,
-          }}>
-            Workspaces Anton uses to group conversations, memory, and outputs.
-          </p>
-        </div>
-        <NewProjectButton onClick={onNewProject} />
-      </div>
-    </div>
-  );
-}
-
-// ─── Filter row ──────────────────────────────────────────────────────────
-
-function SearchInput({ value, onChange, inputRef }) {
-  return (
-    <div style={{
-      flex: '0 1 320px', minWidth: 220,
-      display: 'inline-flex', alignItems: 'center', gap: 8,
-      padding: '7px 11px', borderRadius: 7,
-      background: 'var(--surface-2)',
-      border: '1px solid var(--line)',
-    }}>
-      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--ink-3)' }}>
-        {Ico.search(13)}
-      </span>
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        placeholder="Search projects"
-        style={{
-          flex: 1, minWidth: 0,
-          background: 'transparent', border: 0, outline: 'none',
-          fontFamily: FONT_BODY, fontSize: 12.5,
-          color: 'var(--ink-2)',
-        }}
-      />
-      <span style={{
-        flexShrink: 0,
-        padding: '1px 5px', borderRadius: 3,
-        background: 'var(--surface-3)',
-        border: '1px solid var(--line-2)',
-        fontFamily: FONT_MONO, fontSize: 10,
-        color: 'var(--ink-4)',
-      }}>⌘K</span>
-    </div>
-  );
-}
-
+// Sort options for the projects collection. Kept here (and not in
+// the kit) because the choices are page-specific.
 const SORT_OPTIONS = [
   { id: 'recent',       label: 'Recent' },
   { id: 'name',         label: 'Name' },
@@ -212,158 +154,21 @@ const SORT_OPTIONS = [
   { id: 'least-active', label: 'Least active' },
 ];
 
-function SortPill({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', onClick);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onClick);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-  const current = SORT_OPTIONS.find((o) => o.id === value) || SORT_OPTIONS[0];
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          padding: '7px 11px', borderRadius: 7,
-          background: 'var(--surface-2)',
-          border: '1px solid var(--line)',
-          color: 'var(--ink-2)',
-          fontFamily: FONT_BODY, fontSize: 12.5,
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ color: 'var(--ink-4)', fontSize: 11.5 }}>Sort:</span>
-        <span>{current.label}</span>
-        <span style={{ display: 'inline-flex', color: 'var(--ink-3)' }}>
-          {Ico.chevDown(11)}
-        </span>
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-          minWidth: 160, zIndex: 20,
-          background: 'var(--surface)',
-          border: '1px solid var(--line)',
-          borderRadius: 8,
-          boxShadow: '0 12px 32px rgba(0,0,0,0.28)',
-          padding: '4px 0',
-        }}>
-          {SORT_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => { onChange?.(opt.id); setOpen(false); }}
-              style={{
-                display: 'flex', alignItems: 'center',
-                width: 'calc(100% - 8px)', margin: '0 4px',
-                padding: '7px 10px', borderRadius: 5,
-                background: opt.id === value ? 'var(--surface-2)' : 'transparent',
-                border: 0,
-                fontFamily: FONT_BODY, fontSize: 12.5,
-                color: 'var(--ink-2)', textAlign: 'left',
-                cursor: 'pointer',
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
-              onMouseOut={(e) => { e.currentTarget.style.background = opt.id === value ? 'var(--surface-2)' : 'transparent'; }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ViewToggle({ value, onChange }) {
-  const Btn = ({ id, icon, label }) => {
-    const active = value === id;
-    return (
-      <button
-        type="button"
-        onClick={() => onChange?.(id)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          padding: '5px 10px', borderRadius: 5,
-          background: active ? 'var(--surface-3)' : 'transparent',
-          color: active ? 'var(--ink)' : 'var(--ink-3)',
-          border: 0,
-          boxShadow: active ? 'inset 0 0 0 1px var(--line-2)' : 'none',
-          fontFamily: FONT_BODY, fontSize: 12,
-          cursor: 'pointer',
-          transition: 'background .15s ease, color .15s ease',
-        }}
-        title={label}
-      >
-        {icon}
-        <span>{label}</span>
-      </button>
-    );
-  };
-  return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center', gap: 0,
-      padding: 2, borderRadius: 7,
-      background: 'var(--surface-2)',
-      border: '1px solid var(--line)',
-    }}>
-      <Btn id="grid" icon={Ico.grid(12)} label="Grid" />
-      <Btn id="list" icon={Ico.list(12)} label="List" />
-    </div>
-  );
-}
-
-function FilterRow({
-  search, onSearchChange, sort, onSortChange, view, onViewChange,
-  total, filtered, pinnedCount, searchRef,
-}) {
+function ProjectsCounts({ search, total, filtered, pinnedCount }) {
   const filterActive = (search || '').trim().length > 0;
-  // Count line — reflects the current filter state. When the user is
-  // searching we show "Showing N of T" so the partial result stays
-  // legible; otherwise just the total. Pinned count rides along as a
-  // soft accent stat when present.
   const countText = filterActive
     ? `Showing ${filtered} of ${total}`
     : `${total} ${total === 1 ? 'project' : 'projects'}`;
   return (
-    <div style={{
-      padding: '0 32px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
-      {/* Top row — search + sort on the left, view toggle on the right */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-      }}>
-        <SearchInput value={search} onChange={onSearchChange} inputRef={searchRef} />
-        <SortPill value={sort} onChange={onSortChange} />
-        <span style={{ flex: 1 }} />
-        <ViewToggle value={view} onChange={onViewChange} />
-      </div>
-
-      {/* Count line — independent of the controls; updates on filter */}
-      <div style={{
-        fontFamily: FONT_MONO, fontSize: 11,
-        color: 'var(--ink-4)', letterSpacing: '0.04em',
-      }}>
-        {countText}
-        {pinnedCount > 0 && (
-          <>
-            {' · '}
-            <span style={{ color: 'var(--accent)' }}>{pinnedCount} pinned</span>
-          </>
-        )}
-      </div>
-    </div>
+    <>
+      {countText}
+      {pinnedCount > 0 && (
+        <>
+          {' · '}
+          <span style={{ color: 'var(--accent)' }}>{pinnedCount} pinned</span>
+        </>
+      )}
+    </>
   );
 }
 
@@ -1196,16 +1001,7 @@ export default function ProjectsView({
   useEffect(() => { localStorage.setItem('anton:projects-view', view); }, [view]);
 
   // ⌘K focuses the search input.
-  useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  useCollectionShortcut(searchRef);
 
   // Inline create — the trailing dashed card flips into an input when
   // creating=true. The header / empty-state CTAs toggle it; the card
@@ -1327,21 +1123,33 @@ export default function ProjectsView({
       flex: 1, overflowY: 'auto',
       display: 'flex', flexDirection: 'column',
     }}>
-      <ProjectsHeader onNewProject={handleNewProject} />
+      <PageHeader
+        title="Projects"
+        subtitle="Workspaces Anton uses to group conversations, memory, and outputs."
+        actions={<NewProjectButton onClick={handleNewProject} />}
+      />
 
       <div style={{ height: 18 }} />
 
       <FilterRow
-        search={search}
-        onSearchChange={setSearch}
-        sort={sort}
-        onSortChange={setSort}
-        view={view}
-        onViewChange={setView}
-        total={projects.length}
-        filtered={visibleProjects.length}
-        pinnedCount={visibleProjects.filter((p) => pinned.has(p.name)).length}
-        searchRef={searchRef}
+        search={
+          <SearchInput
+            value={search}
+            onChange={setSearch}
+            inputRef={searchRef}
+            placeholder="Search projects"
+          />
+        }
+        sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
+        view={<ViewToggle value={view} onChange={setView} />}
+        counts={
+          <ProjectsCounts
+            search={search}
+            total={projects.length}
+            filtered={visibleProjects.length}
+            pinnedCount={visibleProjects.filter((p) => pinned.has(p.name)).length}
+          />
+        }
       />
 
       {loading ? (

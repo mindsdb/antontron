@@ -11,6 +11,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Ico from '../components/Icons';
 import { deleteDatasource, fetchDatasources } from '../api';
 import ConnectWorkflowView from './ConnectWorkflowView';
+import {
+  PageHeader,
+  FilterRow,
+  SearchInput,
+  SortPill,
+  useCollectionShortcut,
+} from '../components/collection';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
@@ -31,174 +38,19 @@ function ConnectButton({ onClick, large = false }) {
   );
 }
 
-function PageHeader({ onConnectNew }) {
-  return (
-    <div style={{
-      padding: '28px 32px 0',
-      display: 'flex', flexDirection: 'column', gap: 18,
-    }}>
-      <div style={{
-        display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
-        gap: 24, minWidth: 0,
-      }}>
-        <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-          <h1 style={{
-            margin: 0,
-            fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600,
-            letterSpacing: '-0.005em', color: 'var(--ink)',
-          }}>Connect Apps and Data</h1>
-          <p style={{
-            margin: 0, fontFamily: FONT_BODY, fontSize: 13.5,
-            color: 'var(--ink-3)', lineHeight: 1.5,
-          }}>
-            Connect Anton to the tools you already use, and automate work there.
-          </p>
-        </div>
-        <ConnectButton onClick={onConnectNew} />
-      </div>
-    </div>
-  );
-}
-
-// ─── Filter row ──────────────────────────────────────────────────────────
-
-function SearchInput({ value, onChange, inputRef }) {
-  return (
-    <div style={{
-      flex: '0 1 320px', minWidth: 220,
-      display: 'inline-flex', alignItems: 'center', gap: 8,
-      padding: '7px 11px', borderRadius: 7,
-      background: 'var(--surface-2)',
-      border: '1px solid var(--line)',
-    }}>
-      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--ink-3)' }}>
-        {Ico.search(13)}
-      </span>
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        placeholder="Search connections"
-        style={{
-          flex: 1, minWidth: 0,
-          background: 'transparent', border: 0, outline: 'none',
-          fontFamily: FONT_BODY, fontSize: 12.5,
-          color: 'var(--ink-2)',
-        }}
-      />
-      <span style={{
-        flexShrink: 0,
-        padding: '1px 5px', borderRadius: 3,
-        background: 'var(--surface-3)',
-        border: '1px solid var(--line-2)',
-        fontFamily: FONT_MONO, fontSize: 10,
-        color: 'var(--ink-4)',
-      }}>⌘K</span>
-    </div>
-  );
-}
-
+// Sort options for the connections collection.
 const SORT_OPTIONS = [
   { id: 'recent', label: 'Recent' },
   { id: 'name',   label: 'Name' },
   { id: 'engine', label: 'Engine' },
 ];
 
-function SortPill({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', onClick);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onClick);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-  const current = SORT_OPTIONS.find((o) => o.id === value) || SORT_OPTIONS[0];
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          padding: '7px 11px', borderRadius: 7,
-          background: 'var(--surface-2)',
-          border: '1px solid var(--line)',
-          color: 'var(--ink-2)',
-          fontFamily: FONT_BODY, fontSize: 12.5,
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ color: 'var(--ink-4)', fontSize: 11.5 }}>Sort:</span>
-        <span>{current.label}</span>
-        <span style={{ display: 'inline-flex', color: 'var(--ink-3)' }}>
-          {Ico.chevDown(11)}
-        </span>
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-          minWidth: 160, zIndex: 20,
-          background: 'var(--surface)',
-          border: '1px solid var(--line)',
-          borderRadius: 8,
-          boxShadow: '0 12px 32px rgba(0,0,0,0.28)',
-          padding: '4px 0',
-        }}>
-          {SORT_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => { onChange?.(opt.id); setOpen(false); }}
-              style={{
-                display: 'flex', alignItems: 'center',
-                width: 'calc(100% - 8px)', margin: '0 4px',
-                padding: '7px 10px', borderRadius: 5,
-                background: opt.id === value ? 'var(--surface-2)' : 'transparent',
-                border: 0,
-                fontFamily: FONT_BODY, fontSize: 12.5,
-                color: 'var(--ink-2)', textAlign: 'left',
-                cursor: 'pointer',
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
-              onMouseOut={(e) => { e.currentTarget.style.background = opt.id === value ? 'var(--surface-2)' : 'transparent'; }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FilterRow({ search, onSearchChange, sort, onSortChange, total, filtered, searchRef }) {
+function ConnectionsCounts({ search, total, filtered }) {
   const filterActive = (search || '').trim().length > 0;
   const countText = filterActive
     ? `Showing ${filtered} of ${total}`
     : `${total} ${total === 1 ? 'connection' : 'connections'}`;
-  return (
-    <div style={{
-      padding: '0 32px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-        <SearchInput value={search} onChange={onSearchChange} inputRef={searchRef} />
-        <SortPill value={sort} onChange={onSortChange} />
-        <span style={{ flex: 1 }} />
-      </div>
-      <div style={{
-        fontFamily: FONT_MONO, fontSize: 11,
-        color: 'var(--ink-4)', letterSpacing: '0.04em',
-      }}>{countText}</div>
-    </div>
-  );
+  return <>{countText}</>;
 }
 
 // ─── Connection card ─────────────────────────────────────────────────────
@@ -365,16 +217,7 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
   };
 
   // ⌘K focuses the search input.
-  useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  useCollectionShortcut(searchRef);
 
   const handleDelete = async (connection) => {
     try {
@@ -428,19 +271,28 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
       flex: 1, overflowY: 'auto',
       display: 'flex', flexDirection: 'column',
     }}>
-      <PageHeader onConnectNew={handleConnectNew} />
+      <PageHeader
+        title="Connect Apps and Data"
+        subtitle="Connect Anton to the tools you already use, and automate work there."
+        actions={<ConnectButton onClick={handleConnectNew} />}
+      />
 
       <div style={{ height: 18 }} />
 
       {total > 0 && (
         <FilterRow
-          search={search}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={setSort}
-          total={total}
-          filtered={visible.length}
-          searchRef={searchRef}
+          search={
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              inputRef={searchRef}
+              placeholder="Search connections"
+            />
+          }
+          sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
+          counts={
+            <ConnectionsCounts search={search} total={total} filtered={visible.length} />
+          }
         />
       )}
 
