@@ -1,8 +1,9 @@
-import { useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Ico from './Icons';
 import { Spinner } from './ui';
 import { TaskMenu } from './TaskMenu';
 import { isMac, isWeb } from '../lib/host';
+import RecentsModal from './RecentsModal';
 
 // Platform-aware modifier symbol for keyboard hints. Mac uses ⌘ glyph,
 // Windows/Linux use Ctrl+ literal. host.isMac() works in both Electron
@@ -160,6 +161,7 @@ export default function Sidebar({
   onMoveTaskToProject,
   projects = [],
   onToggleServer,
+  onShowServerHelp,
 }) {
   // Decorate every task with its pinned state. Tasks come from the
   // conversations endpoint which doesn't know about pins (they live
@@ -173,7 +175,41 @@ export default function Sidebar({
   );
 
   // Recents excludes pinned items so a task isn't surfaced twice.
-  const recents = tasksWithPin.filter((t) => !pinnedIds.has(t.id)).slice(0, 8);
+  // The full pool — sliced down to whatever fits the viewport + a
+  // "Show more" affordance below.
+  const recentsAll = tasksWithPin.filter((t) => !pinnedIds.has(t.id));
+
+  // Sized dynamically: measure the available height of the recents
+  // scroll area on mount + on window resize, then divide by an
+  // average row height to pick how many to render inline. Min 5 so
+  // the section never collapses to a single row, max all-of-them.
+  const RECENT_ROW_HEIGHT  = 30;   // single recent-item incl. 1px gap
+  const RECENT_FOOTER_PAD  = 36;   // reserved for the Show-more row
+  const recentsRef = useRef(null);
+  const [recentsHeight, setRecentsHeight] = useState(0);
+  useLayoutEffect(() => {
+    const el = recentsRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setRecentsHeight(entry.contentRect.height);
+      }
+    });
+    ro.observe(el);
+    setRecentsHeight(el.clientHeight);
+    return () => ro.disconnect();
+  }, []);
+  const inlineRecentCount = (() => {
+    if (recentsHeight <= 0) return 5;
+    const usable = Math.max(0, recentsHeight - RECENT_FOOTER_PAD);
+    return Math.max(5, Math.floor(usable / RECENT_ROW_HEIGHT));
+  })();
+  const recents = recentsAll.slice(0, inlineRecentCount);
+  // "Show more" hidden for now — kept the modal + state plumbing
+  // so we can flip this back on later without rewiring anything.
+  const hasMoreRecents = false;
+
+  const [recentsModalOpen, setRecentsModalOpen] = useState(false);
   const pinnedTasks = (pins || [])
     .filter((pin) => pin.type === 'task')
     .map((pin) => {
@@ -268,7 +304,7 @@ export default function Sidebar({
         {/* Primary nav */}
         <div className="nav-list" style={{ padding: '0 10px', display: 'flex', flexDirection: 'column', gap: 1 }}>
           <NavItem icon={Ico.folder(15)}  label="Projects"      onClick={() => onNavigate('projects')}  active={activeRoute === 'projects'} />
-          <NavItem icon={Ico.clock(15)}   label="Scheduled"     onClick={() => onNavigate('scheduled')} active={activeRoute === 'scheduled'} badge={scheduledCount || null} />
+          <NavItem icon={Ico.clock(15)}   label="Scheduled tasks" onClick={() => onNavigate('scheduled')} active={activeRoute === 'scheduled'} badge={scheduledCount || null} />
           <NavItem icon={Ico.sparkle(15)} label="Live artifacts" onClick={() => onNavigate('artifacts')} active={activeRoute === 'artifacts'} />
           <NavItem icon={Ico.chats(15)}   label="Dispatch"      onClick={() => onNavigate('dispatch')}  active={activeRoute === 'dispatch'} />
           {/* Connect Apps and Data — replaces "Customize". Reuses the
@@ -283,9 +319,10 @@ export default function Sidebar({
         <div className="anton-group">
           <NavItem icon={Ico.cube(15)}     label="Skills library" onClick={() => onNavigate('skills')}   active={activeRoute === 'skills'}   compact />
           <NavItem icon={Ico.brain(15)}    label="Memory"         onClick={() => onNavigate('memory')}   active={activeRoute === 'memory'}   compact />
-          {/* "Connect data" removed from the sidebar — the workflow
-              still lives at route='connect' and is reached via the
-              "+ Connect" button on the Connect Apps and Data page. */}
+          {/* "Connect data" removed from the sidebar — the canonical
+              connector surface is the Connect Apps and Data page
+              (route='customize'). The legacy 'connect' route used to
+              render UtilitiesView/ConnectView and has been retired. */}
           <NavItem icon={Ico.settings(15)} label="Settings"       onClick={() => onNavigate('settings')} active={activeRoute === 'settings'} compact />
         </div>
 
@@ -316,7 +353,7 @@ export default function Sidebar({
 
         {/* Recents */}
         <div className="section-label">Recents</div>
-        <div className="scroll-clean" style={{
+        <div ref={recentsRef} className="scroll-clean" style={{
           padding: '0 10px', flex: 1, overflowY: 'auto',
           display: 'flex', flexDirection: 'column', gap: 1,
         }}>
@@ -333,15 +370,59 @@ export default function Sidebar({
               onMoveToProject={onMoveTaskToProject}
             />
           ))}
+          {hasMoreRecents && (
+            <button
+              type="button"
+              onClick={() => setRecentsModalOpen(true)}
+              className="recents-show-more"
+              style={{
+                margin: '6px 0 4px',
+                padding: '7px 10px',
+                background: 'transparent',
+                border: '1px dashed var(--line-2)',
+                borderRadius: 7,
+                color: 'var(--ink-3)',
+                fontFamily: 'var(--font-body)', fontSize: 12,
+                cursor: 'pointer',
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                gap: 8,
+                transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
+              }}
+              onMouseOver={(e) => {
+                e.currentTarget.style.background = 'var(--surface-2)';
+                e.currentTarget.style.color = 'var(--ink)';
+                e.currentTarget.style.borderColor = 'var(--line)';
+              }}
+              onMouseOut={(e) => {
+                e.currentTarget.style.background = 'transparent';
+                e.currentTarget.style.color = 'var(--ink-3)';
+                e.currentTarget.style.borderColor = 'var(--line-2)';
+              }}
+            >
+              <span>Show more</span>
+              <span style={{ fontFamily: 'var(--font-mono)', fontSize: 10.5, color: 'var(--ink-4)' }}>
+                +{recentsAll.length - recents.length}
+              </span>
+            </button>
+          )}
         </div>
 
         {/* Footer status */}
         <div className="anton-sidebar__footer">
-          <div
+          {/* The whole "backend · <status>" pill is the help affordance
+              now — click anywhere on it to open the server-state modal.
+              Replaces the previous standalone "?" icon, which only
+              appeared when offline and read as visual clutter. */}
+          <button
+            type="button"
             className={
-              'status-pill' +
+              'status-pill is-clickable' +
               (serverBusy ? ' is-busy' : serverOnline ? ' is-on' : '')
             }
+            onClick={onShowServerHelp}
+            title="Backend status — click for details"
+            aria-label="Backend status — click for details"
+            style={{ WebkitAppRegion: 'no-drag' }}
           >
             <span
               className={
@@ -391,8 +472,42 @@ export default function Sidebar({
               </button>
             </div>
           )}
+          </button>
+          <div className="anton-sidebar__footer-actions">
+            <button
+              className={
+                'chrome-btn--small server-toggle' +
+                (serverOnline ? ' is-on' : '') +
+                (serverBusy ? ' is-busy' : '')
+              }
+              onClick={onToggleServer}
+              disabled={serverBusy}
+              title={
+                serverBusy
+                  ? `Backend ${serverBusyKind}…`
+                  : serverOnline ? 'Stop Anton backend' : 'Start Anton backend'
+              }
+              aria-label={serverOnline ? 'Stop backend' : 'Start backend'}
+              aria-busy={serverBusy ? 'true' : undefined}
+              style={{ WebkitAppRegion: 'no-drag' }}
+            >
+              {serverBusy
+                ? <Spinner intervalMs={70} />
+                : (serverOnline ? Ico.powerOff(13) : Ico.power(13))}
+            </button>
+          </div>
         </div>
       </div>
+
+      <RecentsModal
+        open={recentsModalOpen}
+        onClose={() => setRecentsModalOpen(false)}
+        // Cap at 100 — beyond that the list is more usefully reached
+        // via global search (Cmd+K) than by scrolling.
+        tasks={recentsAll.slice(0, 100)}
+        onSelect={(id) => onSelectTask?.(id)}
+        onDelete={(id) => onDeleteTask?.(id)}
+      />
     </aside>
   );
 }

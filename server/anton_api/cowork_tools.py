@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Any
 
@@ -204,7 +205,10 @@ def _ensure_form_id(spec: dict) -> dict:
         out["form_id"] = "fm_" + uuid.uuid4().hex[:10]
     if not out.get("title"):
         out["title"] = "Connect"
-    if "fields" not in out or not isinstance(out.get("fields"), list):
+    has_methods = isinstance(out.get("methods"), list) and out.get("methods")
+    if not has_methods and (
+        "fields" not in out or not isinstance(out.get("fields"), list)
+    ):
         out["fields"] = []
     return out
 
@@ -252,6 +256,18 @@ _REQUEST_CREDENTIALS_SCHEMA = {
             "type": "string",
             "description": "REQUIRED. A short slug for the connector (e.g. 'postgres', 'mysql', 'snowflake', 'github', 'posthog', 'salesforce', 'gmail', 'google_calendar'). Use the closest convention; ANY value is accepted — engines not in anton's built-in registry are saved as 'custom' connections with whatever fields you list here. Don't gate on whether it's a known engine.",
         },
+        "_connector_id": {
+            "type": "string",
+            "description": "OPTIONAL. The slug of the canonical connector spec (from `lookup_connector`) this form was built from. When set, submissions go to POST /v1/connectors/{id}/save (which bypasses anton-core's built-in datasource registry — required for OAuth-shaped saves). ALWAYS set this when the form spec came from `lookup_connector`; leave unset when handcrafting a one-off spec.",
+        },
+        "how_to": {
+            "type": "string",
+            "description": "OPTIONAL. Markdown-formatted setup instructions for SINGLE-method forms (use the per-method `how_to` for multi-method specs). The form panel shows a 'How to?' link in the actions row that opens a centered modal with this content.",
+        },
+        "help_url": {
+            "type": "string",
+            "description": "OPTIONAL. External help URL for SINGLE-method forms (use the per-method `help_url` for multi-method specs). Used as a fallback when no `how_to` markdown is provided.",
+        },
         "logo": {
             "type": "string",
             "description": "Optional icon name from the app's palette — use one of: 'database', 'globe', 'cube', 'doc', 'code', 'image', 'folder', 'brain', 'sparkle', 'wifi', 'key', 'link', 'mindsdb'. URLs are NOT supported; pick the closest semantic match for the connector. Defaults to 'database' when omitted.",
@@ -278,7 +294,7 @@ _REQUEST_CREDENTIALS_SCHEMA = {
         },
         "fields": {
             "type": "array",
-            "description": "Field specs the user fills in. Order matters — render top to bottom.",
+            "description": "Field specs the user fills in (single-method form). Order matters — render top to bottom. For services with MULTIPLE auth options (Gmail = OAuth + app-password + service-account, etc.) prefer `methods` instead.",
             "items": {
                 "type": "object",
                 "properties": {
@@ -308,6 +324,68 @@ _REQUEST_CREDENTIALS_SCHEMA = {
                 "required": ["name", "label", "type"],
             },
         },
+        "methods": {
+            "type": "array",
+            "description": (
+                "Use INSTEAD of `fields` when the engine supports multiple auth methods "
+                "(e.g. Gmail can be reached via OAuth, App Password, or Service Account). "
+                "The user picks one method first, then fills in just that method's fields. "
+                "Each method should have a clear label, a 1-2 sentence description, and "
+                "its own fields. Mark the easiest one with `recommended: true`. If the "
+                "user has already signalled a preference (\"I have an app password\"), "
+                "set `selected_method` at the form's top level so we skip the picker."
+            ),
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "description": "Stable id for this method (e.g. 'oauth', 'app-password', 'service-account'). Anton's probe uses this id to decide which auth flow to test, and the vault stamps it onto the saved record as `_method`."},
+                    "label": {"type": "string", "description": "Card title (e.g. 'App Password')."},
+                    "description": {"type": "string", "description": "1-2 sentence description shown on the picker card. Mention prereqs and difficulty when relevant."},
+                    "recommended": {"type": "boolean", "description": "Mark the easiest/most common method. Renders a 'Recommended' pill on the card."},
+                    "how_to": {"type": "string", "description": "Optional markdown-formatted setup instructions for THIS method. Picker cards show a 'How to?' affordance that opens a centered modal with this content; the same link travels into the form-fill stage. Prefer this over `help_url` when you can write a good walkthrough."},
+                    "help_url": {"type": "string", "description": "Optional external help URL for THIS method. Used when no `how_to` markdown is provided."},
+                    "submit_action": {
+                        "type": "string",
+                        "enum": ["oauth_launch"],
+                        "description": "Optional. When set to `oauth_launch`, the panel runs a PKCE OAuth flow on the user's machine when they click Submit (spawns a loopback HTTP server, opens the browser to the consent screen, exchanges the code for tokens, and saves the refresh_token to the vault). Required for any OAuth method. Pair with the `oauth` block.",
+                    },
+                    "oauth": {
+                        "type": "object",
+                        "description": "Required when `submit_action` is `oauth_launch`. Provides everything the desktop's PKCE helper needs to run the flow without the LLM in the loop. Anton spawns a loopback server, opens the browser, exchanges the code, and stores the refresh_token in the vault under this connector.",
+                        "properties": {
+                            "auth_url": {"type": "string", "description": "OAuth 2.0 authorization endpoint (e.g. https://accounts.google.com/o/oauth2/v2/auth)."},
+                            "token_url": {"type": "string", "description": "OAuth 2.0 token endpoint (e.g. https://oauth2.googleapis.com/token)."},
+                            "scopes": {
+                                "type": "array",
+                                "description": "Scopes to request. Provider-specific.",
+                                "items": {"type": "string"},
+                            },
+                            "extra_auth_params": {
+                                "type": "object",
+                                "description": "Extra query params on the auth URL (e.g. {access_type: 'offline', prompt: 'consent'} for Google to force a refresh_token).",
+                                "additionalProperties": {"type": "string"},
+                            },
+                        },
+                        "required": ["auth_url", "token_url", "scopes"],
+                    },
+                    "fields": {
+                        "type": "array",
+                        "description": "Fields specific to this method. Same shape as the top-level `fields` items. For `oauth_launch` methods, fields are typically `client_id` + `client_secret` (Pattern B — bring-your-own-OAuth-client) and may be empty when the connector ships a hosted client.",
+                        "items": {"type": "object"},
+                    },
+                    "actions": {
+                        "type": "array",
+                        "description": "OPTIONAL — per-method action buttons. Falls back to the form's top-level actions, then to a default Submit + Cancel pair.",
+                        "items": {"type": "object"},
+                    },
+                },
+                "required": ["id", "label", "fields"],
+            },
+        },
+        "selected_method": {
+            "type": "string",
+            "description": "Pre-pick a method id from `methods[]` (skips the picker, jumps straight to that method's fields). Set when the user has clearly indicated a preference. The user can still hit 'change' to re-open the picker.",
+        },
         "actions": {
             "type": "array",
             "description": "Optional. Defaults to a single primary 'Submit' action plus 'Cancel'. Use to surface custom actions like 'Try OAuth' or per-field skip shortcuts.",
@@ -323,34 +401,279 @@ _REQUEST_CREDENTIALS_SCHEMA = {
             },
         },
     },
-    "required": ["engine", "title", "fields"],
+    "required": ["engine", "title"],
 }
 
 
 _REQUEST_CREDENTIALS_PROMPT = (
     "DATA VAULT WORKFLOW — when the user asks to connect to a service or database:\n"
-    "1. Call `request_credentials` with a full form spec the FIRST time. Include "
-    "the returned markdown block VERBATIM (with blank lines around the fence) so "
-    "the form renders in the side panel.\n"
-    "2. Wait for the user's submission. The follow-up message has a `submission_id` "
-    "and the names of any skipped fields.\n"
-    "3. Call `fetch_submission(submission_id)` to retrieve the staged values. Test "
+    "1. ALWAYS call `lookup_connector` FIRST with the user's wording (e.g. 'gmail', "
+    "'google mail', 'postgres'). When it returns a `form` spec, that is the SAME "
+    "spec the in-app Connector Picker uses — pass it to `request_credentials` "
+    "VERBATIM (only tweak `selected_method` if the user has clearly signalled a "
+    "preference, or `subtitle` to match the conversation context). Registry specs "
+    "ship with `methods[]`, OAuth blocks (`submit_action: 'oauth_launch'` + "
+    "`oauth: {...}`), `how_to` markdown, and `help_url` already filled in — do "
+    "not strip those, do not paraphrase them. ALSO copy `_connector_id` (the "
+    "lookup tool returns it) onto the form spec so submissions go to the "
+    "registry-aware save endpoint.\n"
+    "2. ONLY when `lookup_connector` returns no match, handcraft the spec. The "
+    "schema documents OAuth, `how_to`, and `help_url` fields — use them when you "
+    "know the auth shape (e.g. an OAuth provider). Better to write a good "
+    "registry-grade spec than a bare username/password prompt.\n"
+    "3. Call `request_credentials` with the (registry or handcrafted) spec the "
+    "FIRST time. Include the returned markdown block VERBATIM (with blank lines "
+    "around the fence) so the form renders in the side panel.\n"
+    "4. Wait for the user's submission. The follow-up message has a `submission_id` "
+    "and the names of any skipped fields. For OAuth methods, the desktop runs the "
+    "browser flow itself — you'll just receive the submission with the refresh "
+    "token already in the vault.\n"
+    "5. Call `fetch_submission(submission_id)` to retrieve the staged values. Test "
     "the connection (`connect_datasource` or a scratchpad probe).\n"
-    "4. ON FAILURE — DO NOT re-emit the full form. Use `update_form` (which returns "
-    "a `data-vault-form-patch` block) to attach an `error` to the failing field and "
-    "tweak `subtitle` / `form_warning` if useful. The user's existing inputs stay in "
-    "the panel; only the changed bits update. NEVER include `value` fields in a "
-    "patch or full re-emit — that would echo credentials into chat history. The "
-    "user re-types what they want to fix.\n"
-    "5. On success, summarize what you connected and stop. Do NOT call "
-    "`request_credentials` again unless the user asks for another connection.\n"
+    "6. ON FAILURE — DO NOT re-emit the full form. Use `update_form` (which "
+    "returns a `data-vault-form-patch` block) to attach an `error` to the failing "
+    "field and tweak `subtitle` / `form_warning` if useful. The user's existing "
+    "inputs stay in the panel; only the changed bits update. NEVER include `value` "
+    "fields in a patch or full re-emit — that would echo credentials into chat "
+    "history. The user re-types what they want to fix.\n"
+    "7. On success, summarize what you connected and stop. Do NOT call "
+    "`request_credentials` again unless the user asks for another connection.\n\n"
+    "MULTI-METHOD SHAPE — for engines with several auth options (Gmail can be "
+    "reached via OAuth, App Password, or Service Account; Postgres might support "
+    "password auth + IAM, etc.) emit a `methods[]` array INSTEAD of `fields[]`. "
+    "Each method has its own id, label, description, fields, and (when relevant) "
+    "`how_to` markdown / `help_url` / OAuth block. Mark the simplest one with "
+    "`recommended: true`. The form panel renders a picker first; the user "
+    "chooses, then types only the fields for the chosen method. The submission "
+    "carries `auth_method` so the probe knows which one to test. If the user has "
+    "CLEARLY signalled a preference (\"I already have an app password\"), "
+    "pre-set `selected_method` to skip the picker.\n\n"
     "STRICT RULES:\n"
     "- Field VALUES never appear in chat. Don't echo them, don't include them in "
     "any form spec, don't paraphrase them. The fetch tool is the only read path.\n"
     "- Use `update_form` for any retry / error / status change after the initial "
     "form is up. Reserve `request_credentials` for first emission and for fully "
-    "switching to a different connector."
+    "switching to a different connector.\n"
+    "- The chat-emitted form and the picker-emitted form must FEEL identical to "
+    "the user — same methods, same OAuth flow, same how-to docs. The registry "
+    "lookup is what guarantees that parity; use it."
 )
+
+
+# ── lookup_connector ──────────────────────────────────────────────────
+# The chat agent's "find the canonical spec for this service" path —
+# same source of truth the in-app Connector Picker uses. Without this
+# tool the LLM would hand-craft each form from training-data memory,
+# producing slightly different shapes on each call (sometimes missing
+# OAuth, sometimes bare username/password where the service has a
+# proper OAuth path, etc.). Routing through the registry guarantees
+# the chat-emitted form is byte-identical to what the picker emits.
+#
+# Mirrors POST /v1/connectors/match (server/routes/connectors.py):
+# stage 1 exact match (id or alias, normalized) → stage 2 token-overlap.
+# We don't reuse the route helpers directly to avoid a circular import
+# (routes already pulls from anton_api), but the scoring stays in step.
+
+
+def _lookup_normalize(s: str) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", (s or "").lower()).strip()
+
+
+def _lookup_score(query: str, c: dict) -> float:
+    q_tokens = set(_lookup_normalize(query).split())
+    if not q_tokens:
+        return 0.0
+    label_tokens = set(_lookup_normalize(c.get("label", "")).split())
+    alias_tokens: set[str] = set()
+    for alias in c.get("aliases", []):
+        alias_tokens.update(_lookup_normalize(alias).split())
+    keyword_tokens = set(_lookup_normalize(" ".join(c.get("keywords", []))).split())
+    desc_tokens = set(_lookup_normalize(c.get("description", "")).split())
+    score = 0.0
+    score += 3.0 * len(q_tokens & label_tokens)
+    score += 2.5 * len(q_tokens & alias_tokens)
+    score += 1.0 * len(q_tokens & keyword_tokens)
+    score += 0.4 * len(q_tokens & desc_tokens)
+    return score
+
+
+async def _cowork_lookup_connector(session: Any, tc_input: dict) -> str:
+    """Tool handler for `lookup_connector`.
+
+    Pulls a registry-backed connector spec by id (slug) or by
+    natural-language query. The returned `form` blob is what the LLM
+    should pass to `request_credentials` verbatim — methods, OAuth
+    blocks, how_to markdown, and help_url all already filled in. We
+    also stamp `_connector_id` onto the form so submissions land via
+    the registry-aware save path (POST /v1/connectors/{id}/save).
+    """
+    try:
+        from . import connectors_registry as registry
+    except Exception as exc:
+        logger.exception("Cowork lookup_connector could not import registry")
+        return f"lookup_connector: registry unavailable ({exc})"
+
+    cid = (tc_input.get("id") or "").strip()
+    query = (tc_input.get("query") or "").strip()
+
+    if not cid and not query:
+        return "lookup_connector: provide either `id` (a connector slug) or `query` (a natural-language name)."
+
+    def _present(connector: dict, confidence: float, stage: str) -> str:
+        # Stamp `_connector_id` into the form blob so the LLM doesn't
+        # have to remember to copy it across. The vault save endpoint
+        # uses this to route through POST /v1/connectors/{id}/save
+        # (which bypasses anton-core's built-in datasource registry).
+        form_blob = dict(connector.get("form") or {})
+        form_blob["_connector_id"] = connector.get("id")
+        # Also copy the connector's logo onto the form if the form
+        # itself doesn't carry one — the picker already does this for
+        # the in-app picker path; mirroring it here keeps the chat-
+        # emitted form visually identical.
+        if "logo" not in form_blob and connector.get("logo"):
+            form_blob["logo"] = connector["logo"]
+        if "logo_color" not in form_blob and connector.get("logo_color"):
+            form_blob["logo_color"] = connector["logo_color"]
+        return json.dumps({
+            "id": connector.get("id"),
+            "label": connector.get("label"),
+            "description": connector.get("description"),
+            "category": connector.get("category"),
+            "confidence": confidence,
+            "stage": stage,
+            "form": form_blob,
+            "next_step": (
+                "Pass this `form` blob to `request_credentials` verbatim "
+                "(only tweak `selected_method` or `subtitle` if needed). "
+                "It already includes `_connector_id`, methods[], OAuth "
+                "blocks, how_to markdown, and help_url where applicable."
+            ),
+        })
+
+    # Stage 0 — explicit id always wins.
+    if cid:
+        c = registry.get_connector(cid)
+        if c:
+            return _present(c, 1.0, "id")
+        # Fall through to query-style lookup if the id didn't match.
+        if not query:
+            return json.dumps({
+                "id": None,
+                "match": "none",
+                "message": (
+                    f"No connector with id `{cid}` in the registry. "
+                    f"Either retry with a `query` (natural-language) or "
+                    f"handcraft the form spec — see the request_credentials "
+                    f"schema for the OAuth/how_to/help_url fields."
+                ),
+                "available_ids": sorted(registry.all_connectors().keys()),
+            })
+        # If both were given and id missed, treat the id as part of the query.
+        query = f"{cid} {query}".strip()
+
+    # Stage 1 — exact match (id or alias) on the query.
+    nq = _lookup_normalize(query)
+    for c in registry.all_connectors().values():
+        if _lookup_normalize(c.get("id", "")) == nq:
+            return _present(c, 1.0, "exact-id")
+        for alias in c.get("aliases", []):
+            if _lookup_normalize(alias) == nq:
+                return _present(c, 1.0, "exact-alias")
+
+    # Stage 2 — token-overlap. Return up to 3 candidates with confidence.
+    scored: list[tuple[float, dict]] = []
+    for c in registry.all_connectors().values():
+        s = _lookup_score(query, c)
+        if s > 0:
+            scored.append((s, c))
+    scored.sort(reverse=True, key=lambda x: x[0])
+
+    if not scored:
+        return json.dumps({
+            "id": None,
+            "match": "none",
+            "message": (
+                "No connector matched the query. Either ask the user to "
+                "clarify, or handcraft the form spec — see the "
+                "request_credentials schema for the OAuth/how_to/help_url "
+                "fields you should fill in when you know the auth shape."
+            ),
+            "available_ids": sorted(registry.all_connectors().keys()),
+        })
+
+    top_score, top_c = scored[0]
+    runner_up = scored[1][0] if len(scored) > 1 else 0.0
+
+    # Top is dominant — single confident pick.
+    if runner_up == 0.0 or top_score >= runner_up * 2:
+        return _present(top_c, 0.85, "scored-single")
+
+    # Otherwise return the top three with normalized confidence so the
+    # LLM can either (a) pick one based on chat context or (b) ask the
+    # user to clarify. We do NOT inline `form` for the runners-up to
+    # keep the response small — the LLM can re-call lookup_connector
+    # with an `id` once it picks.
+    candidates = [
+        {
+            "id": c.get("id"),
+            "label": c.get("label"),
+            "description": c.get("description"),
+            "confidence": round(s / top_score, 3),
+        }
+        for s, c in scored[:3]
+    ]
+    return json.dumps({
+        "match": "ambiguous",
+        "candidates": candidates,
+        "message": (
+            "Multiple connectors matched. Either ask the user to clarify, "
+            "or call `lookup_connector` again with the chosen `id` to fetch "
+            "the full form spec."
+        ),
+    })
+
+
+_LOOKUP_CONNECTOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "id": {
+            "type": "string",
+            "description": "Connector slug (e.g. 'gmail', 'postgres', 'slack'). Use this when you already know the canonical id; matches exactly. Returns the full form spec including methods[], OAuth, how_to, help_url, and a stamped `_connector_id`.",
+        },
+        "query": {
+            "type": "string",
+            "description": "Natural-language query (e.g. 'google mail', 'my postgres database', 'send slack messages'). Runs id-or-alias exact match, then token-overlap scoring, returning a single confident hit or up to 3 candidates with confidence scores.",
+        },
+    },
+}
+
+
+_LOOKUP_CONNECTOR_PROMPT = (
+    "Use `lookup_connector` to fetch the canonical form spec for any "
+    "service the user names. The returned `form` blob is the SAME "
+    "spec the in-app Connector Picker uses — pass it to "
+    "`request_credentials` verbatim. The registry already encodes "
+    "OAuth flows, how_to markdown, help URLs, and method-picker UI "
+    "for services like Gmail, so handcrafting from training-data "
+    "memory will produce a strictly worse form. Always lookup first; "
+    "only handcraft when the registry returns no match."
+)
+
+
+def build_cowork_lookup_connector_tool():
+    from anton.core.tools.tool_defs import ToolDef
+    return ToolDef(
+        name="lookup_connector",
+        description=(
+            "Look up the canonical connector spec for a service by id or "
+            "natural-language query. Returns the same form blob the "
+            "in-app Connector Picker uses — pass it straight to "
+            "`request_credentials`."
+        ),
+        input_schema=_LOOKUP_CONNECTOR_SCHEMA,
+        handler=_cowork_lookup_connector,
+        prompt=_LOOKUP_CONNECTOR_PROMPT,
+    )
 
 
 async def _cowork_fetch_submission(session: Any, tc_input: dict) -> str:

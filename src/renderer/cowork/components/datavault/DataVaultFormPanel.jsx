@@ -16,10 +16,15 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Ico from '../Icons';
-import { RailCard } from '../rail/RailCard';
 import { DataVaultForm } from './DataVaultForm';
-import { clearForm, getForm, subscribe } from './formStore';
+import {
+  clearForm, getForm, patchForm, subscribe,
+  getSelectedMethod, subscribeSelectedMethod, setSelectedMethod,
+} from './formStore';
+import { saveConnector } from '../../api';
 import { submitDataVaultForm } from '../../api';
+
+const FONT_BODY = 'var(--font-body)';
 
 // One-shot keyframes used by the form: appearance animation on the
 // panel + the small spinner inside the live status row. Mounting
@@ -43,7 +48,7 @@ function _ensureKeyframes() {
   _DVF_KEYFRAMES_INJECTED = true;
 }
 
-export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNavigateToConnectors }) {
+export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNavigateToConnectors, highlighted = false }) {
   const [spec, setSpec] = useState(() => getForm(conversationId));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -61,12 +66,27 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
   // than on the spec so server-side updates don't have to know
   // anything about UI dismissal state.
   const [dismissedStatus, setDismissedStatus] = useState(null);
+  // Active method for the panel chrome — when set, the header bar
+  // becomes the "← Back to options · <method>" breadcrumb. Source of
+  // truth lives in formStore so DataVaultForm can write it (on pick)
+  // and the panel can clear it (on "back").
+  const [activeMethodId, setActiveMethodId] = useState(
+    () => (conversationId ? getSelectedMethod(conversationId) : null)
+  );
 
   useEffect(() => { _ensureKeyframes(); }, []);
 
   useEffect(() => {
     setSpec(getForm(conversationId));
     return subscribe(conversationId, (next) => setSpec(next));
+  }, [conversationId]);
+
+  useEffect(() => {
+    if (!conversationId) return undefined;
+    setActiveMethodId(getSelectedMethod(conversationId));
+    return subscribeSelectedMethod(conversationId, (mid) => {
+      setActiveMethodId(mid || null);
+    });
   }, [conversationId]);
 
   useEffect(() => {
@@ -85,12 +105,15 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
     }
   }, [spec?.form_id]);
 
-  // The toast surfaces whenever the current status_text is set
-  // AND it isn't equal to the one the user just dismissed. New
-  // updates with different text re-open the toast automatically.
-  const showStatusToast = !!spec?.status_text && spec.status_text !== dismissedStatus;
+  // Status toast disabled — LLM feedback should land in the chat
+  // only, not duplicated inside the form panel. The chat already
+  // surfaces every progress / tool-result event, and a toast inside
+  // the form just made the surface feel busy. Kept the local
+  // `dismissedStatus` state untouched in case we want a different
+  // in-form indicator in the future.
+  const showStatusToast = false;
 
-  const handleAction = async ({ id, kind, values, skipped }) => {
+  const handleAction = async ({ id, kind, values, skipped, authMethod }) => {
     if (!spec) return;
     setError('');
 
@@ -139,6 +162,107 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
       return;
     }
 
+    // OAuth submit — when the active method declares
+    // `submit_action: "oauth_launch"`, run the PKCE browser flow
+    // before handing off to the save path. We resolve client_id /
+    // secret from the spec (Pattern A — hosted) or the user's
+    // values (Pattern B — BYOK), call the main-process helper, and
+    // augment the values with the resulting refresh_token + scope
+    // so the vault sees a complete credentials payload.
+    const activeMethodSpec = (() => {
+      const id = authMethod;
+      if (!id || !Array.isArray(spec.methods)) return null;
+      return spec.methods.find((m) => m.id === id) || null;
+    })();
+    if (activeMethodSpec?.submit_action === 'oauth_launch' && kind === 'primary') {
+      const oauthMeta = activeMethodSpec.oauth || {};
+      const clientId = oauthMeta.client_id || (values && values.client_id) || '';
+      const clientSecret = oauthMeta.client_secret || (values && values.client_secret) || undefined;
+      if (!clientId) {
+        setError('Missing OAuth client ID — fill the Client ID field below.');
+        return;
+      }
+      if (!oauthMeta.auth_url || !oauthMeta.token_url || !Array.isArray(oauthMeta.scopes)) {
+        setError('OAuth metadata is incomplete in the connector spec (auth_url / token_url / scopes).');
+        return;
+      }
+      setBusy(true);
+      try {
+        const result = await window.antontron?.oauthConnect?.({
+          authUrl: oauthMeta.auth_url,
+          tokenUrl: oauthMeta.token_url,
+          clientId,
+          clientSecret,
+          scopes: oauthMeta.scopes,
+          extraAuthParams: oauthMeta.extra_auth_params,
+        });
+        if (!result || result.ok === false) {
+          setError(result?.reason || 'OAuth flow failed.');
+          setBusy(false);
+          return;
+        }
+        // Build the credentials payload. Keep the user-entered
+        // client_id / client_secret too — they're needed later for
+        // refresh-token exchanges.
+        const oauthValues = {
+          ...(values || {}),
+          client_id: clientId,
+          ...(clientSecret ? { client_secret: clientSecret } : {}),
+          refresh_token: result.refresh_token || '',
+          access_token: result.access_token || '',
+          scope: result.scope || (oauthMeta.scopes || []).join(' '),
+          token_type: result.token_type || 'Bearer',
+        };
+        // OAuth submits go through the connector-aware save endpoint —
+        // not the legacy datasources path that validates against
+        // Anton-core's built-in engine schemas (which would reject
+        // a refresh_token-shaped payload). Falls back to the agent
+        // path when the spec hasn't been stamped with a connector id
+        // (e.g. an LLM-emitted form rather than a registry pick).
+        const connectorId = spec._connector_id || null;
+        if (connectorId) {
+          try {
+            const saved = await saveConnector(connectorId, {
+              method: authMethod || activeMethodSpec.id || null,
+              name: '',
+              values: oauthValues,
+            });
+            // Flip the form into its success branch so the user gets
+            // a clear "connected" affordance + the standard
+            // Close / View connectors actions.
+            patchForm(conversationId, {
+              form_id: spec.form_id,
+              _is_success: true,
+              title: `${saved.label || connectorId} connected`,
+              subtitle: 'Saved to Anton\'s data vault. Anton can use this connection in tasks.',
+            });
+            // Surface a one-line confirmation in the chat too.
+            onContinue?.({
+              text: `Connected ${saved.label || connectorId} — saved to the data vault.`,
+            });
+          } catch (e) {
+            setError(e?.message || 'Could not save the connection.');
+            setBusy(false);
+          }
+        } else if (onSubmit) {
+          // Spec wasn't stamped with a connector id — fall back to
+          // the legacy agent path with the augmented values.
+          onSubmit({
+            formId: spec.form_id,
+            formSpec: authMethod
+              ? { ...spec, auth_method: authMethod, selected_method: authMethod }
+              : spec,
+            values: oauthValues,
+            skipped: skipped || [],
+          });
+        }
+      } catch (e) {
+        setError(e?.message || 'OAuth flow failed.');
+        setBusy(false);
+      }
+      return;
+    }
+
     setBusy(true);
     try {
       // Endpoint-as-agent path: hand the submission off to the
@@ -150,7 +274,13 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
       if (onSubmit) {
         onSubmit({
           formId: spec.form_id,
-          formSpec: spec,
+          // Spread the chosen auth_method into the spec we send so the
+          // server-side agent reads it from spec.auth_method (its
+          // existing entry point) AND keeps spec.selected_method for
+          // any logic that reads it directly.
+          formSpec: authMethod
+            ? { ...spec, auth_method: authMethod, selected_method: authMethod }
+            : spec,
           values: values || {},
           skipped: skipped || [],
         });
@@ -192,6 +322,17 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
     if (conversationId) clearForm(conversationId);
   };
 
+  // Resolve the active method spec so the breadcrumb header can show
+  // its label. Falls back to `spec.selected_method` so a server-side
+  // pre-pick still surfaces in the header.
+  const resolvedActiveMethodId = activeMethodId || spec.selected_method || null;
+  const activeMethodSpec = (Array.isArray(spec.methods) && resolvedActiveMethodId)
+    ? (spec.methods.find((m) => m.id === resolvedActiveMethodId) || null)
+    : null;
+  const onBackToOptions = () => {
+    if (conversationId) setSelectedMethod(conversationId, null);
+  };
+
   return (
     // `key` flips when a NEW form_id arrives, so React remounts the
     // wrapper and the appearance animation fires fresh. Patches that
@@ -201,36 +342,107 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
       key={appearKey}
       style={{
         position: 'relative',
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 12,
+        overflow: 'hidden',
+        // The panel sits in the right rail's flex column — without
+        // `flex-shrink: 0`, the rail squeezes the panel down to fit
+        // its own height, our `overflow: hidden` clips the content,
+        // and the rail's `overflowY: auto` never sees anything to
+        // scroll. Pinning shrink to 0 makes the panel claim its full
+        // content height so the rail's scroll engages naturally.
+        flexShrink: 0,
+        // Highlight ring driven from outside (e.g. the chat's
+        // connect-intro bubble on hover) — accent border + soft
+        // halo so the form card draws the eye without layout shift.
+        boxShadow: highlighted
+          ? '0 0 0 2px var(--accent), 0 0 22px color-mix(in srgb, var(--accent) 28%, transparent)'
+          : 'none',
+        transition: 'box-shadow 180ms ease',
         animation: 'dvf-appear 320ms cubic-bezier(0.2, 0.7, 0.2, 1) both',
       }}
     >
-      <button
-        type="button"
-        onClick={handleClose}
-        title="Close form"
-        aria-label="Close form"
-        style={{
-          position: 'absolute',
-          top: 4, right: 4, zIndex: 5,
-          width: 26, height: 26, borderRadius: 6,
-          background: 'transparent', border: 0,
-          color: 'var(--ink-4)',
-          display: 'inline-grid', placeItems: 'center',
-          cursor: 'pointer',
-          transition: 'color 140ms ease, background 140ms ease',
-        }}
-        onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
-        onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-4)'; e.currentTarget.style.background = 'transparent'; }}
-      >
-        {Ico.close ? Ico.close(13) : <span style={{ fontSize: 16, lineHeight: 1 }}>×</span>}
-      </button>
-    <RailCard
-      title="Connect"
-      defaultOpen
-      noChevron
-      maxBodyHeight={null}
-    >
-      <div style={{ padding: '4px 0 8px' }}>
+      {/* Header bar — when a method is active, the bar IS the
+          "← Back to options · <method>" navigation. Otherwise it's
+          a plain "Connect" label. The X close button sits flush
+          right in either case. */}
+      <div style={{
+        display: 'flex', alignItems: 'stretch',
+        borderBottom: '1px solid var(--line)',
+        minHeight: 42,
+      }}>
+        {activeMethodSpec ? (
+          <button
+            type="button"
+            onClick={onBackToOptions}
+            disabled={busy}
+            title="Back to options"
+            style={{
+              flex: 1, minWidth: 0,
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '0 14px',
+              background: 'transparent', border: 0,
+              cursor: busy ? 'not-allowed' : 'pointer',
+              opacity: busy ? 0.6 : 1,
+              fontFamily: FONT_BODY,
+              textAlign: 'left',
+              transition: 'background 120ms ease',
+            }}
+            onMouseOver={(e) => { if (!busy) e.currentTarget.style.background = 'var(--surface-2)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
+          >
+            <span style={{
+              color: 'var(--accent)',
+              fontSize: 13, fontWeight: 600,
+              display: 'inline-flex', alignItems: 'center', gap: 4,
+              flexShrink: 0,
+            }}>
+              <span aria-hidden>{'←'}</span>
+              Back to options
+            </span>
+            <span style={{
+              color: 'var(--ink-4)', fontSize: 12.5,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+              minWidth: 0, flex: 1,
+            }}>
+              · {activeMethodSpec.label || activeMethodSpec.id}
+            </span>
+          </button>
+        ) : (
+          <div style={{
+            flex: 1, minWidth: 0,
+            display: 'flex', alignItems: 'center',
+            padding: '0 14px',
+            fontFamily: FONT_BODY, fontSize: 13, fontWeight: 600,
+            color: 'var(--ink)', letterSpacing: '-0.005em',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>
+            Connect
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={handleClose}
+          title="Close form"
+          aria-label="Close form"
+          style={{
+            flexShrink: 0,
+            width: 38, alignSelf: 'stretch',
+            background: 'transparent', border: 0,
+            color: 'var(--ink-4)',
+            display: 'inline-grid', placeItems: 'center',
+            cursor: 'pointer',
+            transition: 'color 140ms ease, background 140ms ease',
+          }}
+          onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+          onMouseOut={(e) => { e.currentTarget.style.color = 'var(--ink-4)'; e.currentTarget.style.background = 'transparent'; }}
+        >
+          {Ico.close ? Ico.close(13) : <span style={{ fontSize: 16, lineHeight: 1 }}>×</span>}
+        </button>
+      </div>
+
+      <div style={{ padding: '10px 14px 14px' }}>
         {/* Status toast — sits at the top of the panel body so it
             always occupies the same slot, doesn't displace the
             form below, and can be dismissed independently of any
@@ -286,7 +498,7 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
             </button>
           </div>
         )}
-        <DataVaultForm spec={spec} busy={busy} onAction={handleAction} />
+        <DataVaultForm spec={spec} busy={busy} onAction={handleAction} conversationId={conversationId} />
         {error && (
           <div style={{
             marginTop: 10, padding: '8px 10px', borderRadius: 7,
@@ -296,7 +508,6 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
           }}>{error}</div>
         )}
       </div>
-    </RailCard>
     </div>
   );
 }

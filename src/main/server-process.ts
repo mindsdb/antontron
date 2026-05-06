@@ -21,6 +21,21 @@ let serverStarted = false;
 // (which would race for the same port and the second would fail).
 let pendingStart: Promise<StartServerResult> | null = null;
 
+// Diagnostics — captured so the renderer can surface them in a help
+// modal when the user wonders why the backend is offline. We keep
+// the most recent start failure reason and a rolling tail of stderr
+// (latest ~32 KB) since the python crash trace usually lives in the
+// last few lines. Flushed on a successful start.
+const STDERR_BUFFER_BYTES = 32 * 1024;
+let recentStderr = '';
+let lastStartError: string | null = null;
+let lastStartAt: number | null = null;
+let lastExitCode: number | null = null;
+
+function appendStderr(chunk: string) {
+  recentStderr = (recentStderr + chunk).slice(-STDERR_BUFFER_BYTES);
+}
+
 export function getServerPort(): number {
   return serverPort;
 }
@@ -37,6 +52,27 @@ function getAntonPython(): string | null {
     process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
   );
   return fs.existsSync(candidate) ? candidate : null;
+}
+
+// Build a PATH with ~/.local/bin and ~/.cargo/bin prepended. Critical
+// for macOS (and to a lesser extent Linux) GUI launches: when Anton.app
+// starts from Finder/Dock, process.env.PATH is the minimal launchd PATH
+// (`/usr/bin:/bin:/usr/sbin:/sbin`) — shell init files aren't read,
+// so `~/.local/bin` (where the installer puts `uv`) is missing.
+//
+// The Python server we spawn inherits this PATH; anton's scratchpad
+// runtime uses `shutil.which("uv")` to pick the fast venv path. Without
+// uv on PATH it falls back to stdlib `venv.create(... with_pip=False)`,
+// which is the failure mode users see as "Python venv creation is failing"
+// — the venv has no pip, so subsequent `pip install` calls inside the
+// scratchpad fail. With uv on PATH the runtime gets a proper, seeded
+// venv and everything works.
+function getEnvPath(): string {
+  const localBin = path.join(os.homedir(), '.local', 'bin');
+  const cargoBin = path.join(os.homedir(), '.cargo', 'bin');
+  const currentPath = process.env.PATH || '';
+  const parts = [localBin, cargoBin, currentPath].filter(Boolean);
+  return parts.join(path.delimiter);
 }
 
 function getServerDir(): string {
@@ -83,25 +119,29 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
   serverPort = opts.port ?? (Number(process.env.ANTON_SERVER_PORT) || DEFAULT_PORT);
   const readyTimeoutMs = opts.readyTimeoutMs ?? 15000;
 
+  lastStartAt = Date.now();
   const pythonCmd = getAntonPython();
   if (!pythonCmd) {
+    lastStartError = 'Anton Python interpreter not found. Run the installer first.';
     return {
       ok: false,
-      reason: 'Anton Python interpreter not found. Run the installer first.',
+      reason: lastStartError,
     };
   }
 
   const serverDir = getServerDir();
   if (!fs.existsSync(path.join(serverDir, 'main.py'))) {
+    lastStartError = `Server source not found at ${serverDir}/main.py`;
     return {
       ok: false,
-      reason: `Server source not found at ${serverDir}/main.py`,
+      reason: lastStartError,
     };
   }
 
   pendingStart = (async (): Promise<StartServerResult> => {
     const env = {
       ...process.env,
+      PATH: getEnvPath(),
       PYTHONUNBUFFERED: '1',
       ANTON_SERVER_PORT: String(serverPort),
       ANTON_SERVER_HOST: SERVER_HOST,
@@ -115,14 +155,23 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     });
 
     child.stdout.on('data', (d) => {
-      process.stdout.write(`[anton-server] ${d.toString()}`);
+      const text = d.toString();
+      // Server logs go to stdout via uvicorn — the python crash trace
+      // we want to surface lives on stderr, but errors propagated
+      // through logging.error often land on stdout too. Buffer both
+      // so the help modal has the complete picture.
+      appendStderr(text);
+      process.stdout.write(`[anton-server] ${text}`);
     });
     child.stderr.on('data', (d) => {
-      process.stderr.write(`[anton-server] ${d.toString()}`);
+      const text = d.toString();
+      appendStderr(text);
+      process.stderr.write(`[anton-server] ${text}`);
     });
     child.on('exit', (code) => {
       serverStarted = false;
       serverProcess = null;
+      lastExitCode = code;
       if (code !== 0 && code !== null) {
         console.error(`[anton-server] exited with code ${code}`);
       }
@@ -132,13 +181,17 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
 
     const ready = await probeHealth(readyTimeoutMs);
     if (!ready) {
+      lastStartError = `Server did not respond on /health within ${readyTimeoutMs}ms.`;
       return {
         ok: false,
-        reason: `Server did not respond on /health within ${readyTimeoutMs}ms.`,
+        reason: lastStartError,
         port: serverPort,
       };
     }
     serverStarted = true;
+    // Successful start — clear the previous failure note but keep
+    // the rolling stderr in case downstream code wants to inspect.
+    lastStartError = null;
     return { ok: true, port: serverPort };
   })();
 
@@ -167,4 +220,30 @@ export function isServerRunning(): boolean {
 // uses this to show "starting…" without firing a duplicate start.
 export function isServerStarting(): boolean {
   return pendingStart !== null;
+}
+
+export interface ServerDiagnostics {
+  running: boolean;
+  starting: boolean;
+  port: number;
+  /** Last failure reason from startServer(); null after a successful start. */
+  lastError: string | null;
+  /** Last exit code if the process has died. */
+  lastExitCode: number | null;
+  /** Wall-clock ms of the last start attempt; null until first attempt. */
+  lastStartAt: number | null;
+  /** Tail of stdout+stderr since this run of the main process. */
+  recentLog: string;
+}
+
+export function getServerDiagnostics(): ServerDiagnostics {
+  return {
+    running: isServerRunning(),
+    starting: isServerStarting(),
+    port: serverPort,
+    lastError: lastStartError,
+    lastExitCode,
+    lastStartAt,
+    recentLog: recentStderr,
+  };
 }

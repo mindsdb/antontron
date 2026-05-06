@@ -12,9 +12,23 @@ contextBridge.exposeInMainWorld('antontron', {
   serverStart:  () => ipcRenderer.invoke('server:start'),
   serverStop:   () => ipcRenderer.invoke('server:stop'),
   serverToggle: () => ipcRenderer.invoke('server:toggle'),
+  // Diagnostics — last start error + tail of stdout/stderr. Used
+  // by the renderer's "why is the backend offline?" help modal.
+  serverDiagnostics: () => ipcRenderer.invoke('server:get-diagnostics'),
+  // PKCE OAuth — main spawns a loopback server + opens the
+  // browser, returns the resulting tokens (or an error reason).
+  oauthConnect: (opts: {
+    authUrl: string;
+    tokenUrl: string;
+    clientId: string;
+    clientSecret?: string;
+    scopes: string[];
+    extraAuthParams?: Record<string, string>;
+  }) => ipcRenderer.invoke('oauth:connect', opts),
 
   // Open a local file/folder in the OS default handler.
   openPath:     (p: string) => ipcRenderer.invoke('shell:open-path', p),
+  showItemInFolder: (p: string) => ipcRenderer.invoke(IPC.SHOW_ITEM_IN_FOLDER, p),
   // Move a local file/folder to the OS Trash. Returns
   // { ok: true } on success or { ok: false, reason } on failure.
   trashItem:    (p: string) => ipcRenderer.invoke('shell:trash-item', p),

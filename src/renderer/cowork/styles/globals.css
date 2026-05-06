@@ -196,7 +196,13 @@ body[data-theme="dark"] {
   --surface-3:    #1A2640;
   --line:         #1E2A44;
   --line-2:       #2A3957;
-  --sidebar-bg:   var(--surface);
+  /* Sidebar base — a hint of cyan over the surface navy, sized
+     small enough that the panel still reads as part of the same
+     dark family as the rest of the app. The ::before halo at the
+     top adds a brighter pool; the rest of the panel stays close to
+     surface. Tweak the second percentage up/down to push the tint
+     warmer/cooler. */
+  --sidebar-bg:   color-mix(in srgb, var(--surface) 97%, var(--accent));
 
   --ink:          #F2F6FF;
   --ink-2:        #C7D2E5;
@@ -2143,7 +2149,7 @@ body[data-theme="dark"] .anton-sidebar__wordmark {
   text-shadow: 0 0 14px var(--accent-glow);
 }
 
-/* Cyan halo at the top of the sidebar — only in dark mode */
+/* Cyan halo at the top of the sidebar — only in dark mode. */
 body[data-theme="dark"] .app-sidebar::before {
   content: '';
   position: absolute;
@@ -2278,14 +2284,11 @@ body[data-theme="dark"] .app-sidebar .nav-item.active::before {
   overflow: hidden;
 }
 body[data-theme="dark"] .anton-group {
-  background: linear-gradient(180deg, var(--surface) 0%, var(--surface-2) 100%);
-}
-body[data-theme="dark"] .anton-group::before {
-  content: '';
-  position: absolute;
-  left: 12px; right: 12px; top: 0; height: 1px;
-  background: linear-gradient(90deg, transparent, var(--accent-dim, var(--accent)), transparent);
-  opacity: 0.5;
+  /* Flat surface — the previous vertical gradient + accent hairline
+     read as decoration on top of an already-distinct panel. The
+     border + surface-2 fill give enough separation from the sidebar
+     base on their own. */
+  background: var(--surface-2);
 }
 
 /* Pinned empty-state */
@@ -2352,6 +2355,22 @@ body[data-theme="dark"] .app-sidebar .sidebar-empty {
   /* Default: muted (offline) palette. Overridden by .is-on / .is-busy below. */
   --status-label-color: var(--ink-3);
   --status-value-color: var(--ink-3);
+  /* Reset button defaults — the pill is rendered as a <button> so it can
+     open the server-help modal on click. */
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: default;
+}
+/* Clickable variant — hovers brighten the surface a touch so the user
+   senses the affordance without the pill changing shape. */
+.status-pill.is-clickable { cursor: pointer; transition: background 140ms ease, border-color 140ms ease; }
+.status-pill.is-clickable:hover {
+  background: var(--surface-3);
+  border-color: var(--line-2);
+}
+body[data-theme="dark"] .status-pill.is-clickable:hover {
+  background: color-mix(in srgb, var(--bg) 78%, var(--accent));
 }
 .status-pill.is-on   { --status-label-color: var(--ink-2); --status-value-color: var(--accent); }
 .status-pill.is-busy { --status-label-color: var(--ink-2); --status-value-color: var(--accent); }
@@ -2477,6 +2496,15 @@ body[data-theme="dark"] .server-toggle.is-on:hover {
   box-shadow: none;
   color: var(--accent);
 }
+
+/* Help affordance next to the server toggle — appears only when the
+   backend is offline. Same size as the toggle so they read as a pair. */
+.server-help {
+  font-family: var(--font-display, inherit);
+  font-weight: 700;
+  color: var(--ink-3);
+}
+.server-help:hover { color: var(--ink); }
 
 /* Floating bottom-right theme toggle. Always reachable, sits above the
    gravity-field background and clear of the composer. */
@@ -3336,9 +3364,13 @@ body[data-theme="dark"] .chat-shell .chat-composer-dock > div {
   border: 1px solid var(--line);
   border-radius: 18px;
   padding: 14px 16px 12px;
+  /* Subtle all-around lift — replaces the heavier downward shadow we
+     used to pair with the bottom gradient mask. With the mask gone, a
+     soft even glow reads as "floating panel" without darkening the
+     gravity field below. */
   box-shadow:
-    0 8px 32px rgba(15, 16, 17, 0.08),
-    0 1px 0 rgba(15, 16, 17, 0.02);
+    0 1px 2px rgba(15, 16, 17, 0.04),
+    0 4px 14px rgba(15, 16, 17, 0.06);
 }
 .chat-floating-composer .composer-textarea {
   font-family: var(--font-body);
@@ -3375,9 +3407,13 @@ body[data-theme="dark"] .chat-shell .chat-composer-dock > div {
   color: var(--ink-4);
 }
 body[data-theme="dark"] .chat-floating-composer .composer-wrap {
+  /* Softer than the old 0.55-alpha 32-blur — that was producing a
+     heavy slab below the composer that drew the eye down. Match the
+     light-mode shadow's restraint, just dialed up enough to read
+     against the navy surface. */
   box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.55),
-    0 0 0 1px rgba(255, 255, 255, 0.02);
+    0 4px 18px rgba(0, 0, 0, 0.28),
+    0 0 0 1px rgba(255, 255, 255, 0.03);
 }
 .chat-floating-composer .composer-wrap.focused {
   border-color: var(--accent);

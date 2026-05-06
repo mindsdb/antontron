@@ -99,9 +99,29 @@ def is_anton_available() -> bool:
 
 
 def _project_base(project: Optional[str]) -> Path:
-    """Resolve project name → filesystem path. None ⇒ active project."""
-    _, base = projects_store.resolve_project(project)
-    return base
+    """Resolve project name → filesystem path. None ⇒ active project.
+
+    Fallback: if `project` is named but its directory is missing
+    (e.g. the user deleted the project on disk while a stale
+    conversation is still cached on the client with that
+    `projectName`), silently fall back to the active project. That
+    project itself self-heals to "default" via `get_active` if its
+    own dir is gone, so a chat can always make forward progress.
+    Without this, every downstream file open under the deleted dir
+    surfaces as "[Errno 2] No such file or directory" and the user
+    can't chat anywhere until they fix it manually.
+    """
+    try:
+        _, base = projects_store.resolve_project(project)
+        return base
+    except FileNotFoundError:
+        if project:
+            logger.info(
+                "Project '%s' no longer exists on disk; falling back to active project.",
+                project,
+            )
+        _, base = projects_store.resolve_project(None)
+        return base
 
 
 def _episodes_dir(project: Optional[str]) -> Path:
@@ -572,7 +592,13 @@ def _ensure_meta(
     if meta:
         return meta
     now = datetime.now(timezone.utc).isoformat()
-    name, _ = projects_store.resolve_project(project)
+    # Same fallback as `_project_base`: if the named project is gone,
+    # resolve to the active one so the new meta lands somewhere valid
+    # and the chat can continue.
+    try:
+        name, _ = projects_store.resolve_project(project)
+    except FileNotFoundError:
+        name, _ = projects_store.resolve_project(None)
     meta = {
         "id": conversation_id,
         "title": "",
@@ -684,11 +710,13 @@ async def _build_chat_session(
         build_cowork_request_credentials_tool,
         build_cowork_fetch_submission_tool,
         build_cowork_update_form_tool,
+        build_cowork_lookup_connector_tool,
     )
     PUBLISH_TOOL = build_cowork_publish_tool()
     REQUEST_CREDENTIALS_TOOL = build_cowork_request_credentials_tool()
     FETCH_SUBMISSION_TOOL = build_cowork_fetch_submission_tool()
     UPDATE_FORM_TOOL = build_cowork_update_form_tool()
+    LOOKUP_CONNECTOR_TOOL = build_cowork_lookup_connector_tool()
 
     try:
         from anton.core.datasources.data_vault import LocalDataVault
@@ -783,6 +811,7 @@ async def _build_chat_session(
         tools=[
             CONNECT_DATASOURCE_TOOL,
             PUBLISH_TOOL,
+            LOOKUP_CONNECTOR_TOOL,
             REQUEST_CREDENTIALS_TOOL,
             FETCH_SUBMISSION_TOOL,
             UPDATE_FORM_TOOL,

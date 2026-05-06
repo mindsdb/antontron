@@ -241,13 +241,28 @@ body.gf-theme-dark  { background: #0a1426; }
   max-width: 520px;
 }
 
-/* Legal viewer as fixed overlay */
+/* Legal viewer as fixed overlay. Portaled to <body> from
+   TermsConsent so it sits above the onboard-shell stacking context
+   and the ANTON header never bleeds through. z-index above
+   .titlebar-drag (1000) so the macOS drag strip doesn't show through
+   either; the legal-viewer-header carries its own -webkit-app-region:
+   drag so window dragging still works.
+
+   Background is set with both a hard light-mode fallback and a
+   dark-mode override below — explicit so the variable chain
+   (var(--bg-primary) → var(--surface-0) → var(--surface)) can't
+   resolve to transparent in any unforeseen scope. The gravity field
+   underneath the React root must NEVER be visible behind this. */
 .legal-viewer-overlay {
   position: fixed;
   inset: 0;
-  z-index: 100;
-  background: var(--bg-primary);
+  z-index: 1100;
+  background: #FAFAFA;
   animation: fadeIn 0.25s ease-out;
+}
+
+body[data-theme="dark"] .legal-viewer-overlay {
+  background: #080d18;
 }
 
 .logo-section {
@@ -1244,7 +1259,10 @@ body.gf-theme-dark  { background: #0a1426; }
 .settings-select {
   padding: 10px 12px;
   background: var(--bg-primary);
-  border: 1px solid var(--border);
+  /* Use --text-muted so the API-key field reads as a real input,
+     not a borderless block; old --border was barely visible in
+     light mode against the white surface. */
+  border: 1px solid var(--text-muted);
   border-radius: 6px;
   color: var(--text-primary);
   font-family: inherit;
@@ -1393,7 +1411,10 @@ body.gf-theme-dark  { background: #0a1426; }
   padding: 14px 16px;
   padding-top: 20px;
   background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  /* Subtle neutral border for the unselected state — quieter than
+     --text-muted so the selected card (which gets the accent ring +
+     halo) clearly wins the eye. */
+  border: 1px solid var(--ink-4);
   border-radius: 10px;
   cursor: pointer;
   text-align: center;
@@ -1403,18 +1424,23 @@ body.gf-theme-dark  { background: #0a1426; }
   align-items: center;
   gap: 6px;
   font-family: inherit;
-  transition: all 0.3s ease;
+  transition: border-color 0.2s ease, background 0.2s ease, box-shadow 0.2s ease;
   -webkit-app-region: no-drag;
 }
 
 .provider-card:hover {
-  border-color: var(--text-muted);
+  border-color: var(--text-strong, var(--ink-2));
   background: var(--bg-tertiary);
 }
 
+/* Selected card — accent border + tinted surface + soft halo so the
+   pick reads as "this is the one you've chosen" without changing
+   layout. The 1 px box-shadow ring effectively doubles the border
+   weight without shifting any pixels. */
 .provider-card.selected {
-  border-color: var(--text-muted);
-  background: var(--bg-tertiary);
+  border-color: var(--accent);
+  background: var(--accent-bg);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 18px var(--accent-glow);
 }
 
 .provider-card-name {
@@ -1455,7 +1481,9 @@ body.gf-theme-dark  { background: #0a1426; }
   padding: 0;
   margin: 8px 0 0;
   font-size: 11px;
-  color: rgba(255, 255, 255, 0.65);
+  /* Theme-aware secondary ink — the previous fixed white-on-65%
+     read as invisible white-on-white in light mode. */
+  color: var(--text-secondary);
   text-align: left;
 }
 
@@ -1478,10 +1506,14 @@ body.gf-theme-dark  { background: #0a1426; }
 
 .provider-card-link {
   font-size: 12px;
-  color: var(--cyan, #00e5ff) !important;
+  /* --accent-strong is the deep teal in light mode (#115562) and
+     bright teal in dark — both have strong contrast against their
+     surfaces. The previous fallback (#00e5ff) was unreadable on
+     the white light-mode surface. */
+  color: var(--accent-strong) !important;
   cursor: pointer;
   margin-top: 6px;
-  opacity: 0.85;
+  opacity: 0.95;
   transition: opacity 0.15s;
   display: inline-block;
   white-space: nowrap;
@@ -1493,9 +1525,12 @@ body.gf-theme-dark  { background: #0a1426; }
 }
 
 .onboard-link {
-  color: var(--cyan, #00e5ff);
+  /* Same theme-aware deep-teal as the provider-card link so light
+     mode reads with real contrast (was a near-invisible bright
+     cyan against white). */
+  color: var(--accent-strong);
   cursor: pointer;
-  opacity: 0.7;
+  opacity: 0.9;
 }
 
 .onboard-link:hover {
@@ -1741,7 +1776,10 @@ body.gf-theme-dark  { background: #0a1426; }
   width: 18px;
   height: 18px;
   min-width: 18px;
-  border: 2px solid var(--border);
+  /* High-contrast border so the checkbox reads as an interactive
+     control instead of melting into the surrounding card. The old
+     `--border` was nearly invisible against `--bg-primary`. */
+  border: 2px solid var(--text-muted);
   border-radius: 4px;
   background: var(--bg-primary);
   cursor: pointer;
@@ -1750,20 +1788,52 @@ body.gf-theme-dark  { background: #0a1426; }
   position: relative;
 }
 
+.terms-checkbox:hover {
+  border-color: var(--text-secondary, var(--ink-2));
+}
+
+.terms-checkbox:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 2px;
+}
+
+.terms-checkbox-label:hover .terms-checkbox {
+  border-color: var(--text-secondary, var(--ink-2));
+}
+
+/* Checked state — keep the same dark border as unchecked so the
+   control reads as "still a checkbox", just with a tick. The
+   previous design filled the box with accent-cyan and used the
+   page bg for the tick, which rendered the tick invisible against
+   the bright cyan in dark mode. */
 .terms-checkbox:checked {
-  background: var(--accent-cyan);
-  border-color: var(--accent-cyan);
-  box-shadow: 0 0 10px rgba(0, 229, 255, 0.3);
+  background: var(--bg-primary);
+  border-color: var(--text-muted);
 }
 
 .terms-checkbox:checked::after {
   content: '\2713';
   position: absolute;
-  top: -1px;
-  left: 2px;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
   font-size: 13px;
   font-weight: 700;
-  color: var(--bg-primary);
+  line-height: 1;
+  color: var(--accent-cyan);
+}
+
+/* Dark mode flips the tick to white — the bright accent cyan on a
+   dark navy bg is legible but lower-contrast than a pure white tick,
+   which the user expects to read as "checked". */
+body[data-theme="dark"] .terms-checkbox:checked::after {
+  color: #ffffff;
+}
+
+.terms-checkbox-label:hover .terms-checkbox:checked,
+.terms-checkbox:checked:hover {
+  border-color: var(--text-secondary, var(--ink-2));
 }
 
 .terms-checkbox-text {
@@ -1877,6 +1947,52 @@ body.gf-theme-dark  { background: #0a1426; }
   word-wrap: break-word;
   max-width: 720px;
   margin: 0 auto;
+}
+
+/* Small explainer under the SETUP ANTON CTA on the consent
+   screen — quiet, single-paragraph caption tone. */
+.terms-setup-note {
+  margin: 0;
+  max-width: 360px;
+  text-align: center;
+  font-size: 12px;
+  line-height: 1.55;
+  color: var(--text-muted);
+  -webkit-app-region: no-drag;
+}
+
+/* Floating back button on the legal viewer — no fill, no border.
+   Fixed to the bottom-right corner of the viewport so it travels
+   with the user as they scroll the document. Hover bumps the text
+   color up; no background flash. */
+.legal-floating-back {
+  position: fixed;
+  right: 32px;
+  bottom: 28px;
+  z-index: 1101;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  -webkit-app-region: no-drag;
+  transition: color 120ms ease, transform 120ms ease;
+}
+.legal-floating-back:hover {
+  color: var(--text-primary);
+  transform: translateX(-1px);
+}
+.legal-floating-back:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 4px;
+  border-radius: 4px;
 }
 
 /* ─── Animations ─── */

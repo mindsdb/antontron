@@ -19,75 +19,24 @@ import {
 import { copyText } from '../lib/clipboard';
 import { ArtifactViewer } from '../components/artifact';
 import { openExternal } from '../lib/host';
+import {
+  PageHeader,
+  FilterRow,
+  SearchInput,
+  SortPill,
+  ViewToggle,
+  HoverMenu,
+  useCollectionShortcut,
+} from '../components/collection';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
 const FONT_MONO    = "var(--font-mono)";
 
-// ─── Header ──────────────────────────────────────────────────────────────
+const EMPTY_ARTIFACTS = [];
 
-function ArtifactsHeader() {
-  return (
-    <div style={{
-      padding: '28px 32px 0',
-      display: 'flex', flexDirection: 'column', gap: 18,
-    }}>
-      <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <h1 style={{
-          margin: 0,
-          fontFamily: FONT_DISPLAY, fontSize: 28, fontWeight: 600,
-          letterSpacing: '-0.005em', color: 'var(--ink)',
-        }}>Live artifacts</h1>
-        <p style={{
-          margin: 0, fontFamily: FONT_BODY, fontSize: 13.5,
-          color: 'var(--ink-3)', lineHeight: 1.5,
-        }}>
-          Documents, dashboards, and code Anton produces. Publish HTML to share a live URL.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ─── Filter row ──────────────────────────────────────────────────────────
-
-function SearchInput({ value, onChange, inputRef }) {
-  return (
-    <div style={{
-      flex: '0 1 320px', minWidth: 220,
-      display: 'inline-flex', alignItems: 'center', gap: 8,
-      padding: '7px 11px', borderRadius: 7,
-      background: 'var(--surface-2)',
-      border: '1px solid var(--line)',
-    }}>
-      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--ink-3)' }}>
-        {Ico.search(13)}
-      </span>
-      <input
-        ref={inputRef}
-        type="text"
-        value={value}
-        onChange={(e) => onChange?.(e.target.value)}
-        placeholder="Search artifacts"
-        style={{
-          flex: 1, minWidth: 0,
-          background: 'transparent', border: 0, outline: 'none',
-          fontFamily: FONT_BODY, fontSize: 12.5,
-          color: 'var(--ink-2)',
-        }}
-      />
-      <span style={{
-        flexShrink: 0,
-        padding: '1px 5px', borderRadius: 3,
-        background: 'var(--surface-3)',
-        border: '1px solid var(--line-2)',
-        fontFamily: FONT_MONO, fontSize: 10,
-        color: 'var(--ink-4)',
-      }}>⌘K</span>
-    </div>
-  );
-}
-
+// Sort options for the artifacts collection. Per-page (publishing
+// state isn't relevant to other collections).
 const SORT_OPTIONS = [
   { id: 'published',   label: 'Published first' },
   { id: 'recent',      label: 'Recent' },
@@ -96,154 +45,21 @@ const SORT_OPTIONS = [
   { id: 'type',        label: 'Type' },
 ];
 
-function SortPill({ value, onChange }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef(null);
-  useEffect(() => {
-    if (!open) return;
-    const onClick = (e) => { if (!ref.current?.contains(e.target)) setOpen(false); };
-    const onKey = (e) => { if (e.key === 'Escape') setOpen(false); };
-    window.addEventListener('mousedown', onClick);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onClick);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-  const current = SORT_OPTIONS.find((o) => o.id === value) || SORT_OPTIONS[0];
-  return (
-    <div ref={ref} style={{ position: 'relative' }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          padding: '7px 11px', borderRadius: 7,
-          background: 'var(--surface-2)',
-          border: '1px solid var(--line)',
-          color: 'var(--ink-2)',
-          fontFamily: FONT_BODY, fontSize: 12.5,
-          cursor: 'pointer',
-        }}
-      >
-        <span style={{ color: 'var(--ink-4)', fontSize: 11.5 }}>Sort:</span>
-        <span>{current.label}</span>
-        <span style={{ display: 'inline-flex', color: 'var(--ink-3)' }}>
-          {Ico.chevDown(11)}
-        </span>
-      </button>
-      {open && (
-        <div style={{
-          position: 'absolute', top: 'calc(100% + 4px)', left: 0,
-          minWidth: 180, zIndex: 20,
-          background: 'var(--surface)',
-          border: '1px solid var(--line)',
-          borderRadius: 8,
-          boxShadow: '0 12px 32px rgba(0,0,0,0.28)',
-          padding: '4px 0',
-        }}>
-          {SORT_OPTIONS.map((opt) => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => { onChange?.(opt.id); setOpen(false); }}
-              style={{
-                display: 'flex', alignItems: 'center',
-                width: 'calc(100% - 8px)', margin: '0 4px',
-                padding: '7px 10px', borderRadius: 5,
-                background: opt.id === value ? 'var(--surface-2)' : 'transparent',
-                border: 0,
-                fontFamily: FONT_BODY, fontSize: 12.5,
-                color: 'var(--ink-2)', textAlign: 'left',
-                cursor: 'pointer',
-              }}
-              onMouseOver={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
-              onMouseOut={(e) => { e.currentTarget.style.background = opt.id === value ? 'var(--surface-2)' : 'transparent'; }}
-            >
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function ViewToggle({ value, onChange }) {
-  const Btn = ({ id, icon, label }) => {
-    const active = value === id;
-    return (
-      <button
-        type="button"
-        onClick={() => onChange?.(id)}
-        style={{
-          display: 'inline-flex', alignItems: 'center', gap: 6,
-          padding: '5px 10px', borderRadius: 5,
-          background: active ? 'var(--surface-3)' : 'transparent',
-          color: active ? 'var(--ink)' : 'var(--ink-3)',
-          border: 0,
-          boxShadow: active ? 'inset 0 0 0 1px var(--line-2)' : 'none',
-          fontFamily: FONT_BODY, fontSize: 12,
-          cursor: 'pointer',
-          transition: 'background .15s ease, color .15s ease',
-        }}
-        title={label}
-      >
-        {icon}
-        <span>{label}</span>
-      </button>
-    );
-  };
-  return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center',
-      padding: 2, borderRadius: 7,
-      background: 'var(--surface-2)',
-      border: '1px solid var(--line)',
-    }}>
-      <Btn id="grid" icon={Ico.grid(12)} label="Grid" />
-      <Btn id="list" icon={Ico.list(12)} label="List" />
-    </div>
-  );
-}
-
-function FilterRow({
-  search, onSearchChange, sort, onSortChange, view, onViewChange,
-  total, filtered, publishedCount, searchRef,
-}) {
+function ArtifactsCounts({ search, total, filtered, publishedCount }) {
   const filterActive = (search || '').trim().length > 0;
   const countText = filterActive
     ? `Showing ${filtered} of ${total}`
     : `${total} ${total === 1 ? 'artifact' : 'artifacts'}`;
   return (
-    <div style={{
-      padding: '0 32px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    }}>
-      {/* Top row — search + sort on the left, view toggle on the right */}
-      <div style={{
-        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
-      }}>
-        <SearchInput value={search} onChange={onSearchChange} inputRef={searchRef} />
-        <SortPill value={sort} onChange={onSortChange} />
-        <span style={{ flex: 1 }} />
-        <ViewToggle value={view} onChange={onViewChange} />
-      </div>
-
-      {/* Count line — independent of the controls; updates on filter */}
-      <div style={{
-        fontFamily: FONT_MONO, fontSize: 11,
-        color: 'var(--ink-4)', letterSpacing: '0.04em',
-      }}>
-        {countText}
-        {publishedCount > 0 && (
-          <>
-            {' · '}
-            <span style={{ color: 'var(--accent)' }}>{publishedCount} published</span>
-          </>
-        )}
-      </div>
-    </div>
+    <>
+      {countText}
+      {publishedCount > 0 && (
+        <>
+          {' · '}
+          <span style={{ color: 'var(--accent)' }}>{publishedCount} published</span>
+        </>
+      )}
+    </>
   );
 }
 
@@ -450,9 +266,45 @@ function PublishedUrlRow({ url, onOpen, onCopy }) {
 
 // ─── Card / Bubble (grid view) ───────────────────────────────────────────
 
-function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpublish: doUnpublish, busy }) {
+// Static path row used in place of the published URL pill when the
+// artifact is local-only. Mirrors the URL pill's surface so the card
+// keeps a consistent slot height as state flips between published
+// and not. Ellipsis-truncates a long path; full path lives in the
+// `title` attribute for hover. RTL trick on the path span keeps the
+// filename visible (truncates the front, not the back).
+function LocalPathRow({ path }) {
+  if (!path) return null;
+  return (
+    <div
+      title={path}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 8,
+        padding: '7px 10px', borderRadius: 8,
+        background: 'var(--surface-2)',
+        border: '1px solid var(--line)',
+        minWidth: 0,
+      }}
+    >
+      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--ink-4)' }}>
+        {Ico.folder(12)}
+      </span>
+      <span style={{
+        flex: 1, minWidth: 0,
+        fontFamily: FONT_MONO, fontSize: 11.5,
+        color: 'var(--ink-3)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        direction: 'rtl', textAlign: 'left',
+      }}>{path}</span>
+    </div>
+  );
+}
+
+function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isMenuOpen, busy }) {
   const isHtml = isHtmlArtifact(artifact);
   const published = !!artifact.publishedUrl;
+
+  const [hover, setHover] = useState(false);
+  const kebabRef = useRef(null);
 
   const onCopyUrl = async () => {
     if (!published) return false;
@@ -465,10 +317,24 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
 
   const Icon = iconForArtifact(artifact);
   const ext = extensionOf(artifact);
+  const projectLabel = projectNameOf(artifact, projects);
+
+  // Hand the click off to the parent — it owns the single shared
+  // menu so the dropdown isn't rendered inside the card (cards
+  // apply `transform` on hover, which would re-anchor a
+  // position:fixed descendant to the card instead of the viewport).
+  const openMenu = (e) => {
+    e.stopPropagation();
+    if (!kebabRef.current) return;
+    onMenuOpen?.(artifact, kebabRef.current.getBoundingClientRect());
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onClick={() => isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)}
       onKeyDown={(e) => { if (e.key === 'Enter') (isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)); }}
       style={{
@@ -476,8 +342,11 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
         cursor: 'pointer',
         background: 'var(--surface)',
         border: '1px solid var(--line)',
-        borderRadius: 12,
-        padding: 16,
+        // Card geometry matches ProjectCard so the two grids feel
+        // like the same family: 10px radius, 14/16 padding, 120 min
+        // height, 10px column gap.
+        borderRadius: 10,
+        padding: '14px 16px',
         display: 'flex', flexDirection: 'column', gap: 10,
         transition: 'border-color 160ms ease, box-shadow 200ms ease, transform 160ms ease',
         boxShadow: '0 1px 0 rgba(15,16,17,0.02)',
@@ -494,37 +363,79 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
-      {/* Status badge — top right, same slot the preview-overlay used.
-          Published wins over Live when both apply. */}
-      {(published || artifact.live) && (
-        <div style={{
-          position: 'absolute', top: 12, right: 12,
-          pointerEvents: 'none',
-        }}>
-          {published ? <PublishedPill /> : (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              fontFamily: FONT_BODY, fontSize: 11,
-              color: 'var(--accent)', fontWeight: 500,
-              border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
-              padding: '3px 8px', borderRadius: 999,
-            }}>
-              <span className="pulse-dot" style={{
-                width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)',
-              }} />
-              Live
-            </span>
-          )}
-        </div>
-      )}
+      {/* Top-right cluster: status pill (left) + hover-revealed
+          kebab (right). The kebab is always rightmost so the user's
+          eye finds it in the same place regardless of pill state.
+          We toggle `visibility` (not display/opacity-without-space)
+          so the pill keeps its X position whether the kebab is
+          showing or not. */}
+      <div style={{
+        position: 'absolute', top: 12, right: 12,
+        display: 'flex', alignItems: 'center', gap: 6,
+        zIndex: 2,
+      }}>
+        {(published || artifact.live) && (
+          <span style={{ pointerEvents: 'none' }}>
+            {published ? <PublishedPill /> : (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                fontFamily: FONT_BODY, fontSize: 11,
+                color: 'var(--accent)', fontWeight: 500,
+                border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+                padding: '3px 8px', borderRadius: 999,
+              }}>
+                <span className="pulse-dot" style={{
+                  width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)',
+                }} />
+                Live
+              </span>
+            )}
+          </span>
+        )}
+        <button
+          ref={kebabRef}
+          type="button"
+          aria-label="Artifact menu"
+          title="More actions"
+          // Stop propagation on BOTH mousedown and click — the card
+          // itself is a click-able role="button" that opens the
+          // artifact, and a single `e.stopPropagation()` inside
+          // onClick wasn't reliably preventing the parent handler in
+          // every state (e.g. when the kebab was rendered while
+          // visibility was just transitioning).
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); openMenu(e); }}
+          style={{
+            width: 26, height: 26, borderRadius: 6,
+            display: 'inline-grid', placeItems: 'center',
+            color: 'var(--ink-3)',
+            background: 'transparent', border: 0, padding: 0,
+            cursor: 'pointer',
+            visibility: (hover || isMenuOpen) ? 'visible' : 'hidden',
+            transition: 'background 120ms ease, color 120ms ease',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.background = 'var(--surface-2)';
+            e.currentTarget.style.color = 'var(--ink)';
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = 'var(--ink-3)';
+          }}
+        >
+          {Ico.moreVert(14)}
+        </button>
+      </div>
 
       {/* Header: small inline icon + title, with `type: <ext>` mono
-          subtitle directly under it. The status badge floats absolute
-          at the top-right; we reserve right padding so a long title
-          can't overlap it. */}
+          subtitle directly under it. The kebab + status badge cluster
+          floats absolute at the top-right; we reserve right padding
+          so a long title can't overlap them. The kebab is always
+          there in layout (even when hidden) so the padding doesn't
+          jump on hover. */}
       <div style={{
         display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0,
-        paddingRight: (published || artifact.live) ? 96 : 0,
+        paddingRight: (published || artifact.live) ? 110 : 40,
       }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 7, minWidth: 0,
@@ -545,6 +456,25 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{artifact.title}</span>
         </div>
+        {/* project: <name> — sits above the type line so the workspace
+            origin reads first. Ellipsis-truncates so a long project
+            name can't push the card out of grid alignment; full name
+            is in `title` for hover. */}
+        <span
+          title={projectLabel}
+          style={{
+            fontFamily: FONT_MONO, fontSize: 11,
+            color: 'var(--ink-4)', letterSpacing: '0.04em',
+            display: 'flex', alignItems: 'baseline', gap: 4,
+            minWidth: 0,
+          }}
+        >
+          <span style={{ flexShrink: 0 }}>project:</span>
+          <span style={{
+            color: 'var(--ink-3)', minWidth: 0, flex: '0 1 auto',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{projectLabel}</span>
+        </span>
         <span style={{
           fontFamily: FONT_MONO, fontSize: 11,
           color: 'var(--ink-4)', letterSpacing: '0.04em',
@@ -553,13 +483,17 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
         </span>
       </div>
 
-      {/* URL pill (only when published) */}
-      {published && (
+      {/* Surface the public URL when published; fall back to the
+          local path (ellipsis-truncated) when not — every card now
+          shows where the artifact actually lives. */}
+      {published ? (
         <PublishedUrlRow
           url={artifact.publishedUrl}
           onOpen={onOpenPublished}
           onCopy={onCopyUrl}
         />
+      ) : (
+        <LocalPathRow path={artifact.path} />
       )}
 
       {/* Spacer pushes the meta + actions to the bottom of the card so
@@ -572,19 +506,9 @@ function ArtifactBubble({ artifact, onOpenViewer, onPublish: doPublish, onUnpubl
       }}>
         {artifact.updated || '—'}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {published ? (
-          <ActionButton onClick={() => doUnpublish?.(artifact)} danger title="Unpublish from Minds">
-            {busy ? 'Working…' : 'Unpublish'}
-          </ActionButton>
-        ) : isHtml ? (
-          <ActionButton onClick={() => doPublish?.(artifact)} primary title="Publish to Minds">
-            {busy ? 'Publishing…' : 'Publish'}
-          </ActionButton>
-        ) : null}
-        <ActionButton onClick={() => openArtifact(artifact.path)} title="Open file">Open</ActionButton>
-        <ActionButton onClick={() => revealArtifact(artifact.path)} title="Reveal in Finder">Reveal</ActionButton>
-      </div>
+      {/* The shared HoverMenu lives at the page level (parent
+          owns the menu state) — see the comment on
+          components/collection/HoverMenu for why this matters. */}
     </div>
   );
 }
@@ -890,7 +814,8 @@ function Toast({ kind, message, onClose }) {
   const isError = kind === 'error';
   return (
     <div style={{
-      margin: '12px 32px 0',
+      // Position is owned by the parent wrapper now (fixed overlay),
+      // so this card carries no outer margin.
       padding: '10px 14px',
       borderRadius: 8,
       background: isError
@@ -923,7 +848,7 @@ function Toast({ kind, message, onClose }) {
 
 // ─── Composed view ───────────────────────────────────────────────────────
 
-export default function ArtifactsView({ artifacts: initial = [], projects = [] }) {
+export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, projects = [] }) {
   const [list, setList] = useState(initial);
   const [viewer, setViewer] = useState(null);
   const [view, setView] = useState(() =>
@@ -934,30 +859,40 @@ export default function ArtifactsView({ artifacts: initial = [], projects = [] }
   // Per-artifact-path "in flight" set so multiple cards can publish
   // independently without freezing the whole grid.
   const [busyPaths, setBusyPaths] = useState(() => new Set());
+  // Page-level state for the shared HoverMenu — mounting the menu at
+  // the parent (and not inside a card) is required because cards
+  // apply `transform` on hover, which would re-anchor a position:fixed
+  // descendant to the card itself instead of the viewport.
+  const [menuFor, setMenuFor] = useState(null); // { artifact, rect }
+  const isMacPlatform = (() => {
+    try {
+      if (window.antontron?.getPlatform) return window.antontron.getPlatform() === 'darwin';
+    } catch {}
+    return /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
+  })();
   // Toast surfaces publish/unpublish results — primarily so failures
   // don't disappear into the console.
   const [toast, setToast] = useState(null); // { kind: 'ok'|'error', message }
   const searchRef = useRef(null);
 
-  // Reflect prop changes (parent may refresh on stream completion).
-  if (list !== initial && list.length === 0 && initial.length > 0) {
+  // Reflect parent refreshes exactly. The parent refetches when the
+  // route opens and after streams complete; if a file was trashed from
+  // another surface, the refreshed prop is the source of truth and the
+  // local grid must drop the stale card.
+  useEffect(() => {
     setList(initial);
-  }
+    setViewer((cur) => {
+      if (!cur) return cur;
+      const fresh = initial.find((a) => a.path === cur.path);
+      return fresh ? { ...cur, ...fresh } : null;
+    });
+  }, [initial]);
 
   // Persist view toggle.
   useEffect(() => { localStorage.setItem('anton:artifacts-view', view); }, [view]);
 
   // ⌘K focuses the search input.
-  useEffect(() => {
-    const onKey = (e) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k' && !e.shiftKey && !e.altKey) {
-        e.preventDefault();
-        searchRef.current?.focus();
-      }
-    };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  useCollectionShortcut(searchRef);
 
   // Auto-dismiss the toast after 5s — long enough to read, short enough
   // not to linger across navigations.
@@ -970,6 +905,11 @@ export default function ArtifactsView({ artifacts: initial = [], projects = [] }
   const updateOne = (updated) => {
     setList((prev) => prev.map((a) => a.path === updated.path ? { ...a, ...updated } : a));
     setViewer((cur) => (cur && cur.path === updated.path ? { ...cur, ...updated } : cur));
+  };
+
+  const removeOne = (path) => {
+    setList((prev) => prev.filter((a) => a.path !== path));
+    setViewer((cur) => (cur && cur.path === path ? null : cur));
   };
 
   const setBusy = (path, isBusy) => {
@@ -1028,6 +968,27 @@ export default function ArtifactsView({ artifacts: initial = [], projects = [] }
     }
   };
 
+  // Move the file to the OS Trash and drop it from the local list.
+  // Reuses the Electron `shell.trashItem` IPC the artifact viewer
+  // also calls, so the deletion is reversible from the user's
+  // Trash / Recycle Bin (no extra confirm modal needed).
+  const handleTrash = async (artifact) => {
+    if (!artifact?.path || busyPaths.has(artifact.path)) return;
+    setBusy(artifact.path, true);
+    try {
+      const result = await window.antontron?.trashItem?.(artifact.path);
+      if (result && result.ok === false) {
+        throw new Error(result.reason || 'Could not move to Trash.');
+      }
+      removeOne(artifact.path);
+      setToast({ kind: 'ok', message: 'Moved to Trash.' });
+    } catch (e) {
+      setToast({ kind: 'error', message: `Delete failed: ${e?.message || e}` });
+    } finally {
+      setBusy(artifact.path, false);
+    }
+  };
+
   // Filter + sort.
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -1065,33 +1026,64 @@ export default function ArtifactsView({ artifacts: initial = [], projects = [] }
   const publishedCount = visible.filter((a) => a.publishedUrl).length;
 
   return (
+    // Background intentionally omitted so the gravity-field canvas
+    // painted behind the React root shows through.
     <div className="scroll-clean" style={{
       flex: 1, overflowY: 'auto',
-      background: 'var(--bg)',
       display: 'flex', flexDirection: 'column',
     }}>
-      <ArtifactsHeader />
-
-      <Toast
-        kind={toast?.kind}
-        message={toast?.message}
-        onClose={() => setToast(null)}
+      <PageHeader
+        title="Live artifacts"
+        subtitle="Documents, dashboards, and code Anton produces. Publish to share a live URL."
+        // 20px below the subtitle text so the page reads with a
+        // little air before the search-row begins. The 20px spacer
+        // below the header still adds the standard between-section
+        // rhythm — together they make Live Artifacts breathe a touch
+        // more than other collection pages, where the action button
+        // already anchors the lower edge of the header.
+        subtitleBottom={20}
       />
 
-      <div style={{ height: 18 }} />
+      {/* Toast floats over the page so it can't perturb the
+          subtitle → search spacing. */}
+      <div style={{
+        position: 'fixed', top: 24, right: 32, zIndex: 70,
+        pointerEvents: toast?.message ? 'auto' : 'none',
+        maxWidth: 420,
+      }}>
+        <Toast
+          kind={toast?.kind}
+          message={toast?.message}
+          onClose={() => setToast(null)}
+        />
+      </div>
+
+      {/* Subtitle → search-row gap. Set to 20px per the design;
+          ProjectsView uses 18px because its header has an anchor
+          button on the right ("+ New project"), which reads as
+          slightly taller — Artifacts compensates with a few extra. */}
+      <div style={{ height: 20 }} />
 
       {total > 0 && (
         <FilterRow
-          search={search}
-          onSearchChange={setSearch}
-          sort={sort}
-          onSortChange={setSort}
-          view={view}
-          onViewChange={setView}
-          total={total}
-          filtered={visible.length}
-          publishedCount={publishedCount}
-          searchRef={searchRef}
+          search={
+            <SearchInput
+              value={search}
+              onChange={setSearch}
+              inputRef={searchRef}
+              placeholder="Search artifacts"
+            />
+          }
+          sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
+          view={<ViewToggle value={view} onChange={setView} />}
+          counts={
+            <ArtifactsCounts
+              search={search}
+              total={total}
+              filtered={visible.length}
+              publishedCount={publishedCount}
+            />
+          }
         />
       )}
 
@@ -1100,16 +1092,19 @@ export default function ArtifactsView({ artifacts: initial = [], projects = [] }
       ) : view === 'grid' ? (
         <div style={{
           padding: '6px 32px 60px',
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14,
+          // Same grid geometry as ProjectsView so cards line up at
+          // the same density across pages.
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14,
           marginTop: 18,
         }}>
           {visible.map((a) => (
             <ArtifactBubble
               key={a.id || a.path}
               artifact={a}
+              projects={projects}
               onOpenViewer={setViewer}
-              onPublish={handlePublish}
-              onUnpublish={handleUnpublish}
+              onMenuOpen={(art, rect) => setMenuFor({ artifact: art, rect })}
+              isMenuOpen={menuFor?.artifact?.path === a.path}
               busy={busyPaths.has(a.path)}
             />
           ))}
@@ -1135,6 +1130,77 @@ export default function ArtifactsView({ artifacts: initial = [], projects = [] }
         artifact={viewer}
         onClose={() => setViewer(null)}
         onChange={updateOne}
+        onDelete={removeOne}
+      />
+
+      {/* Single shared menu for the whole grid — anchored to whichever
+          card the user just clicked. Mounted here at the page level
+          (not inside each card) so the dropdown's `position: fixed`
+          stays viewport-relative regardless of card-level transforms. */}
+      <HoverMenu
+        open={!!menuFor}
+        anchorRect={menuFor?.rect}
+        onClose={() => setMenuFor(null)}
+        items={(() => {
+          const a = menuFor?.artifact;
+          if (!a) return [];
+          const isHtml = isHtmlArtifact(a);
+          const published = !!a.publishedUrl;
+          const busyA = busyPaths.has(a.path);
+          const items = [];
+          if (published) {
+            items.push({
+              id: 'unpublish',
+              label: busyA ? 'Working…' : 'Unpublish',
+              icon: Ico.power(13),
+              onClick: () => handleUnpublish(a),
+            });
+          } else if (isHtml) {
+            items.push({
+              id: 'publish',
+              label: busyA ? 'Publishing…' : 'Publish',
+              icon: Ico.power(13),
+              onClick: () => handlePublish(a),
+            });
+          }
+          items.push({
+            id: 'preview',
+            label: 'Preview',
+            icon: (Ico.eye?.(13) || Ico.sparkle(13)),
+            onClick: () => setViewer(a),
+          });
+          if (isHtml) {
+            items.push({
+              id: 'open',
+              label: 'Open in browser',
+              icon: (Ico.link?.(13) || Ico.globe?.(13) || Ico.doc(13)),
+              onClick: () => {
+                if (a.publishedUrl) {
+                  try { window.antontron?.openExternal?.(a.publishedUrl); }
+                  catch { window.open(a.publishedUrl, '_blank', 'noreferrer'); }
+                } else {
+                  openArtifact(a.path);
+                }
+              },
+            });
+          } else {
+            items.push({
+              id: 'reveal',
+              label: isMacPlatform ? 'Show in Finder' : 'Show in Explorer',
+              icon: Ico.folder(13),
+              onClick: () => { try { revealArtifact(a.path); } catch {} },
+            });
+          }
+          items.push({ separator: true });
+          items.push({
+            id: 'delete',
+            label: 'Delete',
+            icon: Ico.trash(13),
+            danger: true,
+            onClick: () => handleTrash(a),
+          });
+          return items;
+        })()}
       />
     </div>
   );

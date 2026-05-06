@@ -2,11 +2,12 @@ import { useState, useEffect } from 'react';
 import TermsConsent from './pages/TermsConsent';
 import Setup from './pages/Setup';
 import Onboarding from './pages/Onboarding';
+import IntroSequence from './pages/IntroSequence';
 import CoworkApp from './CoworkApp';
 import ThemeToggle from './components/ThemeToggle';
 import './styles.css';
 
-type Page = 'loading' | 'terms' | 'setup' | 'onboarding' | 'launching' | 'terminal';
+type Page = 'loading' | 'intro' | 'terms' | 'setup' | 'onboarding' | 'launching' | 'terminal';
 
 const LOGO = `  \u2584\u2580\u2588 \u2588\u2584 \u2588 \u2580\u2588\u2580 \u2588\u2580\u2588 \u2588\u2584 \u2588
   \u2588\u2580\u2588 \u2588 \u2580\u2588  \u2588  \u2588\u2584\u2588 \u2588 \u2580\u2588`;
@@ -21,7 +22,11 @@ export default function App() {
       try {
         const settings = await window.antontron.readSettings();
         if (settings.ANTON_TERMS_CONSENT !== 'true') {
-          setPage('terms');
+          // Terms gate the rest of the app — every launch up until the
+          // user accepts shows the intro, then the terms screen. Once
+          // accepted, the intro never plays again because we never
+          // re-enter this branch.
+          setPage('intro');
           return;
         }
 
@@ -78,7 +83,7 @@ export default function App() {
           sidebar's icon buttons at z-index:1000 and blocks pointer events
           for the upper ~38px (causing the icons to feel "broken / only
           hoverable at the bottom"). */}
-      {isMac && (page === 'terms' || page === 'setup' || page === 'onboarding' || page === 'launching') && <div className="titlebar-drag" />}
+      {isMac && (page === 'intro' || page === 'terms' || page === 'setup' || page === 'onboarding' || page === 'launching') && <div className="titlebar-drag" />}
 
       {page === 'loading' && (
         <div className="setup-container">
@@ -86,6 +91,10 @@ export default function App() {
             <div className="spinner" style={{ width: 32, height: 32 }} />
           </div>
         </div>
+      )}
+
+      {page === 'intro' && (
+        <IntroSequence onComplete={() => setPage('terms')} />
       )}
 
       {showLogo && (

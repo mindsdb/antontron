@@ -51,6 +51,7 @@ from routes.dispatch import (
     stop_dispatch,
 )
 from routes.dispatch_slack import router as dispatch_slack_router
+from routes.connectors import router as connectors_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -106,6 +107,8 @@ app.include_router(integrations_router, prefix="/v1/integrations", tags=["integr
 app.include_router(datavault_router, prefix="/v1/datavault", tags=["datavault"])
 app.include_router(dispatch_router, prefix="/v1/dispatch", tags=["dispatch"])
 app.include_router(dispatch_slack_router, prefix="/v1/dispatch", tags=["dispatch-slack"])
+# Predefined connector registry — server/connectors/*.json
+app.include_router(connectors_router)
 
 
 @app.get("/health")

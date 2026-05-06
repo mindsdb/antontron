@@ -19,6 +19,95 @@
 const _byConversation = new Map();
 const _listeners = new Map(); // cid → Set<fn>
 
+// Redacted snapshot of the user's current form input — published by
+// DataVaultForm on every change so the chat layer can inject context
+// into messages sent during a connect task. Never holds secret field
+// values (passwords, tokens). Shape:
+//   { method: string|null,
+//     fields: { <name>: <string-value-or-"__REDACTED__"> } }
+const _formStateByConversation = new Map();
+const _formStateListeners = new Map(); // cid → Set<fn>
+
+// Selected-method tracking for multi-method forms. Lifted out of
+// DataVaultForm so the panel chrome (header / breadcrumb) can read it
+// AND clear it ("back to options"). DataVaultForm subscribes to read,
+// and writes via `setSelectedMethod` whenever the user picks or backs
+// out. Falls back to `spec.selected_method` when no override is set.
+const _selectedMethodByConversation = new Map();
+const _selectedMethodListeners = new Map(); // cid → Set<fn>
+
+export function setSelectedMethod(conversationId, methodId) {
+  if (!conversationId) return;
+  if (!methodId) {
+    _selectedMethodByConversation.delete(conversationId);
+  } else {
+    _selectedMethodByConversation.set(conversationId, methodId);
+  }
+  const subs = _selectedMethodListeners.get(conversationId);
+  if (subs) for (const fn of subs) {
+    try { fn(methodId || null); } catch {}
+  }
+}
+
+export function getSelectedMethod(conversationId) {
+  return _selectedMethodByConversation.get(conversationId) || null;
+}
+
+export function subscribeSelectedMethod(conversationId, fn) {
+  if (!conversationId || typeof fn !== 'function') return () => {};
+  let subs = _selectedMethodListeners.get(conversationId);
+  if (!subs) {
+    subs = new Set();
+    _selectedMethodListeners.set(conversationId, subs);
+  }
+  subs.add(fn);
+  return () => {
+    const cur = _selectedMethodListeners.get(conversationId);
+    if (cur) {
+      cur.delete(fn);
+      if (cur.size === 0) _selectedMethodListeners.delete(conversationId);
+    }
+  };
+}
+
+export function setFormState(conversationId, state) {
+  if (!conversationId) return;
+  if (!state) {
+    _formStateByConversation.delete(conversationId);
+  } else {
+    _formStateByConversation.set(conversationId, state);
+  }
+  const subs = _formStateListeners.get(conversationId);
+  if (subs) for (const fn of subs) {
+    try { fn(state || null); } catch {}
+  }
+}
+
+export function getFormState(conversationId) {
+  return _formStateByConversation.get(conversationId) || null;
+}
+
+export function clearFormState(conversationId) {
+  setFormState(conversationId, null);
+}
+
+export function subscribeFormState(conversationId, fn) {
+  if (!conversationId || typeof fn !== 'function') return () => {};
+  let subs = _formStateListeners.get(conversationId);
+  if (!subs) {
+    subs = new Set();
+    _formStateListeners.set(conversationId, subs);
+  }
+  subs.add(fn);
+  return () => {
+    const cur = _formStateListeners.get(conversationId);
+    if (cur) {
+      cur.delete(fn);
+      if (cur.size === 0) _formStateListeners.delete(conversationId);
+    }
+  };
+}
+
 export function setForm(conversationId, spec) {
   if (!conversationId || !spec || typeof spec !== 'object') return;
   // Guard against churn — JSON.parse always returns a new object,
@@ -31,6 +120,45 @@ export function setForm(conversationId, spec) {
   if (subs) for (const fn of subs) {
     try { fn(spec); } catch {}
   }
+}
+
+// Merge a name-keyed patch map into an array of {name, ...} entries,
+// honouring the standard semantics:
+//   patch[name] = object → merge those properties into the matching
+//                          entry (null at property level clears prop)
+//   patch[name] = null   → delete the entry from the output
+//   missing name         → entry untouched
+//   new name + object    → append as a new entry
+//   new name + null      → silent no-op
+// Used both for the form's top-level `fields` array AND each method's
+// own `fields` array.
+function _mergeNamedList(existing, patchMap) {
+  const list = Array.isArray(existing) ? existing : [];
+  const out = [];
+  for (const item of list) {
+    if (Object.prototype.hasOwnProperty.call(patchMap, item.name)) {
+      const p = patchMap[item.name];
+      if (p === null) continue;
+      if (!p || typeof p !== 'object') { out.push(item); continue; }
+      const merged = { ...item };
+      for (const k of Object.keys(p)) {
+        if (p[k] === null) delete merged[k];
+        else merged[k] = p[k];
+      }
+      out.push(merged);
+    } else {
+      out.push(item);
+    }
+  }
+  for (const name of Object.keys(patchMap)) {
+    if (!list.some((item) => item.name === name)) {
+      const p = patchMap[name];
+      if (p && typeof p === 'object') {
+        out.push({ name, ...p });
+      }
+    }
+  }
+  return out;
 }
 
 function _shallowFormEqual(a, b) {
@@ -83,40 +211,53 @@ export function patchForm(conversationId, patch) {
   }
 
   if (patch.fields && typeof patch.fields === 'object' && !Array.isArray(patch.fields)) {
-    const existing = Array.isArray(prev.fields) ? prev.fields : [];
-    // Pass 1 — merge patches into existing fields, OR drop fields
-    // whose patch is `null` (deletion semantic).
+    next.fields = _mergeNamedList(prev.fields, patch.fields);
+  }
+
+  // ── Methods (multi-method forms) ─────────────────────────────────
+  // Same key-by-id semantics as fields, plus an inner `fields` list
+  // each method owns. Patches look like:
+  //   { methods: { app_password: { label: "App Password", fields: {...} | null } } }
+  // and individual methods can be deleted with `methods[id] = null`.
+  if (patch.methods && typeof patch.methods === 'object' && !Array.isArray(patch.methods)) {
+    const existing = Array.isArray(prev.methods) ? prev.methods : [];
     const merged = [];
-    for (const f of existing) {
-      if (Object.prototype.hasOwnProperty.call(patch.fields, f.name)) {
-        const fieldPatch = patch.fields[f.name];
-        if (fieldPatch === null) continue; // deletion — skip from output
-        if (!fieldPatch || typeof fieldPatch !== 'object') {
-          merged.push(f);
-          continue;
+    for (const m of existing) {
+      if (Object.prototype.hasOwnProperty.call(patch.methods, m.id)) {
+        const mp = patch.methods[m.id];
+        if (mp === null) continue; // deletion
+        if (!mp || typeof mp !== 'object') { merged.push(m); continue; }
+        const out = { ...m };
+        for (const k of Object.keys(mp)) {
+          if (k === 'fields') continue; // handled below
+          if (mp[k] === null) delete out[k];
+          else out[k] = mp[k];
         }
-        const out = { ...f };
-        for (const k of Object.keys(fieldPatch)) {
-          if (fieldPatch[k] === null) delete out[k];
-          else out[k] = fieldPatch[k];
+        if (mp.fields && typeof mp.fields === 'object' && !Array.isArray(mp.fields)) {
+          out.fields = _mergeNamedList(m.fields, mp.fields);
         }
         merged.push(out);
       } else {
-        merged.push(f);
+        merged.push(m);
       }
     }
-    // Pass 2 — append any patch entries whose name didn't exist.
-    // `null` for a non-existent name is a silent no-op (nothing to
-    // delete, no shape to append).
-    for (const name of Object.keys(patch.fields)) {
-      if (!existing.some((f) => f.name === name)) {
-        const fp = patch.fields[name];
-        if (fp && typeof fp === 'object') {
-          merged.push({ name, ...fp });
+    // New methods appended in the order they appear in the patch.
+    for (const id of Object.keys(patch.methods)) {
+      if (!existing.some((m) => m.id === id)) {
+        const mp = patch.methods[id];
+        if (mp && typeof mp === 'object') {
+          // If the new method declares fields as a name-keyed map
+          // (consistent with patch shape), normalise into the
+          // array-of-objects shape the rest of the app expects.
+          const newMethod = { id, ...mp };
+          if (mp.fields && typeof mp.fields === 'object' && !Array.isArray(mp.fields)) {
+            newMethod.fields = _mergeNamedList([], mp.fields);
+          }
+          merged.push(newMethod);
         }
       }
     }
-    next.fields = merged;
+    next.methods = merged;
   }
 
   _byConversation.set(conversationId, next);
@@ -129,6 +270,14 @@ export function patchForm(conversationId, patch) {
 export function clearForm(conversationId) {
   if (!conversationId) return;
   _byConversation.delete(conversationId);
+  // Closing / clearing the form also clears the redacted state
+  // snapshot — once the form is gone, there's nothing to inject
+  // into chat messages.
+  clearFormState(conversationId);
+  // Drop any selected-method override so the next form opens at
+  // its picker (or default state) rather than inheriting the prior
+  // form's choice.
+  setSelectedMethod(conversationId, null);
   const subs = _listeners.get(conversationId);
   if (subs) for (const fn of subs) {
     try { fn(null); } catch {}

@@ -18,6 +18,55 @@ import CustomizeView from './views/CustomizeView';
 import SettingsView from './views/SettingsView';
 import UtilitiesView from './views/UtilitiesView';
 import SearchModal from './components/SearchModal';
+import ConnectorPicker from './components/connector/ConnectorPicker';
+import ServerOfflineHelpModal from './components/ServerOfflineHelpModal';
+import { setForm as setDataVaultForm, getFormState as getDataVaultFormState } from './components/datavault/formStore';
+
+// One-of-ten encouraging follow-ups picked when a connect task is
+// created. Reads as a friendly nudge after the connect-intro card —
+// keeps the chat surface inviting and signals that the agent is
+// available for free-form questions about the form.
+const CONNECT_FOLLOWUPS = [
+  "Have a question about any of the fields? I'm happy to explain.",
+  "Need help finding your credentials? Just ask.",
+  "If anything's unclear, let me know — I can walk you through it.",
+  "Curious what a specific field expects? I can clarify.",
+  "Want more detail on any of the steps? Just ask.",
+  "Have questions before you submit? I'm here.",
+  "Want me to explain any of the fields more deeply? Let me know.",
+  "Happy to clarify anything before you fill it out.",
+  "If you'd like more context on a field, just ask.",
+  "Any questions about the setup? I'm here to help.",
+];
+
+// Build a short context block describing the user's current
+// connect-form state. Sent appended to chat messages so the agent
+// has continuous awareness of what the user is connecting and how
+// far along they are. Secret values are mentioned as "(filled)" or
+// "(redacted)" but their actual values are never included.
+function describeConnectFormState(state) {
+  if (!state) return '';
+  const lines = [];
+  if (state.title) lines.push(`Connector: ${state.title}`);
+  if (state.methodLabel || state.method) {
+    lines.push(`Selected method: ${state.methodLabel || state.method}`);
+  } else {
+    lines.push('Selected method: (none yet)');
+  }
+  const entries = Object.entries(state.fields || {});
+  if (entries.length === 0) {
+    lines.push('Filled fields: (none yet)');
+  } else {
+    const parts = entries.map(([k, v]) =>
+      v === '__REDACTED__' ? `${k}: (filled, redacted)` : `${k}: ${v}`
+    );
+    lines.push(`Filled fields: ${parts.join('; ')}`);
+  }
+  return [
+    '[connect form state — Anton-only context, do not echo back]',
+    ...lines,
+  ].join('\n');
+}
 import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
          createProject, updateSettings, streamNewSession, streamMessage,
          streamDataVaultSubmission,
@@ -26,7 +75,7 @@ import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettin
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
          pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
          renameConversation, deleteConversation, deleteConversationTurn, moveConversation,
-         deleteProject, cancelScratchpad } from './api';
+         deleteProject, cancelScratchpad, fetchConnector } from './api';
 import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
 
 const ACCENT_VARS = {
@@ -334,6 +383,8 @@ function AppCore() {
   const [connectors, setConnectors] = useState([]);
   const [composerAttachments, setComposerAttachments] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
+  const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
+  const [serverHelpOpen, setServerHelpOpen] = useState(false);
   // Pending delete confirm — task id whose delete is awaiting user
   // confirmation in the modal. null = no modal.
   const [pendingDeleteTaskId, setPendingDeleteTaskId] = useState(null);
@@ -709,28 +760,77 @@ function AppCore() {
     setRoute('home');
   };
 
-  // "+ Connect" entry — opens a brand-new task whose first message
-  // is a synthesized assistant greeting (random pick from a small
-  // bank). The user replies to that, kicking off the normal
-  // handleSendInTask → request_credentials flow on the server. The
-  // greeting is a client-only display seed; on conversation reload
-  // it won't reappear (anton's history starts at the first real
-  // user input), but the form panel + saved connection survive.
+  // "+ Connect" entry — surfaces the ConnectorPicker modal. The user
+  // browses or searches the predefined registry; on pick, we kick
+  // off a new task whose first user message names the chosen
+  // connector ("Connect Gmail"), which the existing agent / form
+  // pipeline already knows how to route. Wiring the picker straight
+  // to a renderer-side DataVaultForm (no chat round-trip) is the
+  // next step — for this round we keep the agent path so we can
+  // validate the picker UX without rewriting the form flow.
   const handleStartConnectChat = () => {
+    setConnectorPickerOpen(true);
+  };
+  // Picker hands us a summary record (id + label + …). The user
+  // wants to land in a normal chat task — not a separate modal —
+  // so the scratchpad / agent loop is available for any iteration
+  // beyond the initial form. We just skip the LLM round-trip for
+  // *getting* the form: known id → known JSON spec → inject directly
+  // into the form store, and the chat-side DataVaultFormPanel picks
+  // it up. Submission goes through the existing handleSubmitDataVaultForm
+  // path so the agent can probe credentials, retry, etc.
+  //
+  // If the registry lookup fails (network, id not in registry), we
+  // fall back to the chat-agent path so picking a connector is
+  // never a dead end.
+  const handleConnectorPicked = async (connector) => {
+    setConnectorPickerOpen(false);
+    if (!connector?.id) return;
+
+    let full = null;
+    try {
+      full = await fetchConnector(connector.id);
+    } catch (e) {
+      // eslint-disable-next-line no-console
+      console.warn('[connectors] failed to load full spec, falling back to chat', e);
+    }
+
+    const label = full?.label || connector.label || connector.id;
     const tempId = 'tmp-connect-' + Date.now();
-    const welcome = pickConnectWelcome();
+    const hasLiteralForm = !!(full && full.form);
+
     setTasks((prev) => [{
       id: tempId,
-      title: 'New connection',
+      title: `Connect ${label}`,
       subtitle: 'just now',
-      status: 'idle',
-      messages: [{
-        role: 'assistant',
-        content: welcome,
-        // Marker so future code can distinguish synthesized greetings
-        // from real assistant turns if needed (e.g. skip persisting).
-        _client_only: true,
-      }],
+      status: hasLiteralForm ? 'idle' : 'active',
+      messages: hasLiteralForm
+        ? [
+            {
+              role: 'assistant',
+              _kind: 'connect_intro',
+              connector: {
+                id: full.id,
+                label,
+                logo: full.form?.logo || full.logo,
+                logo_color: full.form?.logo_color || full.logo_color,
+              },
+              content: `Connect ${label}`,
+              _client_only: true,
+            },
+            {
+              role: 'assistant',
+              content: CONNECT_FOLLOWUPS[Math.floor(Math.random() * CONNECT_FOLLOWUPS.length)],
+              _client_only: true,
+            },
+          ]
+        : [
+            {
+              role: 'assistant',
+              content: `Let's connect ${label}.`,
+              _client_only: true,
+            },
+          ],
       projectName: selectedProject?.name || 'general',
       projectPath: selectedProject?.path || null,
       model: selectedModel?.id || null,
@@ -739,6 +839,31 @@ function AppCore() {
     setActiveTaskId(tempId);
     setComposerAttachments([]);
     setRoute('task');
+
+    if (hasLiteralForm) {
+      // Inject the form spec directly. DataVaultFormPanel reads
+      // from the same store; no LLM ever sees the prompt. We also
+      // stamp the connector id on the spec so the panel can route
+      // OAuth (and any other auth shape) submits through the
+      // connector-aware save endpoint instead of the legacy
+      // datasources path.
+      setDataVaultForm(tempId, {
+        ...full.form,
+        // Stamp the canonical engine slug so server-side code
+        // (datavault_agent: "Trying to connect to **<engine>**…",
+        // probe prompt, vault save path) has a deterministic id
+        // even when the connector JSON's `form` block doesn't
+        // repeat it. Connector JSONs use top-level `id` as the
+        // engine slug; we treat that as the source of truth.
+        engine: full.form.engine || full.id,
+        _connector_id: full.id,
+        logo: full.form.logo || full.logo,
+        logo_color: full.form.logo_color || full.logo_color,
+      });
+    } else {
+      // No registry entry — fall back to the chat-agent flow.
+      Promise.resolve().then(() => handleSendFromHome(`Connect ${label}`));
+    }
   };
   // Keep the ref synced so the Cmd/Ctrl+N keydown handler always calls
   // the latest newTask closure (which captures fresh setRoute/setTasks).
@@ -1066,7 +1191,15 @@ function AppCore() {
       }));
     };
 
-    activeStreamCtrlRef.current = streamMessage(id, text, {
+    // If a connect form is active for this conversation, append a
+     // redacted snapshot of its state to the *sent* text so the agent
+     // sees what the user has selected / filled. The on-screen bubble
+     // keeps the original text — Anton-only context, never shown.
+    const connectFormState = getDataVaultFormState(id);
+    const connectContext = describeConnectFormState(connectFormState);
+    const sendText = connectContext ? `${text}\n\n${connectContext}` : text;
+
+    activeStreamCtrlRef.current = streamMessage(id, sendText, {
       projectName: taskProjectName,
       projectPath: taskProjectPath,
       model: taskModel,
@@ -1526,6 +1659,7 @@ function AppCore() {
         projects={projects}
         serverBusy={serverBusy}
         serverBusyKind={serverBusyKind}
+        onShowServerHelp={() => setServerHelpOpen(true)}
         onToggleServer={async () => {
           if (serverBusy) return;
           // Decide intent from main's actual state, not renderer state.
@@ -1613,7 +1747,7 @@ function AppCore() {
             onMoveTaskToProject={handleMoveTaskToProject}
             onStop={handleStopStream}
             onSubmitDataVaultForm={handleSubmitDataVaultForm}
-            onNavigateToConnectors={() => navigate('connect')}
+            onNavigateToConnectors={() => navigate('customize')}
             onOpenProject={(p) => {
               if (p) setSelectedProject(p);
               setRoute('projects');
@@ -1687,7 +1821,11 @@ function AppCore() {
           <SettingsView settings={settings} setSetting={setSetting} onSave={saveSettings} theme={theme} onThemeChange={setTheme} />
         )}
 
-        {['memory', 'skills', 'connect', 'publish'].includes(route) && (
+        {/* Legacy 'connect' kind removed — Connect Apps and Data is now
+            the canonical surface for connector management (route
+            'customize'). UtilitiesView only carries memory / skills /
+            publish now. */}
+        {['memory', 'skills', 'publish'].includes(route) && (
           <UtilitiesView
             kind={route}
             project={selectedProject}
@@ -1700,6 +1838,36 @@ function AppCore() {
         onClose={() => setSearchOpen(false)}
         onSearch={searchCowork}
         onSelect={handleSearchSelect}
+      />
+
+      <ConnectorPicker
+        open={connectorPickerOpen}
+        onClose={() => setConnectorPickerOpen(false)}
+        onPick={handleConnectorPicked}
+      />
+
+      <ServerOfflineHelpModal
+        open={serverHelpOpen}
+        onClose={() => setServerHelpOpen(false)}
+        serverOnline={serverOnline}
+        serverBusy={serverBusy}
+        serverBusyKind={serverBusyKind}
+        onRetry={async () => {
+          // Reuse the toggle path so the busy/online state in App
+          // updates correctly while the start runs. We force "going
+          // up" here since the help icon only renders while offline.
+          setServerBusyKind('starting');
+          setServerBusy(true);
+          try {
+            const result = await window.antontron?.serverStart?.();
+            if (result) {
+              setServerOnline(!!result.running);
+              if (result.running) setTimeout(refreshData, 400);
+            }
+          } catch {} finally {
+            setServerBusy(false);
+          }
+        }}
       />
 
       <ConfirmModal

@@ -6,7 +6,8 @@ import * as https from 'https';
 import * as http from 'http';
 import { IPC } from '../shared/ipc-channels';
 import { checkAntonInstalled, runInstaller } from './installer';
-import { startServer, stopServer, isServerRunning, isServerStarting, getServerPort } from './server-process';
+import { startServer, stopServer, isServerRunning, isServerStarting, getServerPort, getServerDiagnostics } from './server-process';
+import { oauthConnect } from './oauth-service';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
 import { sendEvent } from './analytics';
 import { getRendererPath, checkForUIUpdate, getCachedVersion } from './ui-updater';
@@ -541,6 +542,17 @@ function setupIPC() {
     stopServer();
     return { running: false, port: getServerPort() };
   });
+  // Diagnostics — last start error + recent stdout/stderr tail. The
+  // renderer surfaces these in a help modal when the user wonders
+  // why the backend is offline.
+  ipcMain.handle('server:get-diagnostics', () => getServerDiagnostics());
+
+  // PKCE OAuth — opens a one-shot loopback server + the user's
+  // default browser. The renderer hands over either Anton's hosted
+  // client_id (Pattern A) or BYOK client_id + client_secret (Pattern B).
+  ipcMain.handle('oauth:connect', async (_event, opts) => {
+    return oauthConnect(opts || {});
+  });
 
   ipcMain.handle(IPC.INSTALL_CANCEL, async () => {
     if (!activeInstall) return false;
@@ -892,6 +904,20 @@ function setupIPC() {
       const result = await shell.openPath(p);
       // shell.openPath returns '' on success, or an error string.
       if (result) return { ok: false, reason: result };
+      return { ok: true };
+    } catch (e: any) {
+      return { ok: false, reason: e?.message || String(e) };
+    }
+  });
+
+  // Reveal a local file in the platform file manager. Unlike
+  // shell.openPath, this selects the artifact instead of opening it.
+  ipcMain.handle(IPC.SHOW_ITEM_IN_FOLDER, async (_event, p: string) => {
+    if (typeof p !== 'string' || !p) return { ok: false, reason: 'empty path' };
+    try {
+      const target = path.resolve(p);
+      if (!fs.existsSync(target)) return { ok: false, reason: 'file not found' };
+      shell.showItemInFolder(target);
       return { ok: true };
     } catch (e: any) {
       return { ok: false, reason: e?.message || String(e) };

@@ -62,6 +62,23 @@ def _format_patch_block(patch: dict) -> str:
     return f"\n\n```data-vault-form-patch\n{body}\n```\n\n"
 
 
+def _field_patch(form_id: str, method_id: str | None, name: str, value):
+    """Build a patch that targets a single field, scoped either to
+    the form's top-level fields[] (single-method) or to a specific
+    method's fields[] (multi-method). `value` is the per-field patch
+    object OR None (the latter signals deletion of the whole field).
+    """
+    if method_id:
+        return {
+            "form_id": form_id,
+            "methods": {method_id: {"fields": {name: value}}},
+        }
+    return {
+        "form_id": form_id,
+        "fields": {name: value},
+    }
+
+
 def _validate_shape(engine: str, credentials: dict, auth_method: str | None):
     """Look the engine up in anton's datasource registry.
 
@@ -184,24 +201,15 @@ async def process_submission_stream(
         if k not in skipped and (v is not None and v != "")
     }
 
-    # ── Shape gate (only for registered engines) ────────────────────
-    engine_def, missing = _validate_shape(engine, credentials, auth_method)
-    if engine_def is not None and missing:
-        yield _delta(
-            f"I'm missing some required fields: **{', '.join(missing)}**. "
-            f"Filling those in should be enough to test the connection.\n\n"
-        )
-        yield _patch_delta({
-            "form_id": form_id,
-            "subtitle": "A few required fields were empty — fill them in and try again.",
-            "fields": {name: {"error": "Required", "warning": None} for name in missing},
-        })
-        yield _push("response.completed", {
-            "type": "response.completed",
-            "response": {"id": response_id, "status": "retry"},
-        })
-        _persist_turn(conversation_id, body_parts, recorded_events, started_at_ms)
-        return
+    # No registry-shape gate here — the chat-driven flow uses the
+    # connector JSON's own field names (`username`, `connection_uri`,
+    # …) which often don't match anton's CLI datasource registry
+    # (`user`, `connection_string`, …). Validating against the
+    # registry produced "missing required field: user" messages even
+    # when the user had filled out the equivalent `username`. The
+    # form already enforces `required: true` client-side; if a
+    # credential is genuinely insufficient, the probe will surface
+    # the real authentication error from the engine itself.
 
     # ── Probe setup ─────────────────────────────────────────────────
     # Need the conversation's anton session to lift llm_client +
@@ -209,24 +217,78 @@ async def process_submission_stream(
     # those but persists nothing. Look up the conversation's project
     # explicitly so a non-active-project conversation still resolves
     # to the right .anton dir (instead of the active project's).
+    #
+    # Recovery strategy — historically this throws `[Errno 2] No such
+    # file or directory` when the conversation's cached session in
+    # `conversation_manager._live[cid]` holds a stale path (project
+    # renamed / moved / deleted on disk while the in-memory session
+    # still points at the old location). A server restart heals it
+    # because the cache is in-process. Mimic that here automatically:
+    #
+    #   1. First attempt — use the conversation's recorded project.
+    #   2. On any exception → evict the cached session for this cid,
+    #      then retry with `project=None` so resolve falls through to
+    #      the active project (which self-heals to default if its own
+    #      directory is missing).
+    #   3. If that still fails → surface a clean error. The retry
+    #      almost always succeeds, but the second guard means we
+    #      never silently swallow a deeper bug.
     base_session = None
-    try:
-        if conversation_id:
+    last_error: Exception | None = None
+
+    async def _try_resolve(project_name):
+        return await conversation_manager._resolve_session(
+            conversation_id, project_name, None,
+        )
+
+    if conversation_id:
+        # Attempt 1 — discovered project.
+        try:
             located = conversation_manager._find_conversation_dir(conversation_id)
             project_name = located[0] if located else None
-            base_session = await conversation_manager._resolve_session(
-                conversation_id, project_name, None,
+            base_session = await _try_resolve(project_name)
+        except Exception as exc:
+            logger.warning(
+                "Probe base-session resolve failed for %s (project=%r): %r — evicting cache and retrying.",
+                conversation_id, project_name if 'project_name' in locals() else None, exc,
             )
-    except Exception as exc:
-        logger.exception("Could not resolve base session for probe")
-        base_session = None
+            last_error = exc
+            base_session = None
+
+        # Attempt 2 — evict any stale cached session, retry against
+        # the active project. `_resolve_session` rebuilds from disk
+        # when the cid isn't in `_live`.
+        if base_session is None:
+            try:
+                conversation_manager._live.pop(conversation_id, None)
+                base_session = await _try_resolve(None)
+                logger.info(
+                    "Probe base-session recovered for %s after cache eviction.",
+                    conversation_id,
+                )
+                last_error = None
+            except Exception as exc:
+                logger.exception("Probe base-session retry also failed")
+                last_error = exc
+                base_session = None
+
+    if last_error is not None and base_session is None:
+        # Surface the underlying filename when present so the user
+        # has something actionable. `[Errno 2] No such file or
+        # directory` alone tells them nothing.
+        path_hint = ""
+        try:
+            if isinstance(last_error, OSError) and last_error.filename:
+                path_hint = f" (missing path: {last_error.filename})"
+        except Exception:
+            pass
         yield _delta(
-            f"Could not start the connection probe — `{exc}`. "
+            f"Could not start the connection probe — `{last_error}`{path_hint}. "
             f"Try again, or restart the app if it persists.\n\n"
         )
         yield _patch_delta({
             "form_id": form_id,
-            "form_error": f"Probe setup failed: {exc}",
+            "form_error": f"Probe setup failed: {last_error}",
         })
         yield _push("response.completed", {
             "type": "response.completed",
@@ -313,24 +375,37 @@ async def process_submission_stream(
                 # smallest possible patch: just `fields[name].status`.
                 # The form-store merges this into the existing field
                 # by name, leaving every other property (label, type,
-                # value, error, etc) untouched.
+                # value, error, etc) untouched. For multi-method forms
+                # the patch is nested under methods[method_id].
                 name = (payload or {}).get("name")
                 if name:
                     status_val = (payload or {}).get("status")
-                    yield _patch_delta({
-                        "form_id": form_id,
-                        "fields": {name: {"status": status_val}},
-                    })
+                    method_id = (payload or {}).get("method_id")
+                    yield _patch_delta(_field_patch(form_id, method_id, name, {"status": status_val}))
             elif kind == "remove_field":
                 # Field deletion — `fields[name] = null` at the patch
                 # level is the form-store's "remove this whole field"
                 # signal (distinct from `fields[name].prop = null`
-                # which only clears one property).
-                if isinstance(payload, str) and payload:
-                    yield _patch_delta({
+                # which only clears one property). For multi-method
+                # forms the deletion nests inside the method's fields.
+                name = (payload or {}).get("name")
+                if name:
+                    method_id = (payload or {}).get("method_id")
+                    yield _patch_delta(_field_patch(form_id, method_id, name, None))
+            elif kind == "switch_method":
+                # Flip selected_method at the form level. Reason (if
+                # provided) becomes the form's status_text so the user
+                # sees a one-line explanation in the toast.
+                method_id = (payload or {}).get("method_id")
+                reason = (payload or {}).get("reason") or ""
+                if method_id:
+                    patch = {
                         "form_id": form_id,
-                        "fields": {payload: None},
-                    })
+                        "selected_method": method_id,
+                    }
+                    if reason:
+                        patch["status_text"] = reason
+                    yield _patch_delta(patch)
             elif kind == "scratchpad":
                 action = payload.get("action")
                 if action == "start":
@@ -415,8 +490,6 @@ async def process_submission_stream(
         # credential set.
         reason = final_outcome.follow_up or "We need a few more details before we can connect."
         yield _delta(f"\n\nI need a bit more info before I can finish: {reason}\n")
-        # Convert extra_fields list into the form-patch dict shape
-        # (fields keyed by name, top-level title/subtitle update).
         extra = {}
         for f in final_outcome.extra_fields:
             extra[f.get("name")] = {
@@ -426,14 +499,28 @@ async def process_submission_stream(
                 "placeholder": f.get("placeholder") or "",
                 "required": bool(f.get("required", True)),
             }
-        yield _patch_delta({
-            "form_id": form_id,
-            "subtitle": reason,
-            "status_text": None,
-            "_is_probing": False,
-            "form_error": None,
-            "fields": extra,
-        })
+        # Multi-method needs_input scopes the new fields under the
+        # method id anton tagged on the verdict; otherwise they go
+        # to the form's top-level fields[].
+        target_method = getattr(final_outcome, "method_id", None)
+        if target_method:
+            yield _patch_delta({
+                "form_id": form_id,
+                "subtitle": reason,
+                "status_text": None,
+                "_is_probing": False,
+                "form_error": None,
+                "methods": {target_method: {"fields": extra}},
+            })
+        else:
+            yield _patch_delta({
+                "form_id": form_id,
+                "subtitle": reason,
+                "status_text": None,
+                "_is_probing": False,
+                "form_error": None,
+                "fields": extra,
+            })
         yield _push("response.completed", {
             "type": "response.completed",
             "response": {"id": response_id, "status": "needs_input"},
