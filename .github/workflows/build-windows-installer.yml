@@ -21,9 +21,9 @@ on:
       SSL_TOTP_SECRET:
         required: true
       GOOGLE_CLIENT_ID:
-        required: false
+        required: true
       GOOGLE_CLIENT_SECRET:
-        required: false
+        required: true
 
 jobs:
   build:
@@ -57,7 +57,7 @@ jobs:
         run: npx electron-rebuild -f -w node-pty
 
       - name: Inject Google OAuth credentials
-        if: ${{ secrets.GOOGLE_CLIENT_ID != '' }}
+        shell: bash
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}

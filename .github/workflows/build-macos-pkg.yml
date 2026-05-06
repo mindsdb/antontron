@@ -29,9 +29,9 @@ on:
       APPLE_INSTALLER_IDENTITY:
         required: true
       GOOGLE_CLIENT_ID:
-        required: false
+        required: true
       GOOGLE_CLIENT_SECRET:
-        required: false
+        required: true
 
 jobs:
   build:
@@ -91,7 +91,6 @@ jobs:
           security find-identity -v -p codesigning "$KEYCHAIN_PATH"
 
       - name: Inject Google OAuth credentials
-        if: ${{ secrets.GOOGLE_CLIENT_ID != '' }}
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
