@@ -848,6 +848,13 @@ function AppCore() {
       // datasources path.
       setDataVaultForm(tempId, {
         ...full.form,
+        // Stamp the canonical engine slug so server-side code
+        // (datavault_agent: "Trying to connect to **<engine>**…",
+        // probe prompt, vault save path) has a deterministic id
+        // even when the connector JSON's `form` block doesn't
+        // repeat it. Connector JSONs use top-level `id` as the
+        // engine slug; we treat that as the source of truth.
+        engine: full.form.engine || full.id,
         _connector_id: full.id,
         logo: full.form.logo || full.logo,
         logo_color: full.form.logo_color || full.logo_color,
