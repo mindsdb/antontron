@@ -11,6 +11,7 @@ import HomeView from './views/HomeView';
 import ChatView from './views/ChatView';
 import ProjectsView from './views/ProjectsView';
 import ScheduledView from './views/ScheduledView';
+import ScheduleDetailView from './views/ScheduleDetailView';
 import ArtifactsView from './views/ArtifactsView';
 import DispatchView from './views/DispatchView';
 import CustomizeView from './views/CustomizeView';
@@ -525,8 +526,9 @@ function AppCore() {
     }
   }, [theme]);
 
-  const [route, setRoute] = useState('home');         // home | task | projects | scheduled | artifacts | dispatch | customize | settings
+  const [route, setRoute] = useState('home');         // home | task | projects | scheduled | schedule-detail | artifacts | dispatch | customize | settings
   const [activeTaskId, setActiveTaskId] = useState(null);
+  const [selectedScheduleId, setSelectedScheduleId] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedModel, setSelectedModel] = useState(MOCK_DATA.models[0]);
   const [serverOnline, setServerOnline] = useState(false);
@@ -1641,7 +1643,7 @@ function AppCore() {
         tasks={tasks}
         pins={pins}
         scheduledCount={scheduled.length}
-        activeRoute={route === 'task' ? null : route}
+        activeRoute={route === 'task' ? null : (route === 'schedule-detail' ? 'scheduled' : route)}
         activeTaskId={activeTaskId}
         serverOnline={serverOnline}
         onNavigate={navigate}
@@ -1797,6 +1799,38 @@ function AppCore() {
             onPause={handlePauseSchedule}
             onResume={handleResumeSchedule}
             onRunNow={handleRunScheduleNow}
+            onOpenSchedule={(task) => {
+              setSelectedScheduleId(task.id);
+              setRoute('schedule-detail');
+            }}
+          />
+        )}
+
+        {route === 'schedule-detail' && (
+          <ScheduleDetailView
+            task={scheduled.find((s) => s.id === selectedScheduleId) || null}
+            projects={projects}
+            models={modelOptions}
+            onBack={() => { setSelectedScheduleId(null); setRoute('scheduled'); }}
+            onUpdate={handleUpdateSchedule}
+            onDelete={async (id) => {
+              await handleDeleteSchedule(id);
+              setSelectedScheduleId(null);
+              setRoute('scheduled');
+            }}
+            onPause={handlePauseSchedule}
+            onResume={handleResumeSchedule}
+            onRunNow={handleRunScheduleNow}
+            onOpenRunSession={(sessionId) => {
+              // Best-effort: jump to the conversation if it's in our
+              // task list; otherwise no-op so we don't navigate away
+              // to a blank page.
+              const t = tasks.find((x) => x.id === sessionId);
+              if (t) {
+                setActiveTaskId(t.id);
+                setRoute('task');
+              }
+            }}
           />
         )}
 

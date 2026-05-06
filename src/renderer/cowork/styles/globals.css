@@ -495,16 +495,27 @@ a[href],
 }
 button.meta-pill { cursor: pointer; }
 button.meta-pill:hover { background: var(--surface-0); border-color: var(--border-01); color: var(--text-strong); }
+/* Send button — single shared treatment across the home composer
+   ("create new task") and the in-task chat composer. The legacy
+   --primary-700 token didn't have a dark-mode partner and read as
+   the wrong colour on dark, so the home and chat send buttons
+   diverged. Routing through --accent gives both surfaces the same
+   theme-adaptive look. */
 .send-btn {
-  width: 32px; height: 32px; border-radius: 8px;
+  width: 30px; height: 30px; border-radius: 8px;
   display: inline-flex; align-items: center; justify-content: center;
-  border: 0; background: var(--primary-700); color: #fff;
+  border: 0; background: var(--accent); color: #fff;
   transition: background .15s, transform .1s;
-  box-shadow: 0 1px 2px rgba(0,0,0,0.08);
+  box-shadow: none;
 }
-.send-btn:hover:not(:disabled) { background: var(--primary-600); }
+.send-btn:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, black); }
 .send-btn:active:not(:disabled) { transform: scale(0.97); }
-.send-btn:disabled { background: var(--stone-200); color: var(--frost-500); cursor: not-allowed; box-shadow: none; }
+.send-btn:disabled {
+  background: color-mix(in srgb, var(--ink) 10%, transparent);
+  color: var(--ink-4);
+  cursor: not-allowed;
+  box-shadow: none;
+}
 
 /* ─── Dropdown menus ─────────────────────────────────────────────────────── */
 .menu {

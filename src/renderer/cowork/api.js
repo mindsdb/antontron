@@ -824,6 +824,17 @@ export async function runScheduleNow(id) {
   return req(`/schedules/${encodeURIComponent(id)}/run-now`, { method: 'POST' });
 }
 
+export async function fetchScheduleRuns(id, { limit = 100 } = {}) {
+  // Returns { schedule_id, runs: [{ id, scheduleId, startedAt,
+  // finishedAt, durationMs, status, error, sessionId, manual }] }
+  // Newest first.
+  try {
+    return await req(`/schedules/${encodeURIComponent(id)}/runs?limit=${encodeURIComponent(limit)}`);
+  } catch {
+    return { schedule_id: id, runs: [] };
+  }
+}
+
 // ─── Mock data (used when server is offline) ──────────────────────────────────
 export const MOCK_DATA = {
   tasks: [
