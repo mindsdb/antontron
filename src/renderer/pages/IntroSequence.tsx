@@ -22,24 +22,30 @@
 import { useEffect, useRef, useState } from 'react';
 import OrbitMorph from '../cowork/components/ui/OrbitMorph';
 
-const TITLE = 'Meet Anton';
-const SUBTITLE = 'Your autonomous coworker.';
+const TITLE = "Hi, I'm ANTON!";
+const SUBTITLE = 'your autonomous coworker';
 
 // Cinematic deep navy. Any "blue" reads here; this one sits a hair
 // darker than the dark theme's body bg so the fade-out doesn't pop
 // when the gravity mesh swaps in.
 const BLUE = '#0A1F3D';
 
+// Both stacked orbs run on this orbit period so their satellites
+// stay aligned through the cross-fade. We pick idle's natural pace
+// (4500 ms) so the calmer rhythm wins; the thinking orb's central
+// chaos→pyramid→dot→cube morph still runs at its own faster cadence.
+const INTRO_ORBIT_PERIOD = 4500;
+
 const T = {
   dotIn:        700,    // dot scale-up to full idle orb
-  bgFade:       2300,   // blue → gravity mesh
-  orbIn:        3000,   // total stage-1 duration (dotIn + a hold)
+  bgFade:       1800,   // blue → gravity mesh
+  orbIn:        2000,   // total stage-1 duration (dotIn + a brief hold)
   crossFade:    1000,   // each idle⇄thinking cross-fade
   thinkingHold: 3000,
   collapse:     800,
   dotMorph:     400,
-  typeChar:     55,
-  typeGap:      240,
+  typeChar:     95,
+  typeGap:      320,
   hold:         1400,
   fadeOut:      700,
 };
@@ -133,15 +139,22 @@ export default function IntroSequence({ onComplete }: { onComplete: () => void }
       after(at, () => setTitleTyped(TITLE.slice(0, i + 1)));
     }
     const titleDoneAt = typingStart + TITLE.length * T.typeChar;
-    const subStart = titleDoneAt + T.typeGap;
-    for (let i = 0; i < SUBTITLE.length; i += 1) {
-      const at = subStart + (i + 1) * T.typeChar;
-      after(at, () => setSubTyped(SUBTITLE.slice(0, i + 1)));
-    }
-    const subDoneAt = subStart + SUBTITLE.length * T.typeChar;
 
-    after(subDoneAt + T.hold, () => setPhase('fadeout'));
-    after(subDoneAt + T.hold + T.fadeOut, finish);
+    // Skip the inter-line pause + subtitle scheduling entirely when
+    // there's no subtitle; otherwise the hold drags on after the
+    // title is already complete.
+    let typingDoneAt = titleDoneAt;
+    if (SUBTITLE.length > 0) {
+      const subStart = titleDoneAt + T.typeGap;
+      for (let i = 0; i < SUBTITLE.length; i += 1) {
+        const at = subStart + (i + 1) * T.typeChar;
+        after(at, () => setSubTyped(SUBTITLE.slice(0, i + 1)));
+      }
+      typingDoneAt = subStart + SUBTITLE.length * T.typeChar;
+    }
+
+    after(typingDoneAt + T.hold, () => setPhase('fadeout'));
+    after(typingDoneAt + T.hold + T.fadeOut, finish);
 
     return () => {
       cancelled = true;
@@ -220,19 +233,25 @@ export default function IntroSequence({ onComplete }: { onComplete: () => void }
               willChange: 'transform',
             }}
           >
+            {/* Both orbs share an orbit period so their satellites
+                land at the same point on the ring throughout the
+                cross-fade — otherwise idle (4500 ms) and thinking
+                (1400 ms) drift apart and the user sees two satellites
+                at once during the 1 s overlap. The morph cycle inside
+                each orb is unaffected. */}
             <div style={{
               position: 'absolute',
               opacity: opacities.idle,
               transition: `opacity ${T.crossFade}ms ease`,
             }}>
-              <OrbitMorph state="idle" size={180} />
+              <OrbitMorph state="idle" size={180} orbitPeriodMs={INTRO_ORBIT_PERIOD} />
             </div>
             <div style={{
               position: 'absolute',
               opacity: opacities.thinking,
               transition: `opacity ${T.crossFade}ms ease`,
             }}>
-              <OrbitMorph state="thinking" size={180} />
+              <OrbitMorph state="thinking" size={180} orbitPeriodMs={INTRO_ORBIT_PERIOD} />
             </div>
           </div>
         )}
@@ -251,34 +270,59 @@ export default function IntroSequence({ onComplete }: { onComplete: () => void }
           />
         )}
 
-        {/* Typed title + subtitle with a trailing blinking caret. */}
+        {/* Typed title + subtitle.
+            The title is anchored to the stage's vertical center —
+            i.e. the exact spot where the orb collapsed and the
+            cursor materialised — so it lands on the cursor and
+            stays put. The subtitle is positioned absolutely below
+            the title's bottom edge, so when it types in it extends
+            downward instead of pushing the title up. Both rows have
+            locked heights so caret swaps don't cause sub-pixel jitter. */}
         {textVisible && (
-          <div style={{
-            position: 'absolute', inset: 0,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            gap: 12,
-            animation: `intro-fade-up 320ms ease both`,
-            textAlign: 'center',
-          }}>
+          <div
+            style={{
+              position: 'absolute', inset: 0,
+              animation: `intro-fade-up 320ms ease both`,
+              textAlign: 'center',
+            }}
+          >
             <h1 style={{
+              position: 'absolute',
+              left: '50%', top: '50%',
+              transform: 'translate(-50%, -50%)',
               margin: 0,
               fontFamily: 'var(--font-display, "Josefin Sans", system-ui, sans-serif)',
-              fontWeight: 700, fontSize: 44, letterSpacing: '-0.02em',
+              fontWeight: 700, fontSize: 44, letterSpacing: '-0.01em',
               color: 'var(--ink, #f3f5f7)',
-              display: 'inline-flex', alignItems: 'baseline', gap: 4,
+              height: 56, lineHeight: 1,
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+              whiteSpace: 'nowrap',
             }}>
               <span>{titleTyped}</span>
               {!subTyped && <Caret />}
             </h1>
-            <div style={{
-              fontFamily: 'var(--font-body, "Inter", system-ui, sans-serif)',
-              fontSize: 17, color: 'var(--ink-3, #8a97ae)',
-              display: 'inline-flex', alignItems: 'baseline', gap: 3,
-              minHeight: 24,
-            }}>
-              <span>{subTyped}</span>
-              {subTyped && <Caret />}
-            </div>
+            {SUBTITLE.length > 0 && (
+              <div style={{
+                position: 'absolute',
+                left: '50%',
+                // Title is 56 px tall and centred on the stage's
+                // vertical midline → its bottom sits at midline + 28.
+                // 16 px of breathing room below = midline + 44.
+                top: 'calc(50% + 44px)',
+                transform: 'translateX(-50%)',
+                fontFamily: 'var(--font-display, "Josefin Sans", system-ui, sans-serif)',
+                fontSize: 22,
+                fontWeight: 500,
+                letterSpacing: '-0.005em',
+                color: 'var(--ink, #f3f5f7)',
+                height: 30, lineHeight: 1,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 3,
+                whiteSpace: 'nowrap',
+              }}>
+                <span>{subTyped}</span>
+                {subTyped && <Caret />}
+              </div>
+            )}
           </div>
         )}
       </div>

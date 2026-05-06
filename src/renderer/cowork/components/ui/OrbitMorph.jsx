@@ -36,13 +36,20 @@ export default function OrbitMorph({
   className,
   style,
   title,
+  // Optional override for the satellite's orbit period (in ms). Lets
+  // callers lock two stacked instances to the same speed so their
+  // satellites stay synchronized across cross-fades. Default is the
+  // state-derived value (1400 thinking, 4500 idle/done).
+  orbitPeriodMs,
 }) {
   const hostRef = useRef(null);
   const stateRef = useRef(state);
   const themeRef = useRef(theme || readBodyTheme());
+  const orbitPeriodRef = useRef(orbitPeriodMs);
 
   // Keep refs in sync so the rAF loop reads fresh values without restarting.
   useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { orbitPeriodRef.current = orbitPeriodMs; }, [orbitPeriodMs]);
   useEffect(() => {
     if (theme) themeRef.current = theme;
   }, [theme]);
@@ -77,7 +84,7 @@ export default function OrbitMorph({
       const p = PALETTE[themeRef.current] || PALETTE.light;
 
       const t = performance.now() - t0;
-      const orbitDur = s === 'thinking' ? 1400 : 4500;
+      const orbitDur = orbitPeriodRef.current ?? (s === 'thinking' ? 1400 : 4500);
       const morphDur = s === 'thinking' ? 4800 : 12000;
       const angle = ((t / orbitDur) * 360) % 360;
       const phase = (t / morphDur) % 1;

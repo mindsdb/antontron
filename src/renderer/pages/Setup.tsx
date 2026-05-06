@@ -20,13 +20,25 @@ export default function Setup({
 }: {
   onComplete: () => void;
 }) {
-  const [phase, setPhase] = useState<'ready' | 'installing' | 'done' | 'error'>('ready');
+  // Install starts automatically on mount — the "SETUP ANTON" button
+  // already lives on the consent screen, so re-prompting here was
+  // redundant. `phase` still tracks `installing | done | error` so
+  // the rest of the screen (steps panel, error retry, done screen)
+  // works the same.
+  const [phase, setPhase] = useState<'installing' | 'done' | 'error'>('installing');
   const [steps, setSteps] = useState<Step[]>([]);
   const [logs, setLogs] = useState('');
   const [errorMsg, setErrorMsg] = useState('');
   const [isCancelling, setIsCancelling] = useState(false);
   const logRef = useRef<HTMLDivElement>(null);
   const failedStep = steps.find((step) => step.status === 'error');
+
+  // Kick off the install once on mount. Cancel/Retry paths still go
+  // through the same `handleInstall` so an `error → retry` flow
+  // re-runs the same code path.
+  useEffect(() => {
+    void window.antontron.startInstall();
+  }, []);
 
   useEffect(() => {
     const unsubs: (() => void)[] = [];
@@ -61,8 +73,11 @@ export default function Setup({
     unsubs.push(
       window.antontron.onInstallCancelled(() => {
         setIsCancelling(false);
-        setPhase('ready');
-        setErrorMsg('');
+        // No "ready" phase to fall back to — surface the cancel as
+        // an error state with a Retry button so the user can try
+        // again without bouncing back to terms.
+        setPhase('error');
+        setErrorMsg('Installation cancelled.');
       })
     );
 
@@ -90,21 +105,7 @@ export default function Setup({
   };
 
   return (
-    <div className={`setup-content ${phase === 'installing' || phase === 'error' ? 'setup-content-compact' : ''}`}>
-      {phase === 'ready' && (
-        <div className="setup-actions">
-          <button className="btn-primary" onClick={handleInstall}>
-            SETUP ANTON
-          </button>
-        </div>
-      )}
-
-      {phase === 'ready' && (
-        <div className="setup-note">
-          To continue, we need to install and prepare all required system dependencies. This will take just a few minutes.
-        </div>
-      )}
-
+    <div className="setup-content setup-content-compact">
       {(phase === 'installing' || phase === 'error') && (
         <>
           <div className="steps-panel">

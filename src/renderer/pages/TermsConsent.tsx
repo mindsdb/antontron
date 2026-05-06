@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { createPortal } from 'react-dom';
 
 type View = 'main' | 'terms' | 'privacy';
 
@@ -218,13 +219,13 @@ export default function TermsConsent({ onAccept }: { onAccept: () => void }) {
   // ── Inline document viewer ──
   if (view === 'terms' || view === 'privacy') {
     const isTerms = view === 'terms';
-    return (
+    // Portaled to <body> so the ANTON header up the tree can't bleed
+    // through. Overlay sits above titlebar-drag (z 1000) and has its
+    // own draggable header so window dragging still works.
+    return createPortal(
       <div className="legal-viewer-overlay">
         <div className="legal-viewer">
           <div className="legal-viewer-header">
-            <button className="legal-back-btn" onClick={() => setView('main')}>
-              <span className="legal-back-arrow">{'\u2190'}</span> Back
-            </button>
             <span className="legal-viewer-title">
               {isTerms ? 'Terms and Conditions' : 'Privacy Policy'}
             </span>
@@ -232,8 +233,21 @@ export default function TermsConsent({ onAccept }: { onAccept: () => void }) {
           <div className="legal-viewer-body">
             <pre className="legal-text">{isTerms ? TERMS_TEXT : PRIVACY_TEXT}</pre>
           </div>
+          {/* Floating back button \u2014 text-only, no fill, no border;
+              fixed to the bottom-right of the viewport so the user
+              can dismiss the document without having to scroll back
+              to the top. */}
+          <button
+            type="button"
+            className="legal-floating-back"
+            onClick={() => setView('main')}
+          >
+            <span aria-hidden>{'\u2190'}</span>
+            <span>Back</span>
+          </button>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
@@ -276,8 +290,14 @@ export default function TermsConsent({ onAccept }: { onAccept: () => void }) {
           disabled={!accepted}
           onClick={onAccept}
         >
-          CONTINUE
+          SETUP ANTON
         </button>
+        {/* Short explainer beneath the CTA — reassures the user that
+            "Setup Anton" is just an install, not a credential dance. */}
+        <p className="terms-setup-note">
+          We&rsquo;ll install and prepare the system dependencies Anton needs.
+          Takes about a minute.
+        </p>
     </div>
   );
 }
