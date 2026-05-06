@@ -10,6 +10,7 @@ import {
   fetchDispatchStatus,
   fetchSlackConfig,
   fetchWirings,
+  getApiOrigin,
   saveSlackConfig,
   startSlackOAuth,
 } from '../api';
@@ -393,17 +394,20 @@ export default function DispatchView() {
     setConnectError((s) => ({ ...s, [channelType]: null }));
     try {
       // The redirect URL must match one configured under "Redirect URLs"
-      // in the Slack app, AND must reach the FastAPI server's
-      // /v1/dispatch/slack/oauth/callback route. Use the renderer's own
-      // origin — works across all three deployment modes:
-      //   - Local docker (traefik):   https://cw-<hash>.localhost/v1/...
-      //   - Web dev (vite proxy):     http://localhost:5173/v1/...
-      //   - Direct curl/dev server:   http://localhost:26866/v1/...
-      // The Electron `app://` scheme does not satisfy Slack's HTTPS
-      // requirement, so for Electron a fallback to a fixed localhost
-      // origin would be needed — but in practice the Electron renderer
-      // is also hosted by traefik in the local stack.
-      const redirectUri = `${window.location.origin}/v1/dispatch/slack/oauth/callback`;
+      // in the Slack app AND must reach the FastAPI server's
+      // /v1/dispatch/slack/oauth/callback route. `getApiOrigin()` returns:
+      //   - Electron (app:// or file://):  http://127.0.0.1:26866   (the
+      //     Python child process — Slack opens the install URL in the
+      //     user's default browser, which CAN reach localhost on the
+      //     same machine).
+      //   - Web dev (vite):               http://localhost:5173    (vite
+      //     proxies /v1/* to the Python server).
+      //   - Web docker/prod (traefik):    https://cw-<hash>.localhost
+      //     (nginx proxies /v1/* to cowork-gateway).
+      // Both Electron and web modes resolve to a redirect URL Slack can
+      // hit. For Electron, register http://127.0.0.1:26866/v1/... in the
+      // Slack app's Redirect URLs alongside the web origins.
+      const redirectUri = `${getApiOrigin()}/v1/dispatch/slack/oauth/callback`;
       const { install_url } = await startSlackOAuth(redirectUri);
       window.open(install_url, '_blank', 'noopener,noreferrer');
     } catch (err) {

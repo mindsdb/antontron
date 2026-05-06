@@ -18,6 +18,24 @@ const API_ORIGIN = (() => {
 const BASE = `${API_ORIGIN}/v1`;
 const ROOT_BASE = `${API_ORIGIN}`;
 
+/**
+ * Absolute origin of the antontron API, suitable for building redirect URLs
+ * that must be reached from outside the app (e.g. Slack OAuth callback).
+ *
+ *   Electron:           "http://127.0.0.1:26866"  (Python child process)
+ *   Web (vite/dev):     window.location.origin    ("http://localhost:5173")
+ *   Web (docker/prod):  window.location.origin    ("https://cw-*.localhost")
+ *
+ * Always returns a usable absolute origin; never an empty string.
+ */
+export function getApiOrigin() {
+  if (API_ORIGIN) return API_ORIGIN;
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  return '';
+}
+
 async function req(path, options = {}) {
   const res = await fetch(BASE + path, {
     headers: { 'Content-Type': 'application/json', ...options.headers },
