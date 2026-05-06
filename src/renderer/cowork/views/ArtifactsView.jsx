@@ -27,6 +27,7 @@ import {
   HoverMenu,
   useCollectionShortcut,
 } from '../components/collection';
+import { openExternal } from '../lib/host';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
@@ -311,9 +312,7 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
   };
   const onOpenPublished = async () => {
     if (!published) return;
-    try { await window.antontron?.openExternal?.(artifact.publishedUrl); } catch {
-      window.open(artifact.publishedUrl, '_blank', 'noreferrer');
-    }
+    await openExternal(artifact.publishedUrl);
   };
 
   const Icon = iconForArtifact(artifact);

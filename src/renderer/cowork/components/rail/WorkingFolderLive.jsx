@@ -12,6 +12,7 @@ import clsx from 'clsx';
 import Ico from '../Icons';
 import { fetchArtifacts, fetchActiveProject } from '../../api';
 import { ArtifactViewer } from '../artifact';
+import { openPath } from '../../lib/host';
 
 function timeAgo(iso) {
   if (!iso) return '';
@@ -92,7 +93,7 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
   // Other types open in the OS default app.
   const [previewArt, setPreviewArt] = useState(null);
   const onOpen = async (path) => {
-    try { await window.antontron?.openPath?.(path); } catch {}
+    try { await openPath(path); } catch {}
   };
   const onOpenArtifact = (artifact) => {
     const isHtml = (artifact.ext || '').toLowerCase() === '.html'

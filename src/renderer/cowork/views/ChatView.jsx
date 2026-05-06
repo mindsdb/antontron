@@ -25,6 +25,7 @@ import { getForm as getDataVaultForm, subscribe as subscribeDataVaultForm } from
 import { FormErrorBoundary } from '../components/datavault/FormErrorBoundary';
 import { revealArtifact } from '../api';
 import { normalizeArtifactRecord } from '../lib/artifactPaths';
+import { openPath } from '../lib/host';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -401,7 +402,7 @@ function ArtifactCard({ artifact, onOpen }) {
       return;
     }
     try {
-      const result = await window.antontron?.openPath?.(path);
+      const result = await openPath(path);
       if (result && result.ok === false) throw new Error(result.reason || 'Could not open artifact.');
       showStatus('ok', 'Opened.');
     }

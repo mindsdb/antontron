@@ -3,17 +3,12 @@ import Ico from './Icons';
 import { Spinner } from './ui';
 import { TaskMenu } from './TaskMenu';
 import RecentsModal from './RecentsModal';
+import { isMac, isWeb } from '../lib/host';
 
 // Platform-aware modifier symbol for keyboard hints. Mac uses ⌘ glyph,
-// Windows/Linux use Ctrl+ literal.
-const IS_MAC = (() => {
-  try {
-    if (typeof window !== 'undefined' && window.antontron && typeof window.antontron.getPlatform === 'function') {
-      return window.antontron.getPlatform() === 'darwin';
-    }
-  } catch {}
-  return /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
-})();
+// Windows/Linux use Ctrl+ literal. host.isMac() works in both Electron
+// (delegates to preload's getPlatform) and web (navigator.userAgentData).
+const IS_MAC = isMac();
 const MOD_LABEL = IS_MAC ? '⌘' : 'Ctrl+';
 const shortcut = (key) => `${MOD_LABEL}${key}`;
 
@@ -448,29 +443,34 @@ export default function Sidebar({
               )}
             </span>
           </button>
-          <div className="anton-sidebar__footer-actions">
-            <button
-              className={
-                'chrome-btn--small server-toggle' +
-                (serverOnline ? ' is-on' : '') +
-                (serverBusy ? ' is-busy' : '')
-              }
-              onClick={onToggleServer}
-              disabled={serverBusy}
-              title={
-                serverBusy
-                  ? `Backend ${serverBusyKind}…`
-                  : serverOnline ? 'Stop Anton backend' : 'Start Anton backend'
-              }
-              aria-label={serverOnline ? 'Stop backend' : 'Start backend'}
-              aria-busy={serverBusy ? 'true' : undefined}
-              style={{ WebkitAppRegion: 'no-drag' }}
-            >
-              {serverBusy
-                ? <Spinner intervalMs={70} />
-                : (serverOnline ? Ico.powerOff(13) : Ico.power(13))}
-            </button>
-          </div>
+          {/* Server-toggle hidden in web mode — the FastAPI is container/Lightsail
+              managed there, not user-controllable from the renderer. The status
+              pill above still surfaces connected/offline as a read-only signal. */}
+          {!isWeb && (
+            <div className="anton-sidebar__footer-actions">
+              <button
+                className={
+                  'chrome-btn--small server-toggle' +
+                  (serverOnline ? ' is-on' : '') +
+                  (serverBusy ? ' is-busy' : '')
+                }
+                onClick={onToggleServer}
+                disabled={serverBusy}
+                title={
+                  serverBusy
+                    ? `Backend ${serverBusyKind}…`
+                    : serverOnline ? 'Stop Anton backend' : 'Start Anton backend'
+                }
+                aria-label={serverOnline ? 'Stop backend' : 'Start backend'}
+                aria-busy={serverBusy ? 'true' : undefined}
+                style={{ WebkitAppRegion: 'no-drag' }}
+              >
+                {serverBusy
+                  ? <Spinner intervalMs={70} />
+                  : (serverOnline ? Ico.powerOff(13) : Ico.power(13))}
+              </button>
+            </div>
+          )}
         </div>
       </div>
 
