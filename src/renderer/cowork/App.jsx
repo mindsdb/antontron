@@ -1806,7 +1806,7 @@ function AppCore() {
         )}
 
         {route === 'dispatch' && (
-          <DispatchView onSetUpLater={() => setRoute('home')} />
+          <DispatchView />
         )}
 
         {route === 'customize' && (
