@@ -14,6 +14,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Ico from '../components/Icons';
 import {
   PageHeader, FilterRow, SearchInput, SortPill,
+  ViewToggle,
   useCollectionShortcut,
 } from '../components/collection';
 import ScheduleTaskModal from '../components/schedule/ScheduleTaskModal';
@@ -27,7 +28,10 @@ const SORT_OPTIONS = [
   { id: 'created', label: 'Recently created' },
 ];
 
-const VIEW_MODE_KEY = 'antontron:scheduled-view-mode';
+// Match the storage-key convention used by ArtifactsView /
+// ProjectsView (`anton:<surface>-view`). Same value-shape too —
+// 'grid' | 'list'.
+const VIEW_MODE_KEY = 'anton:scheduled-view';
 
 function loadViewMode() {
   if (typeof localStorage === 'undefined') return 'grid';
@@ -133,12 +137,9 @@ export default function ScheduledView({
         title="Scheduled tasks"
         subtitle="Local scheduled Anton tasks run while Anton CoWork is open. Missed runs wait for approval."
         actions={
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-            <ViewToggle mode={viewMode} onChange={setViewMode} />
-            <button className="btn-primary" onClick={openCreate}>
-              {Ico.plus(14)} Schedule task
-            </button>
-          </div>
+          <button className="btn-primary" onClick={openCreate}>
+            {Ico.plus(14)} Schedule task
+          </button>
         }
       />
 
@@ -155,6 +156,7 @@ export default function ScheduledView({
             />
           }
           sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
+          view={<ViewToggle value={viewMode} onChange={setViewMode} />}
           counts={
             <>
               {(search || '').trim().length > 0
@@ -243,50 +245,6 @@ export default function ScheduledView({
         defaultProjectPath={selectedProject?.path || ''}
         defaultModelId={selectedModel?.id || ''}
       />
-    </div>
-  );
-}
-
-
-// ── View toggle ──
-
-function ViewToggle({ mode, onChange }) {
-  const Btn = ({ value, icon, label }) => {
-    const active = mode === value;
-    return (
-      <button
-        type="button"
-        onClick={() => onChange(value)}
-        title={label}
-        aria-label={label}
-        aria-pressed={active}
-        style={{
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 30, height: 30,
-          background: active ? 'var(--surface)' : 'transparent',
-          border: 0,
-          color: active ? 'var(--ink)' : 'var(--ink-3)',
-          borderRadius: 6,
-          cursor: 'pointer',
-          transition: 'background 120ms ease, color 120ms ease',
-        }}
-        onMouseOver={(e) => { if (!active) e.currentTarget.style.color = 'var(--ink)'; }}
-        onMouseOut={(e)  => { if (!active) e.currentTarget.style.color = 'var(--ink-3)'; }}
-      >
-        {icon}
-      </button>
-    );
-  };
-  return (
-    <div style={{
-      display: 'inline-flex', alignItems: 'center',
-      padding: 2,
-      background: 'var(--surface-2)',
-      border: '1px solid var(--line)',
-      borderRadius: 8,
-    }}>
-      <Btn value="grid" icon={Ico.grid(14)} label="Grid view" />
-      <Btn value="list" icon={Ico.list(14)} label="List view" />
     </div>
   );
 }

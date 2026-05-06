@@ -1,12 +1,18 @@
-// Context card body — currently surfaces just memories (Project +
-// Global). Click any memory row to open the rendered markdown in a
-// modal. Skills are intentionally skipped for now per current scope.
+// Context card body — surfaces memories (Project + Global) AND
+// the project's own context files (anton.md + anything the user
+// dropped in via the new-project modal). Click any row to open
+// the corresponding modal: memories use the existing read-only
+// markdown viewer, project files use ContextFileModal which has
+// view + edit modes.
 
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import Ico from '../Icons';
-import { fetchMemory } from '../../api';
+import { fetchMemory, fetchProjectFiles } from '../../api';
 import { MarkdownContent } from '../markdown/MarkdownContent';
+import ContextFileModal from '../project/ContextFileModal';
+
+const ANTON_INSTRUCTIONS_FILENAME = 'anton.md';
 
 function relativeAge(ts) {
   if (!ts) return '';
@@ -98,9 +104,47 @@ function MemoryModal({ open, onClose, entry }) {
   );
 }
 
+// Row for a project context file (anton.md or any uploaded file).
+// Same visual rhythm as MemoryRow but distinguishes the always-
+// present anton.md with a subtle "Project instructions" label.
+function ContextFileRow({ file, onOpen }) {
+  const isAnton = file.path === ANTON_INSTRUCTIONS_FILENAME;
+  const isEmpty = !file.size || file.synthetic === true;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      title={file.path}
+      className={clsx(
+        'group grid items-start gap-2 rounded-md px-1 py-1 text-left',
+        'cursor-pointer transition-colors hover:bg-surface-2',
+        'border-0 bg-transparent w-full'
+      )}
+      style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
+    >
+      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{Ico.doc(13)}</span>
+      <span className="min-w-0">
+        <span className="block truncate text-[12.5px] text-ink">
+          {file.path}
+        </span>
+        <span className="mt-0.5 block truncate text-[11px] text-ink-4">
+          {isAnton
+            ? (isEmpty ? 'Empty — click to add instructions' : 'Project instructions')
+            : (isEmpty ? 'Empty file' : `${Math.ceil((file.size || 0) / 1024)} KB`)}
+        </span>
+      </span>
+    </button>
+  );
+}
+
 export function ContextCard({ project }) {
   const [sections, setSections] = useState([]);
+  const [projectFiles, setProjectFiles] = useState([]);
   const [openEntry, setOpenEntry] = useState(null);
+  // Project-file editor is a separate modal because the shape (view
+  // + edit + save + delete) is different from the read-only memory
+  // viewer.
+  const [openFile, setOpenFile] = useState(null);
   const [showAll, setShowAll] = useState(false);
 
   useEffect(() => {
@@ -110,6 +154,28 @@ export function ContextCard({ project }) {
       .catch(() => {});
     return () => { cancelled = true; };
   }, [project?.path]);
+
+  // Project files fetch — keyed by project NAME (server route is
+  // /v1/projects/{name}/files). Server always returns at least the
+  // synthetic anton.md entry so first-time projects still show
+  // something to author against.
+  const reloadFiles = () => {
+    if (!project?.name) { setProjectFiles([]); return; }
+    fetchProjectFiles(project.name)
+      .then((data) => setProjectFiles(Array.isArray(data?.files) ? data.files : []))
+      .catch(() => setProjectFiles([]));
+  };
+  useEffect(() => {
+    let cancelled = false;
+    if (!project?.name) { setProjectFiles([]); return undefined; }
+    fetchProjectFiles(project.name)
+      .then((data) => {
+        if (cancelled) return;
+        setProjectFiles(Array.isArray(data?.files) ? data.files : []);
+      })
+      .catch(() => { if (!cancelled) setProjectFiles([]); });
+    return () => { cancelled = true; };
+  }, [project?.name]);
 
   // Order: Project section first, Global second.
   const ordered = useMemo(() => {
@@ -127,9 +193,10 @@ export function ContextCard({ project }) {
     }));
   }, [sections]);
 
-  const totalFiles = useMemo(() => ordered.reduce((n, s) => n + s.files.length, 0), [ordered]);
+  const totalMemoryFiles = useMemo(() => ordered.reduce((n, s) => n + s.files.length, 0), [ordered]);
+  const hasProjectFiles = projectFiles.length > 0;
 
-  if (totalFiles === 0) {
+  if (totalMemoryFiles === 0 && !hasProjectFiles) {
     return (
       <p className="text-[12.5px] text-ink-4 px-1 pt-2 pb-1">
         Anton learns as you work — memories will appear here.
@@ -139,6 +206,24 @@ export function ContextCard({ project }) {
 
   return (
     <div className="flex flex-col gap-3 pt-2">
+      {/* Project files section — anton.md (always) + uploaded docs.
+          Rendered first when we have a project so the working
+          instructions are the first thing the user sees. */}
+      {project?.name && hasProjectFiles && (
+        <div className="flex flex-col gap-0.5">
+          <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
+            Project files
+          </span>
+          {projectFiles.map((f) => (
+            <ContextFileRow
+              key={f.path}
+              file={f}
+              onOpen={() => setOpenFile(f)}
+            />
+          ))}
+        </div>
+      )}
+
       {ordered.map((section) => {
         const max = showAll ? section.files.length : 4;
         const visible = section.files.slice(0, max);
@@ -170,6 +255,14 @@ export function ContextCard({ project }) {
       })}
 
       <MemoryModal open={!!openEntry} entry={openEntry} onClose={() => setOpenEntry(null)} />
+      <ContextFileModal
+        open={!!openFile}
+        projectName={project?.name}
+        filePath={openFile?.path}
+        isAntonMd={openFile?.path === ANTON_INSTRUCTIONS_FILENAME}
+        onClose={() => setOpenFile(null)}
+        onChanged={() => reloadFiles()}
+      />
     </div>
   );
 }

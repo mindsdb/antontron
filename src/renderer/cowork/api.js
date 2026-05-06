@@ -371,6 +371,73 @@ export async function deleteProject(name) {
   return res.json();
 }
 
+// ── Project files (context dir) ─────────────────────────────────
+//
+// Each project has a `.context/` subdirectory the user fills with
+// reference docs (anton.md being the always-present working
+// instructions). These helpers wrap the GET/PUT/POST/DELETE
+// endpoints in routes/projects.py so the renderer can list, read,
+// edit, upload, and remove files without mixing fetch boilerplate
+// into every component that touches them.
+
+const enc = encodeURIComponent;
+
+export async function readProjectFile(projectName, path) {
+  // `path` may have slashes — encode each segment, not the whole
+  // string (encodeURIComponent('a/b') → 'a%2Fb' which the FastAPI
+  // route would treat as a single literal segment).
+  const safe = path.split('/').map(enc).join('/');
+  return req(`/projects/${enc(projectName)}/files/${safe}`);
+}
+
+export async function writeProjectFile(projectName, path, content) {
+  const safe = path.split('/').map(enc).join('/');
+  const res = await fetch(BASE + `/projects/${enc(projectName)}/files/${safe}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ content: content || '' }),
+  });
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json())?.detail || ''; } catch {}
+    throw new Error(detail || `Write failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function uploadProjectFiles(projectName, files) {
+  // `files` is an iterable of File objects (drag&drop or input).
+  // Endpoint accepts a multipart payload with a repeated `files`
+  // field — same shape FastAPI's `list[UploadFile]` consumes.
+  const form = new FormData();
+  for (const f of files) form.append('files', f, f.name);
+  const res = await fetch(BASE + `/projects/${enc(projectName)}/files/upload`, {
+    method: 'POST',
+    body: form,
+  });
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json())?.detail || ''; } catch {}
+    throw new Error(detail || `Upload failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function deleteProjectFile(projectName, path) {
+  const safe = path.split('/').map(enc).join('/');
+  const res = await fetch(BASE + `/projects/${enc(projectName)}/files/${safe}`, {
+    method: 'DELETE',
+  });
+  if (res.status === 404) return { status: 'gone', path };
+  if (!res.ok) {
+    let detail = '';
+    try { detail = (await res.json())?.detail || ''; } catch {}
+    throw new Error(detail || `Delete failed (${res.status})`);
+  }
+  return res.json();
+}
+
+
 export async function fetchActiveProject() {
   try {
     const data = await req('/projects/active');

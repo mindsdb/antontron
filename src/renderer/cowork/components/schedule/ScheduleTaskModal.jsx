@@ -262,7 +262,7 @@ export default function ScheduleTaskModal({
             disabled={busy}
             className="btn-primary"
           >
-            {busy ? 'Saving…' : (isEdit ? 'Save changes' : 'Create schedule')}
+            {busy ? 'Saving…' : (isEdit ? 'Save changes' : 'Create')}
           </button>
         </div>
       </ModalFooter>

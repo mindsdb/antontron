@@ -1344,8 +1344,14 @@ function AppCore() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleCreateProject = async ({ name }) => {
-    const project = await createProject(name);
+  const handleCreateProject = async ({ name, _alreadyCreated }) => {
+    // The new-project modal does the create + anton.md write +
+    // file uploads in one atomic flow; when it calls back here it
+    // sets `_alreadyCreated` so we skip the duplicate POST and just
+    // refresh the projects list + pin the new one as selected.
+    const project = _alreadyCreated
+      ? { name }
+      : await createProject(name);
     const latest = await fetchProjects();
     if (Array.isArray(latest)) {
       setProjects(latest);
@@ -1648,6 +1654,9 @@ function AppCore() {
         tasks={tasks}
         pins={pins}
         scheduledCount={scheduled.length}
+        projectsCount={projects.length}
+        artifactsCount={artifacts.length}
+        connectorsCount={connectors.length}
         activeRoute={route === 'task' ? null : (route === 'schedule-detail' ? 'scheduled' : route)}
         activeTaskId={activeTaskId}
         serverOnline={serverOnline}
