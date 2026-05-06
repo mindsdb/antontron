@@ -56,34 +56,41 @@ function formatDuration(ms) {
 
 
 // ── breadcrumb ──
+//
+// Mirrors ProjectsView's Crumb / CrumbSep so the navigation rhythm
+// (Josefin Sans, 13px buttons, 14px separator + active label, slightly
+// looser letter-spacing) is identical across drilldown surfaces.
 
-function CrumbButton({ label, onClick, title }) {
+function CrumbButton({ label, onClick, title, maxWidth }) {
   return (
     <button
       type="button"
       onClick={onClick}
       title={title || label}
       style={{
-        background: 'transparent', border: 0, padding: '4px 8px',
-        borderRadius: 6, cursor: 'pointer',
-        fontFamily: FONT_BODY, fontSize: 13, fontWeight: 500,
-        color: 'var(--ink-3)',
-        transition: 'background 120ms ease, color 120ms ease',
+        cursor: 'pointer', background: 'transparent', border: 0, outline: 0,
+        fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 13,
+        letterSpacing: '0.04em', color: 'var(--ink-3)',
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        maxWidth, flexShrink: 1,
+        padding: '2px 6px', borderRadius: 5,
+        transition: 'color 120ms ease, background 120ms ease',
+        WebkitAppRegion: 'no-drag',
       }}
-      onMouseOver={(e) => {
-        e.currentTarget.style.background = 'var(--surface-2)';
-        e.currentTarget.style.color = 'var(--ink)';
-      }}
-      onMouseOut={(e) => {
-        e.currentTarget.style.background = 'transparent';
-        e.currentTarget.style.color = 'var(--ink-3)';
-      }}
+      onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
+      onMouseOut={(e)  => { e.currentTarget.style.color = 'var(--ink-3)'; e.currentTarget.style.background = 'transparent'; }}
     >{label}</button>
   );
 }
 
 function CrumbSep() {
-  return <span style={{ color: 'var(--ink-4)', fontSize: 13, padding: '0 2px' }}>›</span>;
+  return (
+    <span aria-hidden="true" style={{
+      color: 'var(--ink-4)', fontFamily: FONT_DISPLAY,
+      fontSize: 14, lineHeight: 1, padding: '0 2px', flexShrink: 0,
+      userSelect: 'none',
+    }}>›</span>
+  );
 }
 
 
@@ -370,7 +377,8 @@ export default function ScheduleDetailView({
       display: 'flex', flexDirection: 'column',
       fontFamily: FONT_BODY,
     }}>
-      {/* Breadcrumb header. */}
+      {/* Breadcrumb header — matches ProjectsView typography exactly
+          so drilldown surfaces feel like one family. */}
       <div style={{
         padding: '14px 28px 8px',
         display: 'flex', alignItems: 'center', gap: 4,
@@ -378,9 +386,9 @@ export default function ScheduleDetailView({
         <CrumbButton label="Scheduled tasks" onClick={onBack} title="All scheduled tasks" />
         <CrumbSep />
         <span style={{
-          padding: '4px 8px',
-          fontFamily: FONT_BODY, fontSize: 13, fontWeight: 600,
-          color: 'var(--ink)',
+          padding: '2px 6px',
+          fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+          letterSpacing: '0.04em', color: 'var(--ink)',
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 360,
         }}>{task.title || 'Untitled schedule'}</span>
       </div>
