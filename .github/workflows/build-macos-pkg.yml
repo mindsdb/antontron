@@ -29,9 +29,9 @@ on:
       APPLE_INSTALLER_IDENTITY:
         required: true
       GOOGLE_CLIENT_ID:
-        required: false
+        required: true
       GOOGLE_CLIENT_SECRET:
-        required: false
+        required: true
 
 jobs:
   build:
