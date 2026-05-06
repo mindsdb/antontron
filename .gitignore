@@ -6,6 +6,11 @@ release/
 .DS_Store
 Thumbs.db
 
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
 # Apple Developer
 CertificateSigningRequest.certSigningRequest
 developerID_application.cer
