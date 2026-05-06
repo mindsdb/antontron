@@ -55,6 +55,40 @@ function ConnectionsCounts({ search, total, filtered }) {
 
 // ─── Connection card ─────────────────────────────────────────────────────
 
+// Trailing dashed card that lives at the end of the connections
+// grid, mirroring the "+ New project" tile in ProjectsView. Click
+// dispatches to the parent's handleConnectNew (same path the page
+// header's "+ Connect" button takes — opens the connector picker).
+// Only rendered when there's at least one existing connection — the
+// EmptyState already covers the zero-connection case.
+function NewConnectionCard({ onClick }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      style={{
+        minHeight: 120, borderRadius: 10,
+        padding: '14px 16px',
+        background: 'transparent',
+        border: `1px dashed ${hover ? 'var(--accent)' : 'var(--line-2)'}`,
+        color: hover ? 'var(--accent)' : 'var(--ink-3)',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+        gap: 8, cursor: 'pointer',
+        transition: 'border-color .15s ease, color .15s ease',
+        font: 'inherit',
+      }}
+    >
+      <span style={{ display: 'inline-flex' }}>{Ico.plus(16)}</span>
+      <span style={{ fontFamily: FONT_BODY, fontSize: 13, fontWeight: 500 }}>
+        New connection
+      </span>
+    </button>
+  );
+}
+
 function ConnectionCard({ connection, onDelete }) {
   const [hover, setHover] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -337,6 +371,11 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
               onDelete={handleDelete}
             />
           ))}
+          {/* Trailing dashed "New connection" card — appears only
+              when there's at least one existing connection (the
+              EmptyState handles the zero-connection case with its
+              own larger CTA). Mirrors the Projects pattern. */}
+          <NewConnectionCard onClick={handleConnectNew} />
         </div>
       )}
     </div>

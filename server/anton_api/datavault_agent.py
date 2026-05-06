@@ -201,24 +201,15 @@ async def process_submission_stream(
         if k not in skipped and (v is not None and v != "")
     }
 
-    # ── Shape gate (only for registered engines) ────────────────────
-    engine_def, missing = _validate_shape(engine, credentials, auth_method)
-    if engine_def is not None and missing:
-        yield _delta(
-            f"I'm missing some required fields: **{', '.join(missing)}**. "
-            f"Filling those in should be enough to test the connection.\n\n"
-        )
-        yield _patch_delta({
-            "form_id": form_id,
-            "subtitle": "A few required fields were empty — fill them in and try again.",
-            "fields": {name: {"error": "Required", "warning": None} for name in missing},
-        })
-        yield _push("response.completed", {
-            "type": "response.completed",
-            "response": {"id": response_id, "status": "retry"},
-        })
-        _persist_turn(conversation_id, body_parts, recorded_events, started_at_ms)
-        return
+    # No registry-shape gate here — the chat-driven flow uses the
+    # connector JSON's own field names (`username`, `connection_uri`,
+    # …) which often don't match anton's CLI datasource registry
+    # (`user`, `connection_string`, …). Validating against the
+    # registry produced "missing required field: user" messages even
+    # when the user had filled out the equivalent `username`. The
+    # form already enforces `required: true` client-side; if a
+    # credential is genuinely insufficient, the probe will surface
+    # the real authentication error from the engine itself.
 
     # ── Probe setup ─────────────────────────────────────────────────
     # Need the conversation's anton session to lift llm_client +

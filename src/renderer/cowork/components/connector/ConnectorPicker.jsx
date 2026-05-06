@@ -53,6 +53,14 @@ const CATEGORY_ORDER = [
   ['accounting', 'Accounting'],
   ['hr', 'HR & People Ops'],
   ['files', 'Files'],
+  // Operations
+  ['mobility', 'Mobility & Delivery'],
+  ['logistics', 'Logistics & Shipping'],
+  // Agent capabilities — APIs that extend what AI can DO
+  ['ai', 'AI APIs'],
+  ['web-search', 'Web Search'],
+  ['maps', 'Maps & Geocoding'],
+  ['public-data', 'Public Data APIs'],
   // Tech / infra
   ['engineering', 'Engineering & DevOps'],
   ['observability', 'Observability & Monitoring'],
