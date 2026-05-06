@@ -21,6 +21,7 @@ import { ScratchpadModal } from '../components/thinking/ScratchpadModal';
 import { ProgressBox, WorkingFolderBox, ContextBox } from '../components/rail';
 import { ArtifactViewer } from '../components/artifact';
 import { DataVaultFormPanel } from '../components/datavault/DataVaultFormPanel';
+import { getForm as getDataVaultForm, subscribe as subscribeDataVaultForm } from '../components/datavault/formStore';
 import { FormErrorBoundary } from '../components/datavault/FormErrorBoundary';
 import { revealArtifact } from '../api';
 import { normalizeArtifactRecord } from '../lib/artifactPaths';
@@ -145,6 +146,66 @@ function MessageActions({ getText, onDelete }) {
 // MessageActions and removes both halves. The orphan case has no
 // assistant bubble, so we surface the delete here instead — a
 // hover-revealed trash glyph just outside the bubble's bottom-left.
+// Connect-intro bubble — synthesized assistant turn shown after the
+// user picks a connector. Reads as a small card with the connector
+// logo + label and a "Fill out the form on the side panel →" prompt.
+// Hovering it highlights the form panel on the right rail so the
+// affordance is obvious.
+function ConnectIntroBubble({ title, connector, onHoverChange }) {
+  const [hover, setHover] = useState(false);
+  const iconName = connector?.logo || 'database';
+  const Icon = (Ico[iconName] || Ico.database);
+  // No "Anton" eyebrow on this bubble — the follow-up assistant
+  // turn that always renders right after it carries its own,
+  // and two headers stacked back-to-back read as a stutter. The
+  // card itself is visually distinct enough to stand on its own.
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingBottom: 4 }}>
+      <div
+        onMouseEnter={() => { setHover(true); onHoverChange?.(true); }}
+        onMouseLeave={() => { setHover(false); onHoverChange?.(false); }}
+        style={{
+          alignSelf: 'flex-start',
+          display: 'inline-flex', alignItems: 'center', gap: 12,
+          padding: '12px 14px',
+          background: hover
+            ? 'color-mix(in srgb, var(--accent) 10%, var(--surface))'
+            : 'var(--surface)',
+          border: `1px solid ${hover ? 'var(--accent)' : T.line}`,
+          borderRadius: 12,
+          maxWidth: '78%',
+          cursor: 'default',
+          transition: 'border-color 140ms ease, background 140ms ease, box-shadow 140ms ease',
+          boxShadow: hover
+            ? `0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent)`
+            : 'none',
+        }}
+      >
+        <span style={{
+          display: 'inline-grid', placeItems: 'center',
+          width: 36, height: 36, borderRadius: 8,
+          background: 'var(--surface-2)',
+          color: connector?.logo_color || 'var(--ink-3)',
+          flexShrink: 0,
+        }}>
+          {Icon(20)}
+        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <span style={{
+            fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+            color: T.ink, letterSpacing: '-0.005em',
+          }}>{title}</span>
+          <span style={{
+            fontFamily: FONT_BODY, fontSize: 12.5, color: T.ink3,
+          }}>
+            Fill out the form on the side panel <span aria-hidden style={{ color: 'var(--accent)' }}>→</span>
+          </span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function UserTurn({ content, attachments, time, onDelete }) {
   const [hover, setHover] = useState(false);
   const [trashHover, setTrashHover] = useState(false);
@@ -576,6 +637,23 @@ export default function ChatView({
   const settingsBtnRef = useRef(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsAnchor, setSettingsAnchor] = useState(null);
+  // Whether a data-vault form is currently active for this
+  // conversation. While it is, we hide Working folder + Context in
+  // the right rail so the form has the user's full attention. The
+  // panel itself reads from the same store; we mirror its state
+  // here just to drive the rail's visibility.
+  const [formActive, setFormActive] = useState(() => !!getDataVaultForm(task?.id || ''));
+  useEffect(() => {
+    const cid = task?.id || '';
+    setFormActive(!!getDataVaultForm(cid));
+    return subscribeDataVaultForm(cid, (next) => setFormActive(!!next));
+  }, [task?.id]);
+
+  // Hovering the connect-intro chat bubble highlights the form
+  // panel on the right rail. Plain local state so we don't need
+  // to lift it further; the panel reads via the `highlighted`
+  // prop we pass it below.
+  const [formHighlight, setFormHighlight] = useState(false);
   // Inline title rename — same affordance the project detail header
   // uses. Hover surfaces the kebab; Rename in the menu flips the
   // title span into an <input>; Enter commits, Esc cancels.
@@ -900,10 +978,16 @@ export default function ChatView({
           }}
         />
 
-        {/* Scrollable conversation */}
+        {/* Scrollable conversation.
+            Bottom padding clears the floating composer so every
+            message is reachable when scrolled to the end. Sized
+            generously (~180px) because the composer grows multi-line
+            as the user types longer drafts, plus the attachments
+            row adds height when files / connectors are attached —
+            tighter values clipped the last reply on long sessions. */}
         <div ref={scrollRef} data-scroll="true" style={{
           minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
-          padding: '32px 28px 220px',
+          padding: '32px 28px 180px',
           background: 'transparent',
           WebkitAppRegion: 'no-drag',
         }}>
@@ -950,6 +1034,16 @@ export default function ChatView({
                 );
               }
               if (m.role === 'activity') return null; // surfaced in the rail's Progress
+              if (m._kind === 'connect_intro') {
+                return (
+                  <ConnectIntroBubble
+                    key={i}
+                    title={m.content || 'Connect'}
+                    connector={m.connector}
+                    onHoverChange={setFormHighlight}
+                  />
+                );
+              }
               if (m.role === 'error') {
                 return (
                   <AnswerTurn key={i} state="done" time={formatTime(m.createdAt)} showActions={false}>
@@ -1050,12 +1144,12 @@ export default function ChatView({
           </div>
         </div>
 
-        {/* Floating composer + gradient mask */}
-        <div style={{
-          position: 'absolute', left: 0, right: 0, bottom: 0, height: 220,
-          pointerEvents: 'none',
-          background: `linear-gradient(to bottom, color-mix(in srgb, var(--bg) 0%, transparent) 0%, var(--bg) 60%)`,
-        }} />
+        {/* Floating composer — no gradient fade behind it. Earlier we
+            had a 220px linear-gradient(transparent → var(--bg)) overlay
+            so messages would soften into the bg above the composer, but
+            with the gravity-field showing through it read as a dark
+            band at the bottom of the chat. The composer's own border +
+            shadow give enough visual separation on its own. */}
         <div className="chat-floating-composer" style={{
           position: 'absolute', left: 28, right: 28, bottom: 22,
           display: 'flex', justifyContent: 'center',
@@ -1135,6 +1229,7 @@ export default function ChatView({
             onContinue={(payload) => onSend?.(payload?.text || '[form action]')}
             onSubmit={onSubmitDataVaultForm}
             onNavigateToConnectors={onNavigateToConnectors}
+            highlighted={formHighlight}
           />
         </FormErrorBoundary>
         <ProgressBox
@@ -1143,12 +1238,14 @@ export default function ChatView({
           conversationId={task.id || ''}
           onActivateStep={(step) => setOpenScratchpadStepId(step.id)}
         />
-        <WorkingFolderBox
-          project={project}
-          isStreaming={isStreaming}
-          streamStartedAt={streamingMsg?.startedAt}
-        />
-        <ContextBox project={project} />
+        {!formActive && (
+          <WorkingFolderBox
+            project={project}
+            isStreaming={isStreaming}
+            streamStartedAt={streamingMsg?.startedAt}
+          />
+        )}
+        {!formActive && <ContextBox project={project} />}
       </aside>
 
       {/* keyframes for the streaming cursor */}

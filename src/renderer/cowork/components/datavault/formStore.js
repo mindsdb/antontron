@@ -19,6 +19,95 @@
 const _byConversation = new Map();
 const _listeners = new Map(); // cid → Set<fn>
 
+// Redacted snapshot of the user's current form input — published by
+// DataVaultForm on every change so the chat layer can inject context
+// into messages sent during a connect task. Never holds secret field
+// values (passwords, tokens). Shape:
+//   { method: string|null,
+//     fields: { <name>: <string-value-or-"__REDACTED__"> } }
+const _formStateByConversation = new Map();
+const _formStateListeners = new Map(); // cid → Set<fn>
+
+// Selected-method tracking for multi-method forms. Lifted out of
+// DataVaultForm so the panel chrome (header / breadcrumb) can read it
+// AND clear it ("back to options"). DataVaultForm subscribes to read,
+// and writes via `setSelectedMethod` whenever the user picks or backs
+// out. Falls back to `spec.selected_method` when no override is set.
+const _selectedMethodByConversation = new Map();
+const _selectedMethodListeners = new Map(); // cid → Set<fn>
+
+export function setSelectedMethod(conversationId, methodId) {
+  if (!conversationId) return;
+  if (!methodId) {
+    _selectedMethodByConversation.delete(conversationId);
+  } else {
+    _selectedMethodByConversation.set(conversationId, methodId);
+  }
+  const subs = _selectedMethodListeners.get(conversationId);
+  if (subs) for (const fn of subs) {
+    try { fn(methodId || null); } catch {}
+  }
+}
+
+export function getSelectedMethod(conversationId) {
+  return _selectedMethodByConversation.get(conversationId) || null;
+}
+
+export function subscribeSelectedMethod(conversationId, fn) {
+  if (!conversationId || typeof fn !== 'function') return () => {};
+  let subs = _selectedMethodListeners.get(conversationId);
+  if (!subs) {
+    subs = new Set();
+    _selectedMethodListeners.set(conversationId, subs);
+  }
+  subs.add(fn);
+  return () => {
+    const cur = _selectedMethodListeners.get(conversationId);
+    if (cur) {
+      cur.delete(fn);
+      if (cur.size === 0) _selectedMethodListeners.delete(conversationId);
+    }
+  };
+}
+
+export function setFormState(conversationId, state) {
+  if (!conversationId) return;
+  if (!state) {
+    _formStateByConversation.delete(conversationId);
+  } else {
+    _formStateByConversation.set(conversationId, state);
+  }
+  const subs = _formStateListeners.get(conversationId);
+  if (subs) for (const fn of subs) {
+    try { fn(state || null); } catch {}
+  }
+}
+
+export function getFormState(conversationId) {
+  return _formStateByConversation.get(conversationId) || null;
+}
+
+export function clearFormState(conversationId) {
+  setFormState(conversationId, null);
+}
+
+export function subscribeFormState(conversationId, fn) {
+  if (!conversationId || typeof fn !== 'function') return () => {};
+  let subs = _formStateListeners.get(conversationId);
+  if (!subs) {
+    subs = new Set();
+    _formStateListeners.set(conversationId, subs);
+  }
+  subs.add(fn);
+  return () => {
+    const cur = _formStateListeners.get(conversationId);
+    if (cur) {
+      cur.delete(fn);
+      if (cur.size === 0) _formStateListeners.delete(conversationId);
+    }
+  };
+}
+
 export function setForm(conversationId, spec) {
   if (!conversationId || !spec || typeof spec !== 'object') return;
   // Guard against churn — JSON.parse always returns a new object,
@@ -181,6 +270,14 @@ export function patchForm(conversationId, patch) {
 export function clearForm(conversationId) {
   if (!conversationId) return;
   _byConversation.delete(conversationId);
+  // Closing / clearing the form also clears the redacted state
+  // snapshot — once the form is gone, there's nothing to inject
+  // into chat messages.
+  clearFormState(conversationId);
+  // Drop any selected-method override so the next form opens at
+  // its picker (or default state) rather than inheriting the prior
+  // form's choice.
+  setSelectedMethod(conversationId, null);
   const subs = _listeners.get(conversationId);
   if (subs) for (const fn of subs) {
     try { fn(null); } catch {}

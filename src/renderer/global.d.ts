@@ -86,6 +86,31 @@ interface AntonTronAPI {
   openPath: (path: string) => Promise<{ ok: boolean; reason?: string }>;
   showItemInFolder: (path: string) => Promise<{ ok: boolean; reason?: string }>;
   trashItem: (path: string) => Promise<{ ok: boolean; reason?: string }>;
+  serverDiagnostics: () => Promise<{
+    running: boolean;
+    starting: boolean;
+    port: number;
+    lastError: string | null;
+    lastExitCode: number | null;
+    lastStartAt: number | null;
+    recentLog: string;
+  }>;
+  oauthConnect: (opts: {
+    authUrl: string;
+    tokenUrl: string;
+    clientId: string;
+    clientSecret?: string;
+    scopes: string[];
+    extraAuthParams?: Record<string, string>;
+  }) => Promise<{
+    ok: boolean;
+    reason?: string;
+    refresh_token?: string;
+    access_token?: string;
+    expires_in?: number;
+    scope?: string;
+    token_type?: string;
+  }>;
   getPathForFile: (file: File) => string;
 }
 

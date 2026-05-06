@@ -13,4 +13,5 @@ export { FilterRow }            from './FilterRow';
 export { SearchInput }          from './SearchInput';
 export { SortPill }             from './SortPill';
 export { ViewToggle }           from './ViewToggle';
+export { HoverMenu }            from './HoverMenu';
 export { useCollectionShortcut } from './useCollectionShortcut';

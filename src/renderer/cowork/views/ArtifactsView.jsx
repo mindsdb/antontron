@@ -24,6 +24,7 @@ import {
   SearchInput,
   SortPill,
   ViewToggle,
+  HoverMenu,
   useCollectionShortcut,
 } from '../components/collection';
 
@@ -297,9 +298,12 @@ function LocalPathRow({ path }) {
   );
 }
 
-function ArtifactBubble({ artifact, projects = [], onOpenViewer, onPublish: doPublish, onUnpublish: doUnpublish, onTrash, busy }) {
+function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isMenuOpen, busy }) {
   const isHtml = isHtmlArtifact(artifact);
   const published = !!artifact.publishedUrl;
+
+  const [hover, setHover] = useState(false);
+  const kebabRef = useRef(null);
 
   const onCopyUrl = async () => {
     if (!published) return false;
@@ -315,10 +319,23 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onPublish: doPu
   const Icon = iconForArtifact(artifact);
   const ext = extensionOf(artifact);
   const projectLabel = projectNameOf(artifact, projects);
+
+  // Hand the click off to the parent — it owns the single shared
+  // menu so the dropdown isn't rendered inside the card (cards
+  // apply `transform` on hover, which would re-anchor a
+  // position:fixed descendant to the card instead of the viewport).
+  const openMenu = (e) => {
+    e.stopPropagation();
+    if (!kebabRef.current) return;
+    onMenuOpen?.(artifact, kebabRef.current.getBoundingClientRect());
+  };
+
   return (
     <div
       role="button"
       tabIndex={0}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       onClick={() => isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)}
       onKeyDown={(e) => { if (e.key === 'Enter') (isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)); }}
       style={{
@@ -326,8 +343,11 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onPublish: doPu
         cursor: 'pointer',
         background: 'var(--surface)',
         border: '1px solid var(--line)',
-        borderRadius: 12,
-        padding: 16,
+        // Card geometry matches ProjectCard so the two grids feel
+        // like the same family: 10px radius, 14/16 padding, 120 min
+        // height, 10px column gap.
+        borderRadius: 10,
+        padding: '14px 16px',
         display: 'flex', flexDirection: 'column', gap: 10,
         transition: 'border-color 160ms ease, box-shadow 200ms ease, transform 160ms ease',
         boxShadow: '0 1px 0 rgba(15,16,17,0.02)',
@@ -344,37 +364,79 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onPublish: doPu
         e.currentTarget.style.transform = 'translateY(0)';
       }}
     >
-      {/* Status badge — top right, same slot the preview-overlay used.
-          Published wins over Live when both apply. */}
-      {(published || artifact.live) && (
-        <div style={{
-          position: 'absolute', top: 12, right: 12,
-          pointerEvents: 'none',
-        }}>
-          {published ? <PublishedPill /> : (
-            <span style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              fontFamily: FONT_BODY, fontSize: 11,
-              color: 'var(--accent)', fontWeight: 500,
-              border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
-              padding: '3px 8px', borderRadius: 999,
-            }}>
-              <span className="pulse-dot" style={{
-                width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)',
-              }} />
-              Live
-            </span>
-          )}
-        </div>
-      )}
+      {/* Top-right cluster: status pill (left) + hover-revealed
+          kebab (right). The kebab is always rightmost so the user's
+          eye finds it in the same place regardless of pill state.
+          We toggle `visibility` (not display/opacity-without-space)
+          so the pill keeps its X position whether the kebab is
+          showing or not. */}
+      <div style={{
+        position: 'absolute', top: 12, right: 12,
+        display: 'flex', alignItems: 'center', gap: 6,
+        zIndex: 2,
+      }}>
+        {(published || artifact.live) && (
+          <span style={{ pointerEvents: 'none' }}>
+            {published ? <PublishedPill /> : (
+              <span style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                fontFamily: FONT_BODY, fontSize: 11,
+                color: 'var(--accent)', fontWeight: 500,
+                border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
+                padding: '3px 8px', borderRadius: 999,
+              }}>
+                <span className="pulse-dot" style={{
+                  width: 6, height: 6, borderRadius: '50%', background: 'var(--accent)',
+                }} />
+                Live
+              </span>
+            )}
+          </span>
+        )}
+        <button
+          ref={kebabRef}
+          type="button"
+          aria-label="Artifact menu"
+          title="More actions"
+          // Stop propagation on BOTH mousedown and click — the card
+          // itself is a click-able role="button" that opens the
+          // artifact, and a single `e.stopPropagation()` inside
+          // onClick wasn't reliably preventing the parent handler in
+          // every state (e.g. when the kebab was rendered while
+          // visibility was just transitioning).
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => { e.stopPropagation(); openMenu(e); }}
+          style={{
+            width: 26, height: 26, borderRadius: 6,
+            display: 'inline-grid', placeItems: 'center',
+            color: 'var(--ink-3)',
+            background: 'transparent', border: 0, padding: 0,
+            cursor: 'pointer',
+            visibility: (hover || isMenuOpen) ? 'visible' : 'hidden',
+            transition: 'background 120ms ease, color 120ms ease',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.background = 'var(--surface-2)';
+            e.currentTarget.style.color = 'var(--ink)';
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = 'var(--ink-3)';
+          }}
+        >
+          {Ico.moreVert(14)}
+        </button>
+      </div>
 
       {/* Header: small inline icon + title, with `type: <ext>` mono
-          subtitle directly under it. The status badge floats absolute
-          at the top-right; we reserve right padding so a long title
-          can't overlap it. */}
+          subtitle directly under it. The kebab + status badge cluster
+          floats absolute at the top-right; we reserve right padding
+          so a long title can't overlap them. The kebab is always
+          there in layout (even when hidden) so the padding doesn't
+          jump on hover. */}
       <div style={{
         display: 'flex', flexDirection: 'column', gap: 4, minWidth: 0,
-        paddingRight: (published || artifact.live) ? 96 : 0,
+        paddingRight: (published || artifact.live) ? 110 : 40,
       }}>
         <div style={{
           display: 'flex', alignItems: 'center', gap: 7, minWidth: 0,
@@ -445,40 +507,9 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onPublish: doPu
       }}>
         {artifact.updated || '—'}
       </div>
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
-        {published ? (
-          <ActionButton onClick={() => doUnpublish?.(artifact)} danger title="Unpublish from Minds">
-            {busy ? 'Working…' : 'Unpublish'}
-          </ActionButton>
-        ) : isHtml ? (
-          <ActionButton onClick={() => doPublish?.(artifact)} primary title="Publish to Minds">
-            {busy ? 'Publishing…' : 'Publish'}
-          </ActionButton>
-        ) : null}
-        <button
-          type="button"
-          onClick={(e) => { e.stopPropagation(); onTrash?.(artifact); }}
-          title="Delete artifact"
-          aria-label="Delete artifact"
-          style={{
-            cursor: 'pointer',
-            background: 'transparent',
-            border: '1px solid color-mix(in srgb, var(--danger) 30%, transparent)',
-            color: 'var(--danger)',
-            width: 30, height: 30, borderRadius: 7,
-            display: 'inline-grid', placeItems: 'center',
-            transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
-          }}
-          onMouseOver={(e) => {
-            e.currentTarget.style.background = 'color-mix(in srgb, var(--danger) 12%, transparent)';
-          }}
-          onMouseOut={(e) => {
-            e.currentTarget.style.background = 'transparent';
-          }}
-        >
-          {Ico.trash(13)}
-        </button>
-      </div>
+      {/* The shared HoverMenu lives at the page level (parent
+          owns the menu state) — see the comment on
+          components/collection/HoverMenu for why this matters. */}
     </div>
   );
 }
@@ -829,6 +860,17 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
   // Per-artifact-path "in flight" set so multiple cards can publish
   // independently without freezing the whole grid.
   const [busyPaths, setBusyPaths] = useState(() => new Set());
+  // Page-level state for the shared HoverMenu — mounting the menu at
+  // the parent (and not inside a card) is required because cards
+  // apply `transform` on hover, which would re-anchor a position:fixed
+  // descendant to the card itself instead of the viewport.
+  const [menuFor, setMenuFor] = useState(null); // { artifact, rect }
+  const isMacPlatform = (() => {
+    try {
+      if (window.antontron?.getPlatform) return window.antontron.getPlatform() === 'darwin';
+    } catch {}
+    return /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
+  })();
   // Toast surfaces publish/unpublish results — primarily so failures
   // don't disappear into the console.
   const [toast, setToast] = useState(null); // { kind: 'ok'|'error', message }
@@ -993,12 +1035,11 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
     }}>
       <PageHeader
         title="Live artifacts"
-        subtitle="Documents, dashboards, and code Anton produces. Publish HTML to share a live URL."
+        subtitle="Documents, dashboards, and code Anton produces. Publish to share a live URL."
       />
 
       {/* Toast floats over the page so it can't perturb the
-          subtitle → search spacing — exact same vertical rhythm
-          as Projects: header → 18px → FilterRow. */}
+          subtitle → search spacing. */}
       <div style={{
         position: 'fixed', top: 24, right: 32, zIndex: 70,
         pointerEvents: toast?.message ? 'auto' : 'none',
@@ -1011,7 +1052,11 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
         />
       </div>
 
-      <div style={{ height: 18 }} />
+      {/* Subtitle → search-row gap. Set to 20px per the design;
+          ProjectsView uses 18px because its header has an anchor
+          button on the right ("+ New project"), which reads as
+          slightly taller — Artifacts compensates with a few extra. */}
+      <div style={{ height: 20 }} />
 
       {total > 0 && (
         <FilterRow
@@ -1041,7 +1086,9 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
       ) : view === 'grid' ? (
         <div style={{
           padding: '6px 32px 60px',
-          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: 14,
+          // Same grid geometry as ProjectsView so cards line up at
+          // the same density across pages.
+          display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14,
           marginTop: 18,
         }}>
           {visible.map((a) => (
@@ -1050,9 +1097,8 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
               artifact={a}
               projects={projects}
               onOpenViewer={setViewer}
-              onPublish={handlePublish}
-              onUnpublish={handleUnpublish}
-              onTrash={handleTrash}
+              onMenuOpen={(art, rect) => setMenuFor({ artifact: art, rect })}
+              isMenuOpen={menuFor?.artifact?.path === a.path}
               busy={busyPaths.has(a.path)}
             />
           ))}
@@ -1079,6 +1125,76 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
         onClose={() => setViewer(null)}
         onChange={updateOne}
         onDelete={removeOne}
+      />
+
+      {/* Single shared menu for the whole grid — anchored to whichever
+          card the user just clicked. Mounted here at the page level
+          (not inside each card) so the dropdown's `position: fixed`
+          stays viewport-relative regardless of card-level transforms. */}
+      <HoverMenu
+        open={!!menuFor}
+        anchorRect={menuFor?.rect}
+        onClose={() => setMenuFor(null)}
+        items={(() => {
+          const a = menuFor?.artifact;
+          if (!a) return [];
+          const isHtml = isHtmlArtifact(a);
+          const published = !!a.publishedUrl;
+          const busyA = busyPaths.has(a.path);
+          const items = [];
+          if (published) {
+            items.push({
+              id: 'unpublish',
+              label: busyA ? 'Working…' : 'Unpublish',
+              icon: Ico.power(13),
+              onClick: () => handleUnpublish(a),
+            });
+          } else if (isHtml) {
+            items.push({
+              id: 'publish',
+              label: busyA ? 'Publishing…' : 'Publish',
+              icon: Ico.power(13),
+              onClick: () => handlePublish(a),
+            });
+          }
+          items.push({
+            id: 'preview',
+            label: 'Preview',
+            icon: (Ico.eye?.(13) || Ico.sparkle(13)),
+            onClick: () => setViewer(a),
+          });
+          if (isHtml) {
+            items.push({
+              id: 'open',
+              label: 'Open in browser',
+              icon: (Ico.link?.(13) || Ico.globe?.(13) || Ico.doc(13)),
+              onClick: () => {
+                if (a.publishedUrl) {
+                  try { window.antontron?.openExternal?.(a.publishedUrl); }
+                  catch { window.open(a.publishedUrl, '_blank', 'noreferrer'); }
+                } else {
+                  openArtifact(a.path);
+                }
+              },
+            });
+          } else {
+            items.push({
+              id: 'reveal',
+              label: isMacPlatform ? 'Show in Finder' : 'Show in Explorer',
+              icon: Ico.folder(13),
+              onClick: () => { try { revealArtifact(a.path); } catch {} },
+            });
+          }
+          items.push({ separator: true });
+          items.push({
+            id: 'delete',
+            label: 'Delete',
+            icon: Ico.trash(13),
+            danger: true,
+            onClick: () => handleTrash(a),
+          });
+          return items;
+        })()}
       />
     </div>
   );

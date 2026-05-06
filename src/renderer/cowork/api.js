@@ -497,6 +497,47 @@ export async function deleteDatasource(engine, name) {
   return req(`/datasources/${encodeURIComponent(engine)}/${encodeURIComponent(name)}`, { method: 'DELETE' });
 }
 
+// ─── Connector registry ─────────────────────────────────────────────
+//
+// Predefined JSON specs in server/connectors/. Three calls:
+//   list()         → lightweight summaries for the picker UI
+//   get(id)        → the full spec (literal-retrieval, no LLM)
+//   match(query)   → ranked candidates for natural-language input
+//
+// The match endpoint runs a no-LLM cascade (exact id/alias →
+// token-overlap) so most calls finish without a model round-trip.
+
+export async function fetchConnectors() {
+  try {
+    const data = await req('/connectors');
+    return Array.isArray(data?.connectors) ? data.connectors : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchConnector(id) {
+  return req(`/connectors/${encodeURIComponent(id)}`);
+}
+
+export async function matchConnector(query, maxCandidates = 3) {
+  return req('/connectors/match', {
+    method: 'POST',
+    body: JSON.stringify({ query, max_candidates: maxCandidates }),
+  });
+}
+
+// Save a connector connection through the JSON-declared field
+// schema (bypasses Anton-core's built-in registry — needed for
+// OAuth + service-account flows where the legacy email/password
+// engine would reject the credential shape).
+export async function saveConnector(connectorId, payload) {
+  return req(`/connectors/${encodeURIComponent(connectorId)}/save`, {
+    method: 'POST',
+    body: JSON.stringify(payload || {}),
+  });
+}
+
 export async function fetchPublishable() {
   return req('/publish');
 }

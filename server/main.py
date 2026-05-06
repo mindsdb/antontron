@@ -44,6 +44,7 @@ from routes.schedules import router as schedules_router, start_scheduler
 from routes.browse import router as browse_router
 from routes.integrations import router as integrations_router
 from routes.datavault import router as datavault_router
+from routes.connectors import router as connectors_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -94,6 +95,8 @@ app.include_router(schedules_router)
 app.include_router(browse_router)
 app.include_router(integrations_router, prefix="/v1/integrations", tags=["integrations"])
 app.include_router(datavault_router, prefix="/v1/datavault", tags=["datavault"])
+# Predefined connector registry — server/connectors/*.json
+app.include_router(connectors_router)
 
 
 @app.get("/health")

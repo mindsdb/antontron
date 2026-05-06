@@ -31,6 +31,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import Ico from '../Icons';
+import {
+  setFormState,
+  setSelectedMethod,
+  getSelectedMethod,
+  subscribeSelectedMethod,
+} from './formStore';
+import HowToModal from './HowToModal';
 
 const FONT_BODY    = 'var(--font-body)';
 const FONT_DISPLAY = 'var(--font-display)';
@@ -132,7 +139,7 @@ function FieldInput({ field, value, onChange, disabled }) {
   );
 }
 
-export function DataVaultForm({ spec, busy = false, onAction }) {
+export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, conversationId }) {
   // ── Multi-method shape ──────────────────────────────────────────
   // A form can either be single-method (top-level `fields[]` array,
   // legacy shape) or multi-method (`methods[]` array of method
@@ -144,11 +151,33 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
   // whatever the server set in `spec.selected_method`. Cleared when
   // a brand-new form arrives (new form_id) and when the user clicks
   // "change" on the breadcrumb.
-  const [localSelectedMethod, setLocalSelectedMethod] = useState(null);
+  // Selected-method override now lives in formStore so the panel
+  // chrome (the breadcrumb header bar) can read AND clear it. We
+  // mirror the store value into local state so React re-renders on
+  // change.
+  const [localSelectedMethod, setLocalSelectedMethodState] = useState(
+    () => (conversationId ? getSelectedMethod(conversationId) : null)
+  );
+  useEffect(() => {
+    if (!conversationId) return undefined;
+    setLocalSelectedMethodState(getSelectedMethod(conversationId));
+    return subscribeSelectedMethod(conversationId, (mid) => {
+      setLocalSelectedMethodState(mid || null);
+    });
+  }, [conversationId]);
+  const setLocalSelectedMethod = (mid) => {
+    if (conversationId) setSelectedMethod(conversationId, mid || null);
+    else setLocalSelectedMethodState(mid || null);
+  };
   const activeMethodId = localSelectedMethod || spec?.selected_method || null;
   const activeMethod = isMultiMethod
     ? (spec.methods.find((m) => m.id === activeMethodId) || null)
     : null;
+  // "How to" modal at the form-fill stage — surfaced from the
+  // bottom-left of the actions row (opposite the primary submit
+  // button) so docs are reachable without crowding the field area
+  // or the breadcrumb.
+  const [formHowToOpen, setFormHowToOpen] = useState(false);
 
   // The fields the form is currently rendering — the active method's
   // for multi-method, or the top-level fields[] for single-method.
@@ -183,6 +212,30 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
   const stateKey = `${spec?.form_id || ''}::${activeMethodId || 'default'}`;
   const values = valuesByKey[stateKey] || initialFor(fields);
   const skipped = skippedByKey[stateKey] || new Set();
+
+  // Publish a redacted snapshot of the form state so the chat layer
+  // can inject context into messages sent during a connect task.
+  // Secret fields (password type or `secret: true`) are flagged but
+  // never carry their value.
+  useEffect(() => {
+    if (!conversationId || !spec) return;
+    const fieldSnapshot = {};
+    for (const f of fields || []) {
+      if (skipped?.has?.(f.name)) continue;
+      const isSecret = !!f.secret || f.type === 'password';
+      const raw = values?.[f.name];
+      const filled = typeof raw === 'string' ? raw.length > 0 : raw != null && raw !== '';
+      if (!filled) continue;
+      fieldSnapshot[f.name] = isSecret ? '__REDACTED__' : raw;
+    }
+    setFormState(conversationId, {
+      formId: spec.form_id || null,
+      title: spec.title || null,
+      method: activeMethodId || null,
+      methodLabel: activeMethod?.label || null,
+      fields: fieldSnapshot,
+    });
+  }, [conversationId, spec?.form_id, activeMethodId, activeMethod?.label, spec?.title, values, skipped]);
 
   const setValues = (updater) => {
     setValuesByKey((prev) => {
@@ -317,20 +370,25 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
       fontFamily: FONT_BODY,
     }}>
       {/* Header — logo + title + subtitle */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-        <FormLogo logo={spec.logo} color={spec.logo_color} />
-        <div style={{ minWidth: 0, flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <div style={{
-            fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600,
-            color: 'var(--ink)', letterSpacing: '-0.005em',
-          }}>{spec.title || 'Connect'}</div>
-          {spec.subtitle && (
-            <div style={{ fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.5 }}>
-              {spec.subtitle}
-            </div>
-          )}
+      {/* Header — logo + title only. The subtitle (`spec.subtitle`)
+          is intentionally NOT rendered here: the chat above already
+          carries the explanation of the connection, and a second
+          line under the title was just visual clutter making the
+          form feel busy. The field labels + help text below carry
+          their own context. Hidden while the user is on the method
+          picker for multi-method forms (the picker has its own
+          "Pick how you want to connect:" caption). */}
+      {!(isMultiMethod && !activeMethod) && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+          <FormLogo logo={spec.logo} color={spec.logo_color} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div style={{
+              fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600,
+              color: 'var(--ink)', letterSpacing: '-0.005em',
+            }}>{spec.title || 'Connect'}</div>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Note: live status (`status_text`) is rendered as a
           dismissible TOAST by DataVaultFormPanel — sitting outside
@@ -345,21 +403,19 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
       {isMultiMethod && !activeMethod && (
         <MethodPicker
           methods={spec.methods}
-          onPick={(id) => setLocalSelectedMethod(id)}
+          onPick={(id) => {
+            setLocalSelectedMethod(id);
+            onMethodChange?.(id);
+          }}
           busy={busy}
         />
       )}
 
-      {/* Method breadcrumb — once a method is active, show a small
-          row above the fields with the method label and a "change"
-          link that re-opens the picker. */}
-      {isMultiMethod && activeMethod && (
-        <MethodBreadcrumb
-          method={activeMethod}
-          onChange={() => setLocalSelectedMethod(null)}
-          busy={busy}
-        />
-      )}
+      {/* Method breadcrumb used to live here — moved up into the
+          panel's header bar (DataVaultFormPanel reads selected method
+          from formStore). The panel's "← Back to options · <method>"
+          replaces the static "Connect" title once a method is picked,
+          so the surface gains vertical space for fields. */}
 
       {/* Everything below is hidden until a method is chosen on a
           multi-method form. Single-method forms never gate. */}
@@ -385,9 +441,15 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
       {/* Fields — always rendered. While a probe is in flight the
           host disables inputs via `busy`, so the layout stays put
           and the user can still see what they entered (without it
-          jumping out of view when the status row appears). */}
+          jumping out of view when the status row appears).
+          Uses the `fields` const (line 155) so multi-method specs
+          render the chosen method's fields, not just `spec.fields`
+          (which is empty for multi-method forms — picking a method
+          would otherwise leave the user staring at an empty body
+          and a Submit button, exactly the "confirm-and-continue"
+          step we don't want). */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {(spec.fields || []).map((f) => {
+        {fields.map((f) => {
           const isSkipped = skipped.has(f.name);
           return (
             <div key={f.name} style={{ display: 'flex', flexDirection: 'column', gap: 4, opacity: isSkipped ? 0.55 : 1 }}>
@@ -483,11 +545,60 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
 
       {/* Actions — always rendered too. Disabled while busy. The
           active method's actions take precedence; falls back to the
-          form's top-level actions, then a generic Submit button. */}
+          form's top-level actions, then a generic Submit button.
+          Layout: How-to link on the left (when the active method
+          ships docs), action buttons on the right. */}
       <div style={{
-        display: 'flex', justifyContent: 'flex-end', gap: 8, flexWrap: 'wrap',
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        gap: 8, flexWrap: 'wrap',
         paddingTop: 4,
       }}>
+        {(() => {
+          const m = activeMethod || spec || {};
+          const hasHowTo = typeof m.how_to === 'string' && m.how_to.trim().length > 0;
+          const hasHelp = hasHowTo || !!m.help_url;
+          if (!hasHelp) return <span aria-hidden style={{ width: 0 }} />;
+          const onClick = (e) => {
+            e?.stopPropagation?.();
+            e?.preventDefault?.();
+            if (hasHowTo) {
+              setFormHowToOpen(true);
+            } else if (m.help_url) {
+              try { window.antontron?.openExternal?.(m.help_url); }
+              catch { window.open(m.help_url, '_blank', 'noreferrer'); }
+            }
+          };
+          const sharedStyle = {
+            padding: '4px 0',
+            fontSize: 12, fontWeight: 500,
+            color: 'var(--accent)',
+            background: 'transparent',
+            border: 0,
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            textDecoration: 'none',
+          };
+          return hasHowTo ? (
+            <button
+              type="button"
+              onClick={onClick}
+              style={sharedStyle}
+              onMouseOver={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+              onMouseOut={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+            >How to?</button>
+          ) : (
+            <a
+              href={m.help_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={onClick}
+              style={sharedStyle}
+              onMouseOver={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+              onMouseOut={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+            >How to?</a>
+          );
+        })()}
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
         {(activeMethod?.actions || spec.actions || [{ id: 'submit', label: 'Submit', kind: 'primary' }]).map((a) => (
           <button
             key={a.id}
@@ -518,8 +629,20 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
             {a.kind === 'primary' && busy ? 'Working…' : a.label}
           </button>
         ))}
+        </div>
       </div>
       </>}
+
+      {/* How-to modal for the form-fill stage — wired to the
+          left-aligned link in the actions row. Opens the active
+          method's docs in a portaled overlay (escaping the form's
+          stacking context) so the docs read as a centered modal. */}
+      <HowToModal
+        open={formHowToOpen}
+        title={`How to · ${(activeMethod || spec)?.label || 'Connect'}`}
+        content={(activeMethod || spec)?.how_to || ''}
+        onClose={() => setFormHowToOpen(false)}
+      />
     </div>
   );
 }
@@ -531,6 +654,20 @@ export function DataVaultForm({ spec, busy = false, onAction }) {
 // the method (host pulls the choice into local state and the form
 // switches to the picked method's fields).
 function MethodPicker({ methods, onPick, busy }) {
+  // When a method exposes `how_to` markdown, clicking the help
+  // affordance opens an in-app modal instead of an external URL.
+  // We hold the active method so the modal can show its title.
+  const [howToFor, setHowToFor] = useState(null);
+  // Recommended methods float to the top — relative order within
+  // each group is preserved (stable sort). Spec authors signal the
+  // simplest path with `recommended: true`; the picker should lead
+  // with it.
+  const orderedMethods = (() => {
+    if (!Array.isArray(methods)) return [];
+    const recommended = methods.filter((m) => m && m.recommended);
+    const rest = methods.filter((m) => !m || !m.recommended);
+    return [...recommended, ...rest];
+  })();
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', gap: 8,
@@ -540,16 +677,22 @@ function MethodPicker({ methods, onPick, busy }) {
       }}>
         Pick how you want to connect:
       </div>
-      {methods.map((m) => {
+      {orderedMethods.map((m) => {
+        const hasHowTo = typeof m.how_to === 'string' && m.how_to.trim().length > 0;
+        const hasHelp = hasHowTo || !!m.help_url;
         const handleHelp = (e) => {
           // Stop bubbling so the card's onClick doesn't also fire
           // and select the method. Prevent default so the anchor
           // doesn't try to navigate inside the Electron renderer
-          // (file:// origin) — we route through Electron's
-          // openExternal which hands the URL to the OS browser.
+          // (file:// origin).
           e.stopPropagation();
           e.preventDefault();
-          if (m.help_url) {
+          // Prefer the in-app markdown modal when the spec ships
+          // its own content; fall back to opening the URL in the
+          // user's default browser via Electron's openExternal.
+          if (hasHowTo) {
+            setHowToFor(m);
+          } else if (m.help_url) {
             try { window.antontron?.openExternal?.(m.help_url); }
             catch { window.open(m.help_url, '_blank', 'noreferrer'); }
           }
@@ -625,77 +768,121 @@ function MethodPicker({ methods, onPick, busy }) {
                 fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.45,
               }}>{m.description}</div>
             )}
-            {m.help_url && (
-              <a
-                href={m.help_url}
-                target="_blank"
-                rel="noopener noreferrer"
-                onClick={handleHelp}
-                onKeyDown={(e) => {
-                  // Don't let Enter/Space bubble up to the card's
-                  // own keyboard handler — the anchor's default
-                  // activation already calls onClick → handleHelp.
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.stopPropagation();
-                  }
-                }}
-                style={{
-                  alignSelf: 'flex-start',
-                  marginTop: 2,
-                  fontSize: 11.5,
-                  color: 'var(--accent)',
-                  textDecoration: 'none',
-                  fontWeight: 500,
-                  borderRadius: 4,
-                }}
-                onMouseOver={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
-                onMouseOut={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
-              >
-                How to →
-              </a>
+            {hasHelp && (
+              hasHowTo ? (
+                <button
+                  type="button"
+                  onClick={handleHelp}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.stopPropagation();
+                    }
+                  }}
+                  style={{
+                    alignSelf: 'flex-start',
+                    marginTop: 2,
+                    fontSize: 11.5,
+                    color: 'var(--accent)',
+                    background: 'transparent',
+                    border: 0,
+                    padding: 0,
+                    cursor: 'pointer',
+                    fontWeight: 500,
+                    fontFamily: 'inherit',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                >
+                  How to?
+                </button>
+              ) : (
+                <a
+                  href={m.help_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  onClick={handleHelp}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.stopPropagation();
+                    }
+                  }}
+                  style={{
+                    alignSelf: 'flex-start',
+                    marginTop: 2,
+                    fontSize: 11.5,
+                    color: 'var(--accent)',
+                    textDecoration: 'none',
+                    fontWeight: 500,
+                    borderRadius: 4,
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                >
+                  How to?
+                </a>
+              )
             )}
           </div>
         );
       })}
+
+      <HowToModal
+        open={!!howToFor}
+        title={howToFor ? `How to · ${howToFor.label || howToFor.id}` : 'How to'}
+        content={howToFor?.how_to || ''}
+        onClose={() => setHowToFor(null)}
+      />
     </div>
   );
 }
 
 // ── Method breadcrumb ────────────────────────────────────────────
 //
-// Compact row above the fields once a method is active. Shows the
-// chosen method label + a "change" link that re-opens the picker.
+// Compact row above the fields once a method is active. Reads as a
+// "← Back to options" navigation link with the chosen method label
+// appended as muted metadata, so picking a method doesn't feel like
+// a "confirm your choice" step — the form fields appear immediately
+// below and the back affordance is left-aligned, button-like, and
+// obvious.
 function MethodBreadcrumb({ method, onChange, busy }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-      gap: 10,
-      padding: '6px 10px',
-      borderRadius: 7,
-      background: 'var(--surface-2)',
-      border: '1px solid var(--line)',
-      fontFamily: FONT_BODY, fontSize: 12,
-    }}>
+    <button
+      type="button"
+      onClick={onChange}
+      disabled={busy}
+      style={{
+        display: 'flex', alignItems: 'center',
+        gap: 8,
+        padding: '6px 10px',
+        borderRadius: 7,
+        background: 'transparent',
+        border: 'none',
+        cursor: busy ? 'not-allowed' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+        font: 'inherit',
+        color: 'inherit',
+        textAlign: 'left',
+        alignSelf: 'flex-start',
+        transition: 'background 120ms ease',
+      }}
+      onMouseOver={(e) => { if (!busy) e.currentTarget.style.background = 'var(--surface-2)'; }}
+      onMouseOut={(e) => { e.currentTarget.style.background = 'transparent'; }}
+    >
       <span style={{
-        display: 'inline-flex', alignItems: 'baseline', gap: 6,
-        minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        color: 'var(--accent)',
+        fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 500,
+        display: 'inline-flex', alignItems: 'center', gap: 4,
       }}>
-        <span style={{ color: 'var(--ink-4)', fontFamily: FONT_MONO, fontSize: 10.5, letterSpacing: '0.04em' }}>
-          METHOD
-        </span>
-        <span style={{ color: 'var(--ink)', fontWeight: 500 }}>{method.label || method.id}</span>
+        <span aria-hidden>{'←'}</span>
+        Back to options
       </span>
-      <button
-        type="button"
-        onClick={onChange}
-        disabled={busy}
-        style={{
-          background: 'transparent', border: 0, padding: 0,
-          color: busy ? 'var(--ink-4)' : 'var(--accent)',
-          fontFamily: FONT_BODY, fontSize: 12,
-          cursor: busy ? 'not-allowed' : 'pointer',
-        }}
-      >change</button>
-    </div>
+      <span style={{
+        color: 'var(--ink-4)', fontFamily: FONT_BODY, fontSize: 12,
+        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+        minWidth: 0,
+      }}>
+        · {method.label || method.id}
+      </span>
+    </button>
   );
 }

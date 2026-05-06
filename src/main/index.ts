@@ -6,7 +6,8 @@ import * as https from 'https';
 import * as http from 'http';
 import { IPC } from '../shared/ipc-channels';
 import { checkAntonInstalled, runInstaller } from './installer';
-import { startServer, stopServer, isServerRunning, isServerStarting, getServerPort } from './server-process';
+import { startServer, stopServer, isServerRunning, isServerStarting, getServerPort, getServerDiagnostics } from './server-process';
+import { oauthConnect } from './oauth-service';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
 import { sendEvent } from './analytics';
 import { getRendererPath, checkForUIUpdate, getCachedVersion } from './ui-updater';
@@ -540,6 +541,17 @@ function setupIPC() {
   ipcMain.handle('server:stop', async () => {
     stopServer();
     return { running: false, port: getServerPort() };
+  });
+  // Diagnostics — last start error + recent stdout/stderr tail. The
+  // renderer surfaces these in a help modal when the user wonders
+  // why the backend is offline.
+  ipcMain.handle('server:get-diagnostics', () => getServerDiagnostics());
+
+  // PKCE OAuth — opens a one-shot loopback server + the user's
+  // default browser. The renderer hands over either Anton's hosted
+  // client_id (Pattern A) or BYOK client_id + client_secret (Pattern B).
+  ipcMain.handle('oauth:connect', async (_event, opts) => {
+    return oauthConnect(opts || {});
   });
 
   ipcMain.handle(IPC.INSTALL_CANCEL, async () => {
