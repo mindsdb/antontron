@@ -20,7 +20,7 @@
     "relational"
   ],
   "description": "Connect to an AWS RDS PostgreSQL instance using your RDS endpoint, credentials, and optional SSL.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#527FFF",
   "form": {

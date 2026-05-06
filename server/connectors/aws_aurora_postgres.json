@@ -22,7 +22,7 @@
     "relational"
   ],
   "description": "Connect to an Amazon Aurora PostgreSQL-compatible cluster using the writer or reader endpoint.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#FF9900",
   "form": {

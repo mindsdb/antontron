@@ -23,7 +23,7 @@
     "geographic"
   ],
   "description": "Query free open-data maps via Nominatim for geocoding and Overpass API for arbitrary geographic data \u2014 no API key required for low-volume use.",
-  "category": "other",
+  "category": "maps",
   "logo": "globe",
   "logo_color": "#7EBC6F",
   "form": {

@@ -19,7 +19,7 @@
     "collections"
   ],
   "description": "Read and write documents in a Google Cloud Firestore database using a service account.",
-  "category": "data",
+  "category": "database",
   "logo": "database",
   "logo_color": "#FFCA28",
   "form": {

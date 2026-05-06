@@ -19,7 +19,7 @@
     "DATABASE_URL"
   ],
   "description": "Connect to a Heroku-managed PostgreSQL add-on using your app's DATABASE_URL connection string.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#430098",
   "form": {

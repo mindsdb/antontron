@@ -21,7 +21,7 @@
     "vector"
   ],
   "description": "Connect to an Elasticsearch cluster to query indices, ingest documents, and run full-text or vector searches.",
-  "category": "data",
+  "category": "database",
   "logo": "search",
   "logo_color": "#00BFB3",
   "form": {

@@ -18,7 +18,7 @@
     "payments"
   ],
   "description": "Connect Zoho Books to read and write accounting data including invoices, expenses, and contacts.",
-  "category": "billing",
+  "category": "accounting",
   "logo": "key",
   "logo_color": "#E42527",
   "form": {

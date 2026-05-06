@@ -19,7 +19,7 @@
     "workspace"
   ],
   "description": "Read and write Notion pages, databases, and blocks from your workspace.",
-  "category": "documents",
+  "category": "productivity",
   "logo": "doc",
   "logo_color": "#000000",
   "form": {

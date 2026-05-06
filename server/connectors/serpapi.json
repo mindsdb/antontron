@@ -20,7 +20,7 @@
     "seo"
   ],
   "description": "Fetch scraped search engine results from Google, Bing, Yahoo, Baidu, and more via the SerpAPI service.",
-  "category": "data",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#4285F4",
   "form": {

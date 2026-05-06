@@ -20,7 +20,7 @@
     "monitoring"
   ],
   "description": "Manage Atlassian Statuspage pages, incidents, and components to communicate service health to your users.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#0052CC",
   "form": {

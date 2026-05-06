@@ -19,7 +19,7 @@
     "infrastructure"
   ],
   "description": "Deploy and manage web services, static sites, databases, and cron jobs on Render's modern PaaS platform.",
-  "category": "other",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#46E3B7",
   "form": {

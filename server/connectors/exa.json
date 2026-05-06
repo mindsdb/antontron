@@ -18,7 +18,7 @@
     "rag"
   ],
   "description": "Neural web search built for AI agents \u2014 query the web semantically and get clean, structured results.",
-  "category": "other",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#7C3AED",
   "form": {

@@ -21,7 +21,7 @@
     "repositories"
   ],
   "description": "Connect to GitLab to access repositories, CI/CD pipelines, issues, and merge requests on gitlab.com or a self-hosted instance.",
-  "category": "data",
+  "category": "engineering",
   "logo": "code",
   "logo_color": "#FC6D26",
   "form": {

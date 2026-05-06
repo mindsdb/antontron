@@ -19,7 +19,7 @@
     "checks"
   ],
   "description": "Connect to Pingdom to access uptime and synthetic monitoring data, alerts, and check results.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#F7941D",
   "form": {

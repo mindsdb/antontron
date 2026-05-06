@@ -23,7 +23,7 @@
     "arm"
   ],
   "description": "Connect to Microsoft Azure using a service principal to manage resources, query data, and automate cloud operations.",
-  "category": "data",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#0078D4",
   "form": {

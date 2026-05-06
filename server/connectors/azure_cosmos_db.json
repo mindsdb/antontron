@@ -24,7 +24,7 @@
     "globally distributed"
   ],
   "description": "Connect to a Microsoft Azure Cosmos DB account to query and manage globally-distributed, multi-model data.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#0078D4",
   "form": {

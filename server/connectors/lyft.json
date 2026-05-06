@@ -16,7 +16,7 @@
     "car"
   ],
   "description": "Connect Lyft to request rides, read ride history, and manage Lyft Business accounts.",
-  "category": "other",
+  "category": "mobility",
   "logo": "send",
   "logo_color": "#FF00BF",
   "form": {

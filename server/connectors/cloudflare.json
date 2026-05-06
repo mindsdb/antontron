@@ -26,7 +26,7 @@
     "domain"
   ],
   "description": "Manage Cloudflare DNS, Workers, R2, KV, Pages, and more via the Cloudflare API.",
-  "category": "data",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#F48120",
   "form": {

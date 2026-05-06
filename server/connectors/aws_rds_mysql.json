@@ -20,7 +20,7 @@
     "sql"
   ],
   "description": "Connect to an AWS-managed MySQL database instance via its RDS endpoint.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#FF9900",
   "form": {

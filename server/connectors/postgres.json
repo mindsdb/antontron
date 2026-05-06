@@ -19,7 +19,7 @@
     "queries"
   ],
   "description": "Connect to a PostgreSQL database to run queries, read tables, and write data.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#336791",
   "form": {

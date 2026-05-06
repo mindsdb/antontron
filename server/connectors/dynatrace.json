@@ -21,7 +21,7 @@
     "cloud"
   ],
   "description": "Connect to Dynatrace for full-stack observability and APM data including metrics, traces, logs, and infrastructure health.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#1496FF",
   "form": {

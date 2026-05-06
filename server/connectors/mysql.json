@@ -20,7 +20,7 @@
     "mariadb"
   ],
   "description": "Connect to a MySQL (or MariaDB/Percona) database to read and write data using SQL.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#4479A1",
   "form": {

@@ -20,7 +20,7 @@
     "automation"
   ],
   "description": "Trigger and monitor CircleCI pipelines, workflows, and jobs from Anton.",
-  "category": "other",
+  "category": "engineering",
   "logo": "refresh",
   "logo_color": "#343434",
   "form": {

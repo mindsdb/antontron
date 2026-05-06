@@ -19,7 +19,7 @@
     "cloud"
   ],
   "description": "Connect to a ClickHouse columnar OLAP database for high-performance analytical queries.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#FAFF69",
   "form": {

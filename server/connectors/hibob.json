@@ -19,7 +19,7 @@
     "org chart"
   ],
   "description": "Connect to HiBob to sync employee records, org data, and HR workflows from your modern HRIS.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#00C2C7",
   "form": {

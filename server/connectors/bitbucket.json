@@ -19,7 +19,7 @@
     "pipelines"
   ],
   "description": "Read repositories, pull requests, and pipelines from your Bitbucket Cloud workspace.",
-  "category": "other",
+  "category": "engineering",
   "logo": "code",
   "logo_color": "#0052CC",
   "form": {

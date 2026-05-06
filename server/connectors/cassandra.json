@@ -18,7 +18,7 @@
     "cql"
   ],
   "description": "Connect to a Cassandra distributed wide-column database cluster using contact points, keyspace, and credentials.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#1287B1",
   "form": {

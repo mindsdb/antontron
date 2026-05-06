@@ -19,7 +19,7 @@
     "workforce"
   ],
   "description": "Connect to Rippling's HRIS API to read employee records, payroll data, benefits, and org structure.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#FF6B35",
   "form": {

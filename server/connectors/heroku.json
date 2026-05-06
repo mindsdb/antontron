@@ -19,7 +19,7 @@
     "containers"
   ],
   "description": "Connect to Heroku to manage apps, dynos, pipelines, and deployments on the Heroku PaaS.",
-  "category": "other",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#430098",
   "form": {

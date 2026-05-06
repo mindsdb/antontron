@@ -20,7 +20,7 @@
     "open source"
   ],
   "description": "Connect to GitHub to read repositories, pull requests, issues, and commits.",
-  "category": "data",
+  "category": "engineering",
   "logo": "code",
   "logo_color": "#24292F",
   "form": {

@@ -18,7 +18,7 @@
     "interviews"
   ],
   "description": "Connect to Ashby to read and manage candidates, job postings, and hiring pipelines.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#5A45FF",
   "form": {

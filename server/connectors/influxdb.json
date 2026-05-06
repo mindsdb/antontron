@@ -18,7 +18,7 @@
     "tsdb"
   ],
   "description": "Connect to an InfluxDB instance to read and write time-series metrics, measurements, and telemetry data.",
-  "category": "data",
+  "category": "database",
   "logo": "database",
   "logo_color": "#22ADF6",
   "form": {

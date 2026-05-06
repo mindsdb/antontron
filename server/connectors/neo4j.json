@@ -19,7 +19,7 @@
     "gdb"
   ],
   "description": "Connect to a Neo4j graph database using a Bolt or Neo4j URI, username, and password.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#008CC1",
   "form": {

@@ -22,7 +22,7 @@
     "mapping"
   ],
   "description": "Access HERE's enterprise mapping, geocoding, and routing APIs using an API key from the HERE developer portal.",
-  "category": "other",
+  "category": "maps",
   "logo": "globe",
   "logo_color": "#00AFAA",
   "form": {

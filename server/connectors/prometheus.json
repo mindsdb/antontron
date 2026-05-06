@@ -18,7 +18,7 @@
     "open-source"
   ],
   "description": "Query and monitor metrics from a Prometheus server using PromQL over HTTP.",
-  "category": "analytics",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#E6522C",
   "form": {

@@ -20,7 +20,7 @@
     "attendance"
   ],
   "description": "Connect to Personio to read and manage employee data, absences, attendance, and HR records.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#3DB39E",
   "form": {

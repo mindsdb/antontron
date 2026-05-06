@@ -17,7 +17,7 @@
     "internet search"
   ],
   "description": "Search the web using Microsoft Bing Web Search API v7 hosted on Azure.",
-  "category": "other",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#008373",
   "form": {

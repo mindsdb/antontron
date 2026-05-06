@@ -18,7 +18,7 @@
     "supabase"
   ],
   "description": "Connect to your Supabase project's managed Postgres database using a connection string or individual credentials.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#3ECF8E",
   "form": {

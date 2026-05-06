@@ -19,7 +19,7 @@
     "wcs"
   ],
   "description": "Connect to a Weaviate vector database cluster to store, search, and retrieve high-dimensional embeddings.",
-  "category": "data",
+  "category": "vector-db",
   "logo": "cube",
   "logo_color": "#4CAF50",
   "form": {

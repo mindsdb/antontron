@@ -17,7 +17,7 @@
     "debugging"
   ],
   "description": "Monitor, track, and triage errors and exceptions from your applications in real time.",
-  "category": "other",
+  "category": "observability",
   "logo": "brain",
   "logo_color": "#3CB358",
   "form": {

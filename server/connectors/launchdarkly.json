@@ -18,7 +18,7 @@
     "flags"
   ],
   "description": "Manage feature flags and run experiments via LaunchDarkly's API.",
-  "category": "other",
+  "category": "engineering",
   "logo": "slider",
   "logo_color": "#405BFF",
   "form": {

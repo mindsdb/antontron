@@ -21,7 +21,7 @@
     "data warehouse"
   ],
   "description": "Connect to an Oracle Database instance using host, port, service name or SID, and credentials.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#F80000",
   "form": {

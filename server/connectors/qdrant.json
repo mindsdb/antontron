@@ -19,7 +19,7 @@
     "collections"
   ],
   "description": "Connect to a Qdrant vector database cluster \u2014 self-hosted or Qdrant Cloud \u2014 to store and search high-dimensional embeddings.",
-  "category": "data",
+  "category": "vector-db",
   "logo": "cube",
   "logo_color": "#DC244C",
   "form": {

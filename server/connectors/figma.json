@@ -19,7 +19,7 @@
     "components"
   ],
   "description": "Access Figma design files, prototypes, and components via the Figma REST API.",
-  "category": "files",
+  "category": "engineering",
   "logo": "image",
   "logo_color": "#F24E1E",
   "form": {

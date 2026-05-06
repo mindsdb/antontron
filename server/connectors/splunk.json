@@ -20,7 +20,7 @@
     "search"
   ],
   "description": "Send and query log events and security analytics data from Splunk via HEC or the REST API.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#65A637",
   "form": {

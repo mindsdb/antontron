@@ -19,7 +19,7 @@
     "table"
   ],
   "description": "Connect to a MariaDB relational database using host, port, credentials, and optional SSL.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#C0765A",
   "form": {

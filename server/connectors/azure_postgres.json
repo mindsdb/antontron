@@ -19,7 +19,7 @@
     "cloud database"
   ],
   "description": "Connect to an Azure Database for PostgreSQL Flexible Server using host, port, database name, and credentials over SSL.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#0078D4",
   "form": {

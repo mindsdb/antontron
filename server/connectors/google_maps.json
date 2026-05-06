@@ -26,7 +26,7 @@
     "navigation"
   ],
   "description": "Query Google Maps Platform APIs for geocoding, places search, routes, and distance matrix calculations.",
-  "category": "other",
+  "category": "maps",
   "logo": "globe",
   "logo_color": "#4285F4",
   "form": {

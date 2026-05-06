@@ -17,7 +17,7 @@
     "talent"
   ],
   "description": "Connect to Workable to read jobs, candidates, and pipeline data from your applicant tracking system.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#2A9D8F",
   "form": {

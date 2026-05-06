@@ -18,7 +18,7 @@
     "privacy"
   ],
   "description": "Query Brave's independent web search index via API key for privacy-respecting search results.",
-  "category": "data",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#FB542B",
   "form": {

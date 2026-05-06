@@ -19,7 +19,7 @@
     "paystub"
   ],
   "description": "Connect Gusto to read and manage payroll, benefits, and HR data for your organization.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#F45D48",
   "form": {

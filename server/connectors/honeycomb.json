@@ -20,7 +20,7 @@
     "apm"
   ],
   "description": "Connect to Honeycomb to query traces, events, and high-cardinality observability data from your datasets.",
-  "category": "analytics",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#F5A623",
   "form": {

@@ -20,7 +20,7 @@
     "self-hosted"
   ],
   "description": "Connect to Grafana to query dashboards, panels, and alerts from a Grafana Cloud stack or self-hosted instance.",
-  "category": "analytics",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#F46800",
   "form": {
