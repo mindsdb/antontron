@@ -19,7 +19,7 @@
     "cloud"
   ],
   "description": "Connect to a Neon serverless Postgres database using a connection string or individual credentials.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#00E599",
   "form": {

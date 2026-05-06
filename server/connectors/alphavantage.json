@@ -22,7 +22,7 @@
     "OHLCV"
   ],
   "description": "Fetch real-time and historical data for stocks, forex, crypto, and economic indicators via the Alpha Vantage REST API.",
-  "category": "data",
+  "category": "public-data",
   "logo": "sparkle",
   "logo_color": "#1A6BFF",
   "form": {

@@ -22,7 +22,7 @@
     "generative"
   ],
   "description": "Connect to Anthropic's Claude models for text generation, chat, and reasoning tasks.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#CC785C",
   "form": {

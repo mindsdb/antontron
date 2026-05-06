@@ -18,7 +18,7 @@
     "index"
   ],
   "description": "Query and upsert vectors in a Pinecone managed vector database for semantic search and AI-powered retrieval.",
-  "category": "data",
+  "category": "vector-db",
   "logo": "cube",
   "logo_color": "#1B2B4B",
   "form": {

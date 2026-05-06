@@ -20,7 +20,7 @@
     "builds"
   ],
   "description": "Connect to Vercel to manage and monitor frontend deployments, projects, and environments.",
-  "category": "other",
+  "category": "engineering",
   "logo": "globe",
   "logo_color": "#000000",
   "form": {

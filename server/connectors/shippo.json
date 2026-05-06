@@ -18,7 +18,7 @@
     "parcel"
   ],
   "description": "Connect to Shippo's multi-carrier shipping API to create labels, track shipments, and manage carriers.",
-  "category": "other",
+  "category": "logistics",
   "logo": "upload",
   "logo_color": "#6B2FE2",
   "form": {

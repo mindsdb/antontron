@@ -18,7 +18,7 @@
     "internet"
   ],
   "description": "Fetch real-time Google Search results via the Serper API.",
-  "category": "data",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#4285F4",
   "form": {

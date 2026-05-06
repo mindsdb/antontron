@@ -16,7 +16,7 @@
     "results"
   ],
   "description": "Query Kagi's premium ad-free search engine via its paid API.",
-  "category": "other",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#FF6C37",
   "form": {

@@ -19,7 +19,7 @@
     "relational"
   ],
   "description": "Connect to a CockroachDB cluster \u2014 serverless, dedicated, or self-hosted \u2014 using a Postgres-compatible SQL interface.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#6933FF",
   "form": {

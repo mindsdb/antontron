@@ -19,7 +19,7 @@
     "conditions"
   ],
   "description": "Fetch real-time weather forecasts, conditions, and severe weather alerts from AccuWeather.",
-  "category": "other",
+  "category": "public-data",
   "logo": "sun",
   "logo_color": "#F47920",
   "form": {

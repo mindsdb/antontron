@@ -23,7 +23,7 @@
     "financial data"
   ],
   "description": "Access real-time and historical market data for stocks, options, forex, and crypto via Polygon.io's REST and WebSocket APIs.",
-  "category": "data",
+  "category": "public-data",
   "logo": "sparkle",
   "logo_color": "#6C47FF",
   "form": {

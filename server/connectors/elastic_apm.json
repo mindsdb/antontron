@@ -21,7 +21,7 @@
     "monitoring"
   ],
   "description": "Connect to Elastic APM to ingest traces, spans, transactions, and error data from your applications via the APM Server.",
-  "category": "other",
+  "category": "observability",
   "logo": "search",
   "logo_color": "#00BFB3",
   "form": {

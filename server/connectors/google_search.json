@@ -17,7 +17,7 @@
     "serp"
   ],
   "description": "Run web searches via Google's Programmable Search Engine (Custom Search JSON API) using an API key and Search Engine ID.",
-  "category": "other",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#4285F4",
   "form": {

@@ -21,7 +21,7 @@
     "status page"
   ],
   "description": "Connect to Better Stack to query logs, monitor uptime, and manage on-call incidents from a single platform.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#FF4F4F",
   "form": {

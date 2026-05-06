@@ -19,7 +19,7 @@
     "finance"
   ],
   "description": "Connect to Xero to read and write transactions, contacts, and financial data from your accounting ledger.",
-  "category": "other",
+  "category": "accounting",
   "logo": "key",
   "logo_color": "#13B5EA",
   "form": {

@@ -19,7 +19,7 @@
     "notes"
   ],
   "description": "Read, search, and manage Confluence pages and spaces from your Atlassian Cloud or Server instance.",
-  "category": "documents",
+  "category": "productivity",
   "logo": "doc",
   "logo_color": "#0052CC",
   "form": {

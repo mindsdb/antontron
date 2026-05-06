@@ -19,7 +19,7 @@
     "drive"
   ],
   "description": "Connect to DoorDash Drive and Marketplace APIs to create, track, and manage on-demand deliveries.",
-  "category": "other",
+  "category": "mobility",
   "logo": "send",
   "logo_color": "#FF3008",
   "form": {

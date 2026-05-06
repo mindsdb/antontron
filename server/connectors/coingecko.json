@@ -23,7 +23,7 @@
     "nft"
   ],
   "description": "Fetch real-time crypto prices, market data, and on-chain analytics from CoinGecko's public and Pro APIs.",
-  "category": "data",
+  "category": "public-data",
   "logo": "cube",
   "logo_color": "#8DC63F",
   "form": {

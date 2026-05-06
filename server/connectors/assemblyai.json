@@ -20,7 +20,7 @@
     "sentiment"
   ],
   "description": "Transcribe audio and extract intelligence from speech using AssemblyAI's API.",
-  "category": "other",
+  "category": "ai",
   "logo": "mic",
   "logo_color": "#6B4FBB",
   "form": {

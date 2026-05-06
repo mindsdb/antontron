@@ -19,7 +19,7 @@
     "elevenlabs"
   ],
   "description": "Generate and clone lifelike AI voices using ElevenLabs' speech synthesis API.",
-  "category": "other",
+  "category": "ai",
   "logo": "mic",
   "logo_color": "#F5A623",
   "form": {

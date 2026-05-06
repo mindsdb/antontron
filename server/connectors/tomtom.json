@@ -20,7 +20,7 @@
     "location"
   ],
   "description": "Access TomTom Maps, geocoding, real-time traffic data, and routing APIs using an API key from your TomTom developer account.",
-  "category": "other",
+  "category": "maps",
   "logo": "globe",
   "logo_color": "#DF1B12",
   "form": {

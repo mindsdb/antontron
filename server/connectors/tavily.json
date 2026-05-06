@@ -18,7 +18,7 @@
     "internet"
   ],
   "description": "AI-optimized web search API that returns pre-formatted results for LLM and agent consumption.",
-  "category": "other",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#0EA5E9",
   "form": {

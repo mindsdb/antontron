@@ -17,7 +17,7 @@
     "low-code"
   ],
   "description": "Read and write records in Airtable bases using the Airtable REST API.",
-  "category": "data",
+  "category": "productivity",
   "logo": "grid",
   "logo_color": "#18BFFF",
   "form": {

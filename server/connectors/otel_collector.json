@@ -24,7 +24,7 @@
     "vendor-neutral"
   ],
   "description": "Send traces, metrics, and logs to any OpenTelemetry Collector via OTLP gRPC or HTTP.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#425CC7",
   "form": {

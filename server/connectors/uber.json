@@ -17,7 +17,7 @@
     "business travel"
   ],
   "description": "Connect Uber to access ride history, Eats deliveries, and Business account data via the Uber API.",
-  "category": "other",
+  "category": "mobility",
   "logo": "send",
   "logo_color": "#000000",
   "form": {

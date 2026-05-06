@@ -20,7 +20,7 @@
     "replica set"
   ],
   "description": "Connect to a MongoDB Atlas cluster using a connection string to query and manage your cloud-hosted MongoDB databases.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#00ED64",
   "form": {

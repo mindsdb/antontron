@@ -18,7 +18,7 @@
     "tracing"
   ],
   "description": "Query and stream logs from a Grafana Loki instance using LogQL.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#F46800",
   "form": {

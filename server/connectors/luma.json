@@ -21,7 +21,7 @@
     "synthetic media"
   ],
   "description": "Generate videos with Dream Machine and 3D assets with Genie using Luma AI's generative media API.",
-  "category": "other",
+  "category": "ai",
   "logo": "image",
   "logo_color": "#6C47FF",
   "form": {

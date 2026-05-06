@@ -20,7 +20,7 @@
     "object storage"
   ],
   "description": "Manage DigitalOcean Droplets, Spaces, App Platform, databases, and other cloud resources.",
-  "category": "data",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#0080FF",
   "form": {

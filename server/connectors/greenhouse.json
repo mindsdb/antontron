@@ -18,7 +18,7 @@
     "harvest"
   ],
   "description": "Connect to Greenhouse to read candidates, jobs, applications, and recruiting pipeline data via the Harvest API.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#24A47F",
   "form": {

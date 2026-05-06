@@ -18,7 +18,7 @@
     "gpu"
   ],
   "description": "Run open-source AI models via Replicate's cloud API with a simple token-based auth.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#000000",
   "form": {

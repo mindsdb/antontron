@@ -19,7 +19,7 @@
     "api"
   ],
   "description": "Generate images using Stable Diffusion models via the Stability AI REST API.",
-  "category": "other",
+  "category": "ai",
   "logo": "image",
   "logo_color": "#6D3DE3",
   "form": {

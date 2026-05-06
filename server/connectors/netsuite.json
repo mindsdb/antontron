@@ -22,7 +22,7 @@
     "suitecloud"
   ],
   "description": "Connect to Oracle NetSuite ERP to read and write financial, inventory, and operational data using Token-Based Authentication.",
-  "category": "other",
+  "category": "accounting",
   "logo": "key",
   "logo_color": "#1A7DC4",
   "form": {

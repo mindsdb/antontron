@@ -20,7 +20,7 @@
     "distributed tracing"
   ],
   "description": "Connect to IBM Instana to query APM metrics, traces, infrastructure data, and alerts via the Instana REST API.",
-  "category": "analytics",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#E6173C",
   "form": {

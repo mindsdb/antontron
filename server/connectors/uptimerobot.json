@@ -19,7 +19,7 @@
     "website monitoring"
   ],
   "description": "Monitor website and service uptime, check status, and retrieve alert data from UptimeRobot.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#3BD671",
   "form": {

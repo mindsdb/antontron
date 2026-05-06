@@ -20,7 +20,7 @@
     "language model"
   ],
   "description": "Run inference and fine-tune open-source models via Together.ai's cloud API.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#0F6FFF",
   "form": {

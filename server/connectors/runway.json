@@ -21,7 +21,7 @@
     "creative"
   ],
   "description": "Generate and transform video with Runway's Gen-2 and Gen-3 AI models via the RunwayML API.",
-  "category": "other",
+  "category": "ai",
   "logo": "image",
   "logo_color": "#000000",
   "form": {

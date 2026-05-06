@@ -20,7 +20,7 @@
     "apm"
   ],
   "description": "Connect to a Grafana Tempo backend to query and explore distributed traces.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#F46800",
   "form": {

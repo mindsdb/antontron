@@ -18,7 +18,7 @@
     "creative"
   ],
   "description": "Generate AI-powered videos from text prompts or images using Pika's creative video model.",
-  "category": "other",
+  "category": "ai",
   "logo": "image",
   "logo_color": "#6C3CE1",
   "form": {

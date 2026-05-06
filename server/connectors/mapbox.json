@@ -18,7 +18,7 @@
     "directions"
   ],
   "description": "Access Mapbox maps, geocoding, routing, and static image APIs using your account access token.",
-  "category": "other",
+  "category": "maps",
   "logo": "globe",
   "logo_color": "#000000",
   "form": {

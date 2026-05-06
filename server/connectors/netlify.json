@@ -18,7 +18,7 @@
     "build"
   ],
   "description": "Connect to Netlify to manage sites, trigger deployments, and inspect build logs.",
-  "category": "other",
+  "category": "engineering",
   "logo": "globe",
   "logo_color": "#00C7B7",
   "form": {

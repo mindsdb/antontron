@@ -23,7 +23,7 @@
     "web3"
   ],
   "description": "Query Ethereum blockchain data, smart contracts, transactions, and token balances via the Etherscan API.",
-  "category": "data",
+  "category": "public-data",
   "logo": "cube",
   "logo_color": "#21325B",
   "form": {

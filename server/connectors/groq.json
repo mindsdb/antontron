@@ -20,7 +20,7 @@
     "whisper"
   ],
   "description": "Connect to Groq's ultra-low-latency inference API to run open-source LLMs at speed.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#F55036",
   "form": {

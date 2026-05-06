@@ -21,7 +21,7 @@
     "t-sql"
   ],
   "description": "Connect to a Microsoft SQL Server instance managed by Amazon RDS using an endpoint, port, and credentials.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#C7232D",
   "form": {

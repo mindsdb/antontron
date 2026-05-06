@@ -19,7 +19,7 @@
     "storage"
   ],
   "description": "Query and write to Amazon DynamoDB tables using AWS credentials scoped to your account and region.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#4A90D9",
   "form": {

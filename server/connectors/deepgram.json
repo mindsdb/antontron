@@ -21,7 +21,7 @@
     "asr"
   ],
   "description": "Transcribe audio and extract voice intelligence using Deepgram's speech-to-text API.",
-  "category": "other",
+  "category": "ai",
   "logo": "mic",
   "logo_color": "#101010",
   "form": {

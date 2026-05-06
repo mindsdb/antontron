@@ -26,7 +26,7 @@
     "kql"
   ],
   "description": "Query Azure Monitor metrics, logs, and Application Insights telemetry using a service principal.",
-  "category": "analytics",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#0078D4",
   "form": {

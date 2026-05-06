@@ -23,7 +23,7 @@
     "time series"
   ],
   "description": "Query metrics, logs, and alerts from Google Cloud Monitoring (formerly Stackdriver) using a service account.",
-  "category": "analytics",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#4285F4",
   "form": {

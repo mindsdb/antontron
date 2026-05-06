@@ -18,7 +18,7 @@
     "podcasts"
   ],
   "description": "Access Spotify's music catalog, user library, playlists, and listening history via the Spotify Web API.",
-  "category": "other",
+  "category": "public-data",
   "logo": "image",
   "logo_color": "#1DB954",
   "form": {

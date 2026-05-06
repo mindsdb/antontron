@@ -19,7 +19,7 @@
     "machine learning"
   ],
   "description": "Connect to Cohere's Command models, embeddings, and reranking APIs using your Cohere API key.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#39594D",
   "form": {

@@ -19,7 +19,7 @@
     "current events"
   ],
   "description": "Fetch aggregated news headlines and full articles from thousands of sources via the NewsAPI.org service.",
-  "category": "data",
+  "category": "public-data",
   "logo": "doc",
   "logo_color": "#333333",
   "form": {

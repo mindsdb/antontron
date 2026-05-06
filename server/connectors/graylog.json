@@ -18,7 +18,7 @@
     "open source"
   ],
   "description": "Connect to Graylog to search logs, manage streams, and trigger alerts from your log management platform.",
-  "category": "other",
+  "category": "observability",
   "logo": "list",
   "logo_color": "#FF3633",
   "form": {

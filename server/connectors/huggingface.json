@@ -21,7 +21,7 @@
     "spaces"
   ],
   "description": "Run inference against hosted models and access the Hugging Face model hub using a personal access token.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#FF9D00",
   "form": {

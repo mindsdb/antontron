@@ -25,7 +25,7 @@
     "firestore"
   ],
   "description": "Connect to Google Cloud Platform services including Cloud Storage, Compute Engine, Pub/Sub, and more using a service account.",
-  "category": "data",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#4285F4",
   "form": {

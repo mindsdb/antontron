@@ -20,7 +20,7 @@
     "high performance"
   ],
   "description": "Connect to a VictoriaMetrics instance to query high-performance Prometheus-compatible metrics and logs.",
-  "category": "data",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#621DEA",
   "form": {

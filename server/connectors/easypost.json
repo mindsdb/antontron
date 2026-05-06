@@ -22,7 +22,7 @@
     "dhl"
   ],
   "description": "Multi-carrier shipping, tracking, and insurance via the EasyPost API.",
-  "category": "other",
+  "category": "logistics",
   "logo": "upload",
   "logo_color": "#4A90D9",
   "form": {

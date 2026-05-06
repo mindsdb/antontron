@@ -19,7 +19,7 @@
     "generative"
   ],
   "description": "Run hosted open-source LLMs and image models via Fireworks AI's fast inference API.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#7C3AED",
   "form": {

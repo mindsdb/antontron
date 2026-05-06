@@ -18,7 +18,7 @@
     "warehouse"
   ],
   "description": "Multi-carrier shipping and label printing platform for ecommerce, connecting orders to carriers and automating fulfillment.",
-  "category": "other",
+  "category": "logistics",
   "logo": "upload",
   "logo_color": "#41A8E0",
   "form": {

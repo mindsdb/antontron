@@ -20,7 +20,7 @@
     "payments"
   ],
   "description": "Manage global contractor payments, EOR employees, and compliance through Deel's unified workforce platform.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#15D5C5",
   "form": {

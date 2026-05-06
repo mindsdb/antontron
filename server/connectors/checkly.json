@@ -20,7 +20,7 @@
     "checks"
   ],
   "description": "Synthetic monitoring, API monitoring, and end-to-end Playwright testing powered by Checkly.",
-  "category": "other",
+  "category": "observability",
   "logo": "refresh",
   "logo_color": "#45C9A6",
   "form": {

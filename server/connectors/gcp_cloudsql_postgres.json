@@ -21,7 +21,7 @@
     "google cloud"
   ],
   "description": "Connect to a Google Cloud SQL PostgreSQL instance using a public IP or Cloud SQL Auth Proxy.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#4285F4",
   "form": {

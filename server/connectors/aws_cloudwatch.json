@@ -22,7 +22,7 @@
     "dashboards"
   ],
   "description": "Query AWS CloudWatch metrics, logs, and alarms using your AWS Access Key ID and Secret Access Key.",
-  "category": "analytics",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#FF9900",
   "form": {

@@ -25,7 +25,7 @@
     "infrastructure"
   ],
   "description": "Connect to Amazon Web Services to interact with S3, EC2, Lambda, and other AWS services using IAM credentials.",
-  "category": "data",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#FF9900",
   "form": {

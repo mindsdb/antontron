@@ -18,7 +18,7 @@
     "api"
   ],
   "description": "Search the web, images, and news using You.com's search API with a single API key.",
-  "category": "other",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#0066FF",
   "form": {

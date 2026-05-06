@@ -18,7 +18,7 @@
     "zipkin"
   ],
   "description": "Connect to a Zipkin server to query distributed traces and span data.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#FF6B35",
   "form": {

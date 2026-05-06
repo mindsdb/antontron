@@ -20,7 +20,7 @@
     "meteorology"
   ],
   "description": "Access hyperlocal weather forecasts and climate intelligence data via the Tomorrow.io API.",
-  "category": "other",
+  "category": "public-data",
   "logo": "sun",
   "logo_color": "#0099FF",
   "form": {

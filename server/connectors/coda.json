@@ -17,7 +17,7 @@
     "collaboration"
   ],
   "description": "Connect to Coda to read and write docs, tables, rows, and automations.",
-  "category": "documents",
+  "category": "productivity",
   "logo": "doc",
   "logo_color": "#E5422B",
   "form": {

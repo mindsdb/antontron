@@ -19,7 +19,7 @@
     "real-time"
   ],
   "description": "Query Perplexity's search-grounded LLM API to get up-to-date, cited answers from the web.",
-  "category": "other",
+  "category": "web-search",
   "logo": "search",
   "logo_color": "#20808D",
   "form": {

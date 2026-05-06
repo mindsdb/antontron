@@ -18,7 +18,7 @@
     "retrieval"
   ],
   "description": "Connect to a Chroma vector database \u2014 self-hosted or Chroma Cloud \u2014 to store and query embeddings.",
-  "category": "data",
+  "category": "vector-db",
   "logo": "cube",
   "logo_color": "#E15C2E",
   "form": {

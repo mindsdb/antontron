@@ -19,7 +19,7 @@
     "transport"
   ],
   "description": "Connect to Bolt's partner platform to manage rides, food orders, and scooter data across EU and Africa.",
-  "category": "other",
+  "category": "mobility",
   "logo": "send",
   "logo_color": "#34D186",
   "form": {

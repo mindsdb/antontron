@@ -20,7 +20,7 @@
     "workers"
   ],
   "description": "Deploy and manage edge applications on Fly.io's global platform using your API token.",
-  "category": "other",
+  "category": "cloud",
   "logo": "cube",
   "logo_color": "#7C3AED",
   "form": {

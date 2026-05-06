@@ -20,7 +20,7 @@
     "api"
   ],
   "description": "Fetch real-time weather forecasts and historical climate data from OpenWeatherMap.",
-  "category": "other",
+  "category": "public-data",
   "logo": "sun",
   "logo_color": "#EB6E4B",
   "form": {

@@ -21,7 +21,7 @@
     "rdbms"
   ],
   "description": "Connect to Microsoft SQL Server or Azure SQL Database using host, port, credentials, and optional SSL encryption.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#CC2927",
   "form": {

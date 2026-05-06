@@ -20,7 +20,7 @@
     "financial management"
   ],
   "description": "Connect to Sage Intacct's XML Web Services API using multi-credential authentication to access financial data, GL entries, invoices, and more.",
-  "category": "other",
+  "category": "accounting",
   "logo": "key",
   "logo_color": "#00B140",
   "form": {

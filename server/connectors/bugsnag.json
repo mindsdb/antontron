@@ -19,7 +19,7 @@
     "stack trace"
   ],
   "description": "Monitor, triage, and resolve application errors and crashes from BugSnag (SmartBear).",
-  "category": "other",
+  "category": "observability",
   "logo": "brain",
   "logo_color": "#4C4CFF",
   "form": {

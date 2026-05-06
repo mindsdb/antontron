@@ -18,7 +18,7 @@
     "relational"
   ],
   "description": "Connect to a PlanetScale MySQL-compatible serverless database using branch credentials from the PlanetScale Console.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#000000",
   "form": {

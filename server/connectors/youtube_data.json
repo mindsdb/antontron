@@ -21,7 +21,7 @@
     "content"
   ],
   "description": "Search and read videos, channels, playlists, and comments from the YouTube Data API v3.",
-  "category": "other",
+  "category": "public-data",
   "logo": "image",
   "logo_color": "#FF0000",
   "form": {

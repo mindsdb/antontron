@@ -22,7 +22,7 @@
     "alerting"
   ],
   "description": "Connect to Logz.io's hosted ELK, Prometheus, and APM platform to ship logs and query observability data.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#00A7E1",
   "form": {

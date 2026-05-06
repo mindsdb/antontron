@@ -17,7 +17,7 @@
     "ecommerce"
   ],
   "description": "Connect to ShipBob to sync orders, inventory, and shipments from your 3PL fulfillment warehouse.",
-  "category": "other",
+  "category": "logistics",
   "logo": "upload",
   "logo_color": "#00A3E0",
   "form": {

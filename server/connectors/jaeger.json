@@ -21,7 +21,7 @@
     "microservices"
   ],
   "description": "Query and explore distributed traces from a Jaeger backend for observability and performance analysis.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#60D0F0",
   "form": {

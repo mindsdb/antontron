@@ -23,7 +23,7 @@
     "completion"
   ],
   "description": "Connect to Google's Gemini API for generative AI, chat, and multimodal tasks via an API key from Google AI Studio.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#4285F4",
   "form": {

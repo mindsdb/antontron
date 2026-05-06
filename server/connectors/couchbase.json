@@ -19,7 +19,7 @@
     "sql++"
   ],
   "description": "Connect to a Couchbase cluster or Capella cloud database using a connection string, username, password, and bucket name.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#EA2328",
   "form": {

@@ -24,7 +24,7 @@
     "neural network"
   ],
   "description": "Connect to OpenAI's API to use GPT models, embeddings, DALL-E image generation, and Whisper speech-to-text.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#10A37F",
   "form": {

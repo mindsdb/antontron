@@ -19,7 +19,7 @@
     "infrastructure"
   ],
   "description": "Connect to AppDynamics to query application performance metrics, events, and health rules from your Cisco APM controller.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#00BEF2",
   "form": {

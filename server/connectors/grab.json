@@ -21,7 +21,7 @@
     "sea"
   ],
   "description": "Connect to Grab's platform to access ride-hailing, food delivery, and financial services data across Southeast Asia.",
-  "category": "other",
+  "category": "mobility",
   "logo": "send",
   "logo_color": "#00B14F",
   "form": {

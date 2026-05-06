@@ -20,7 +20,7 @@
     "people"
   ],
   "description": "Connect to BambooHR to read employee records, time-off data, and org structure from your HRIS.",
-  "category": "other",
+  "category": "hr",
   "logo": "check",
   "logo_color": "#73C41D",
   "form": {

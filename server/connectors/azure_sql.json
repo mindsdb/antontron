@@ -21,7 +21,7 @@
     "paas"
   ],
   "description": "Connect to a Microsoft-managed Azure SQL Database instance using host, port, credentials, and encrypted TLS.",
-  "category": "data-warehouse",
+  "category": "database",
   "logo": "database",
   "logo_color": "#0078D4",
   "form": {

@@ -20,7 +20,7 @@
     "generative"
   ],
   "description": "Connect to Mistral's hosted language models via the La Plateforme API using an API key.",
-  "category": "other",
+  "category": "ai",
   "logo": "brain",
   "logo_color": "#FF7000",
   "form": {

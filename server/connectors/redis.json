@@ -21,7 +21,7 @@
     "redis"
   ],
   "description": "Connect to a Redis in-memory key-value store using a connection string or manual host/port credentials.",
-  "category": "data",
+  "category": "database",
   "logo": "database",
   "logo_color": "#DC382D",
   "form": {

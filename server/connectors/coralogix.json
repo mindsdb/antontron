@@ -19,7 +19,7 @@
     "opentelemetry"
   ],
   "description": "Connect to Coralogix to query logs, metrics, and traces across your observability platform.",
-  "category": "other",
+  "category": "observability",
   "logo": "sparkle",
   "logo_color": "#FF6B35",
   "form": {
