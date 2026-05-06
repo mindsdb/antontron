@@ -1036,6 +1036,13 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
       <PageHeader
         title="Live artifacts"
         subtitle="Documents, dashboards, and code Anton produces. Publish to share a live URL."
+        // 20px below the subtitle text so the page reads with a
+        // little air before the search-row begins. The 20px spacer
+        // below the header still adds the standard between-section
+        // rhythm — together they make Live Artifacts breathe a touch
+        // more than other collection pages, where the action button
+        // already anchors the lower edge of the header.
+        subtitleBottom={20}
       />
 
       {/* Toast floats over the page so it can't perturb the

@@ -169,7 +169,16 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
     if (conversationId) setSelectedMethod(conversationId, mid || null);
     else setLocalSelectedMethodState(mid || null);
   };
-  const activeMethodId = localSelectedMethod || spec?.selected_method || null;
+  // Single-method auto-select — when a connector ships only ONE
+  // method (e.g. PostHog: just an API key paste), there's no choice
+  // to make, so we skip the picker entirely. The form opens directly
+  // on that method's fields. We pretend the spec had `selected_method`
+  // set; the breadcrumb header sees a single-method form and hides
+  // itself (nothing to "go back" to).
+  const onlyMethodId = (isMultiMethod && spec.methods.length === 1)
+    ? spec.methods[0].id
+    : null;
+  const activeMethodId = localSelectedMethod || spec?.selected_method || onlyMethodId || null;
   const activeMethod = isMultiMethod
     ? (spec.methods.find((m) => m.id === activeMethodId) || null)
     : null;

@@ -15,13 +15,14 @@
 //     subtitle="Workspaces Anton uses to group conversations…"
 //     eyebrow="DATABASES"          // optional uppercase mono label above title
 //     actions={<button…>+ New</button>}
+//     subtitleBottom={20}          // optional extra space below the subtitle (px)
 //   />
 
 const FONT_BODY    = 'var(--font-body)';
 const FONT_DISPLAY = 'var(--font-display)';
 const FONT_MONO    = 'var(--font-mono)';
 
-export function PageHeader({ title, subtitle, eyebrow, actions }) {
+export function PageHeader({ title, subtitle, eyebrow, actions, subtitleBottom }) {
   return (
     <div style={{
       padding: '28px 32px 0',
@@ -46,7 +47,12 @@ export function PageHeader({ title, subtitle, eyebrow, actions }) {
           }}>{title}</h1>
           {subtitle && (
             <p style={{
-              margin: 0, fontFamily: FONT_BODY, fontSize: 13.5,
+              margin: 0,
+              // `subtitleBottom` lets a consumer carve out extra
+              // breathing room below the subtitle without touching
+              // the spacer placement around the FilterRow.
+              marginBottom: subtitleBottom || 0,
+              fontFamily: FONT_BODY, fontSize: 13.5,
               color: 'var(--ink-3)', lineHeight: 1.5,
               maxWidth: '64ch',
             }}>{subtitle}</p>

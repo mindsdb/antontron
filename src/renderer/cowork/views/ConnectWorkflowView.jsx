@@ -166,17 +166,39 @@ const CONNECTOR_LIBRARY = {
   },
 };
 
+// Connector card metadata. `category` groups cards in the directory's
+// "Filter by" menu — keep these to a small set (≤ 8 categories) so
+// the dropdown stays scannable. Add new categories sparingly; if a
+// connector fits two, pick the more specific one.
 const DIRECTORY_CONNECTOR_CARDS = [
-  { id: 'gmail', popularity: '#2 popular', desc: 'Draft replies, summarize threads, & search your inbox', action: 'add' },
-  { id: 'google_drive', popularity: 'Most popular', desc: 'Search, read, and upload files instantly', action: 'add' },
-  { id: 'google_calendar', popularity: '#3 popular', desc: 'Manage your schedule and coordinate meetings effortlessly', action: 'add' },
-  { id: 'figma', popularity: '#5 popular', desc: 'Generate diagrams and better code from Figma context', action: 'add' },
-  { id: 'hubspot', popularity: '#9 popular', desc: 'Chat with your CRM data to get personalized insights', action: 'add' },
-  { id: 'notion', popularity: '#6 popular', desc: 'Connect your Notion workspace to search, update, and power workflows across tools', action: 'add' },
-  { id: 'miro', popularity: '', desc: 'Access and create new content on Miro boards', action: 'add' },
-  { id: 'linear', popularity: '', desc: 'Manage issues, projects & team workflows in Linear', action: 'add' },
-  { id: 'slack', popularity: '#8 popular', desc: 'Send messages, create canvases, and fetch Slack data', action: 'add' },
-  { id: 'asana', popularity: '', desc: 'Connect to Asana to coordinate tasks, projects, and goals', action: 'add' },
+  { id: 'gmail',           category: 'Communication',     popularity: '#2 popular',  desc: 'Draft replies, summarize threads, & search your inbox', action: 'add' },
+  { id: 'google_drive',    category: 'Storage',           popularity: 'Most popular', desc: 'Search, read, and upload files instantly', action: 'add' },
+  { id: 'google_calendar', category: 'Calendars',         popularity: '#3 popular',  desc: 'Manage your schedule and coordinate meetings effortlessly', action: 'add' },
+  { id: 'figma',           category: 'Design',            popularity: '#5 popular',  desc: 'Generate diagrams and better code from Figma context', action: 'add' },
+  { id: 'hubspot',         category: 'CRM',               popularity: '#9 popular',  desc: 'Chat with your CRM data to get personalized insights', action: 'add' },
+  { id: 'notion',          category: 'Productivity',      popularity: '#6 popular',  desc: 'Connect your Notion workspace to search, update, and power workflows across tools', action: 'add' },
+  { id: 'miro',            category: 'Design',            popularity: '',            desc: 'Access and create new content on Miro boards', action: 'add' },
+  { id: 'linear',          category: 'Project Management', popularity: '',           desc: 'Manage issues, projects & team workflows in Linear', action: 'add' },
+  { id: 'slack',           category: 'Communication',     popularity: '#8 popular',  desc: 'Send messages, create canvases, and fetch Slack data', action: 'add' },
+  { id: 'asana',           category: 'Project Management', popularity: '',           desc: 'Connect to Asana to coordinate tasks, projects, and goals', action: 'add' },
+];
+
+// Sort options for the directory modal. Popularity is the default
+// (cards are pre-sorted in source order when no #N is set, then by
+// the popularity rank otherwise).
+const DIRECTORY_SORT_OPTIONS = [
+  { id: 'popular', label: 'Popular' },
+  { id: 'name',    label: 'Name (A–Z)' },
+];
+
+// Compute the unique category list from the cards above, plus an
+// "All" sentinel that means no filter. Order: All first, then
+// alphabetical by name.
+const DIRECTORY_CATEGORIES = [
+  { id: 'all', label: 'All categories' },
+  ...Array.from(new Set(DIRECTORY_CONNECTOR_CARDS.map((c) => c.category)))
+    .sort((a, b) => a.localeCompare(b))
+    .map((c) => ({ id: c, label: c })),
 ];
 
 const PLUGIN_DIRECTORY_CARDS = [
@@ -633,28 +655,54 @@ function ConnectorsPage({
 
 function DirectoryModal({ mode, onChangeMode, onClose, onChooseConnector }) {
   const [query, setQuery] = useState('');
+  // Filter (category) + sort selections live here. Both default to
+  // the inclusive option ("All categories", "Popular") so a fresh
+  // open shows the full list in its hand-curated order.
+  const [filterCategory, setFilterCategory] = useState('all');
+  const [sortBy, setSortBy] = useState('popular');
+
   const connectorCards = useMemo(() => {
     const lower = query.trim().toLowerCase();
-    return DIRECTORY_CONNECTOR_CARDS.filter((card) => {
+    let cards = DIRECTORY_CONNECTOR_CARDS.filter((card) => {
       const connector = CONNECTOR_LIBRARY[card.id];
       const haystack = `${connector?.name || ''} ${card.desc}`.toLowerCase();
-      return !lower || haystack.includes(lower);
+      const matchesQuery = !lower || haystack.includes(lower);
+      const matchesCategory = filterCategory === 'all' || card.category === filterCategory;
+      return matchesQuery && matchesCategory;
     });
-  }, [query]);
+    if (sortBy === 'name') {
+      // Sort by the human-readable connector name (CONNECTOR_LIBRARY)
+      // not the id, so "Google Drive" sorts under G, not "google_drive".
+      cards = [...cards].sort((a, b) => {
+        const an = CONNECTOR_LIBRARY[a.id]?.name || a.id;
+        const bn = CONNECTOR_LIBRARY[b.id]?.name || b.id;
+        return an.localeCompare(bn);
+      });
+    }
+    // sortBy === 'popular' → keep DIRECTORY_CONNECTOR_CARDS source
+    // order (already ranked by hand).
+    return cards;
+  }, [query, filterCategory, sortBy]);
 
   const pluginCards = useMemo(() => {
     const lower = query.trim().toLowerCase();
-    return PLUGIN_DIRECTORY_CARDS.filter((card) => {
+    let cards = PLUGIN_DIRECTORY_CARDS.filter((card) => {
       const haystack = `${card.name} ${card.vendor} ${card.desc}`.toLowerCase();
       return !lower || haystack.includes(lower);
     });
-  }, [query]);
+    if (sortBy === 'name') {
+      cards = [...cards].sort((a, b) => a.name.localeCompare(b.name));
+    }
+    return cards;
+  }, [query, sortBy]);
 
   return (
     <div className="customize-modal-overlay" onClick={(event) => event.target === event.currentTarget && onClose()}>
       <div className="customize-modal" role="dialog" aria-modal="true" aria-label="Customize directory">
         <div className="customize-modal-header">
-          <h2 className="customize-serif">Directory</h2>
+          <h2 className="customize-serif">
+            {mode === DIRECTORY_MODE_PLUGINS ? 'Plugins Directory' : 'Connectors Directory'}
+          </h2>
           <button className="icon-btn" type="button" aria-label="Close directory" onClick={onClose}>
             <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M18 6 6 18" />
@@ -691,6 +739,63 @@ function DirectoryModal({ mode, onChangeMode, onClose, onChooseConnector }) {
             />
           </label>
 
+          {/* Filter + Sort row — sits directly under the search input
+              so the three "narrow my results" controls (search, filter,
+              sort) are visually grouped before the partner / tabset
+              toolbar below. The chip filter / Plugins tabset stay in
+              their own row underneath since they're a different kind
+              of switch. */}
+          <div className="customize-select-row" style={{
+            display: 'flex', flexWrap: 'wrap', gap: 8,
+            margin: '8px 0 4px',
+          }}>
+            {/* Category filter — connectors only. Plugins don't
+                carry categories yet so we hide the control there
+                rather than showing a single "All" option. */}
+            {mode === DIRECTORY_MODE_CONNECTORS && (
+              <label className="customize-select" style={{ position: 'relative' }}>
+                <span style={{ color: 'var(--ink-4)', marginRight: 6 }}>Filter by</span>
+                <span>
+                  {DIRECTORY_CATEGORIES.find((c) => c.id === filterCategory)?.label || 'All categories'}
+                </span>
+                {Ico.chevDown(12)}
+                <select
+                  value={filterCategory}
+                  onChange={(e) => setFilterCategory(e.target.value)}
+                  aria-label="Filter by category"
+                  style={{
+                    position: 'absolute', inset: 0,
+                    opacity: 0, cursor: 'pointer',
+                  }}
+                >
+                  {DIRECTORY_CATEGORIES.map((c) => (
+                    <option key={c.id} value={c.id}>{c.label}</option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className="customize-select" style={{ position: 'relative' }}>
+              <span style={{ color: 'var(--ink-4)', marginRight: 6 }}>Sort by</span>
+              <span>
+                {DIRECTORY_SORT_OPTIONS.find((s) => s.id === sortBy)?.label || 'Popular'}
+              </span>
+              {Ico.chevDown(12)}
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value)}
+                aria-label="Sort by"
+                style={{
+                  position: 'absolute', inset: 0,
+                  opacity: 0, cursor: 'pointer',
+                }}
+              >
+                {DIRECTORY_SORT_OPTIONS.map((s) => (
+                  <option key={s.id} value={s.id}>{s.label}</option>
+                ))}
+              </select>
+            </label>
+          </div>
+
           <div className="customize-modal-toolbar">
             {mode === DIRECTORY_MODE_PLUGINS ? (
               <div className="customize-tabset">
@@ -700,10 +805,6 @@ function DirectoryModal({ mode, onChangeMode, onClose, onChooseConnector }) {
             ) : (
               <button className="customize-chip-filter">Anton &amp; Partners</button>
             )}
-            <div className="customize-select-row">
-              <button className="customize-select">Filter by {Ico.chevDown(12)}</button>
-              <button className="customize-select">Sort by {Ico.chevDown(12)}</button>
-            </div>
           </div>
 
           {mode === DIRECTORY_MODE_CONNECTORS ? (

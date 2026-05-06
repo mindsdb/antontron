@@ -226,24 +226,78 @@ async def process_submission_stream(
     # those but persists nothing. Look up the conversation's project
     # explicitly so a non-active-project conversation still resolves
     # to the right .anton dir (instead of the active project's).
+    #
+    # Recovery strategy — historically this throws `[Errno 2] No such
+    # file or directory` when the conversation's cached session in
+    # `conversation_manager._live[cid]` holds a stale path (project
+    # renamed / moved / deleted on disk while the in-memory session
+    # still points at the old location). A server restart heals it
+    # because the cache is in-process. Mimic that here automatically:
+    #
+    #   1. First attempt — use the conversation's recorded project.
+    #   2. On any exception → evict the cached session for this cid,
+    #      then retry with `project=None` so resolve falls through to
+    #      the active project (which self-heals to default if its own
+    #      directory is missing).
+    #   3. If that still fails → surface a clean error. The retry
+    #      almost always succeeds, but the second guard means we
+    #      never silently swallow a deeper bug.
     base_session = None
-    try:
-        if conversation_id:
+    last_error: Exception | None = None
+
+    async def _try_resolve(project_name):
+        return await conversation_manager._resolve_session(
+            conversation_id, project_name, None,
+        )
+
+    if conversation_id:
+        # Attempt 1 — discovered project.
+        try:
             located = conversation_manager._find_conversation_dir(conversation_id)
             project_name = located[0] if located else None
-            base_session = await conversation_manager._resolve_session(
-                conversation_id, project_name, None,
+            base_session = await _try_resolve(project_name)
+        except Exception as exc:
+            logger.warning(
+                "Probe base-session resolve failed for %s (project=%r): %r — evicting cache and retrying.",
+                conversation_id, project_name if 'project_name' in locals() else None, exc,
             )
-    except Exception as exc:
-        logger.exception("Could not resolve base session for probe")
-        base_session = None
+            last_error = exc
+            base_session = None
+
+        # Attempt 2 — evict any stale cached session, retry against
+        # the active project. `_resolve_session` rebuilds from disk
+        # when the cid isn't in `_live`.
+        if base_session is None:
+            try:
+                conversation_manager._live.pop(conversation_id, None)
+                base_session = await _try_resolve(None)
+                logger.info(
+                    "Probe base-session recovered for %s after cache eviction.",
+                    conversation_id,
+                )
+                last_error = None
+            except Exception as exc:
+                logger.exception("Probe base-session retry also failed")
+                last_error = exc
+                base_session = None
+
+    if last_error is not None and base_session is None:
+        # Surface the underlying filename when present so the user
+        # has something actionable. `[Errno 2] No such file or
+        # directory` alone tells them nothing.
+        path_hint = ""
+        try:
+            if isinstance(last_error, OSError) and last_error.filename:
+                path_hint = f" (missing path: {last_error.filename})"
+        except Exception:
+            pass
         yield _delta(
-            f"Could not start the connection probe — `{exc}`. "
+            f"Could not start the connection probe — `{last_error}`{path_hint}. "
             f"Try again, or restart the app if it persists.\n\n"
         )
         yield _patch_delta({
             "form_id": form_id,
-            "form_error": f"Probe setup failed: {exc}",
+            "form_error": f"Probe setup failed: {last_error}",
         })
         yield _push("response.completed", {
             "type": "response.completed",

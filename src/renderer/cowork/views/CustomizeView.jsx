@@ -219,6 +219,32 @@ export default function CustomizeView({ connectors: initialConnectors = [], onCo
   // ⌘K focuses the search input.
   useCollectionShortcut(searchRef);
 
+  // Auto-open the connect flow when the user lands here without any
+  // connectors set up yet. Prevents the empty-state click ceremony
+  // (page → "+ Connect" button → modal) for first-time users — the
+  // modal appears immediately. Guarded by a ref so it fires once per
+  // mount, and delayed slightly so a still-in-flight `fetchDatasources`
+  // can populate `initialConnectors` first (avoids briefly opening the
+  // modal for users who actually have connectors).
+  const autoOpenedRef = useRef(false);
+  useEffect(() => {
+    if (autoOpenedRef.current) return;
+    const id = setTimeout(() => {
+      if (autoOpenedRef.current) return;
+      // Only auto-open when nothing is configured AND the workflow
+      // isn't already on screen for some other reason.
+      if ((list || []).length === 0 && !showWorkflow) {
+        autoOpenedRef.current = true;
+        handleConnectNew();
+      }
+    }, 200);
+    return () => clearTimeout(id);
+    // We intentionally only watch `list` so the auto-open can fire
+    // after the prop sync updates the local mirror once the initial
+    // fetch settles.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [list]);
+
   const handleDelete = async (connection) => {
     try {
       await deleteDatasource(connection.engine, connection.name);
