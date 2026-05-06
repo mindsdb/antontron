@@ -57,6 +57,7 @@ jobs:
         run: npx electron-rebuild -f -w node-pty
 
       - name: Inject Google OAuth credentials
+        shell: bash
         env:
           GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
           GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
