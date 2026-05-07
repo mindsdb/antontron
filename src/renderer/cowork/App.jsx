@@ -668,6 +668,10 @@ function AppCore() {
   const [serverBusyKind, setServerBusyKind] = useState('starting'); // 'starting' | 'stopping'
   const [health, setHealth] = useState({ status: 'offline', anton_available: false, config_ready: false });
 
+  // OTA UI update state
+  const [updateStatus, setUpdateStatus] = useState(null); // { phase, version }
+  const [updateApplying, setUpdateApplying] = useState(false);
+
   // Load data from server on mount
   const refreshData = useCallback(() => {
     fetchHealth().then((h) => {
@@ -741,6 +745,27 @@ function AppCore() {
   useEffect(() => {
     if (serverOnline && !bootIntroDone) setBootIntroDone(true);
   }, [serverOnline, bootIntroDone]);
+
+  // Listen for OTA update status pushed from main process
+  useEffect(() => {
+    if (!window.antontron?.onUpdateStatus) return;
+    return window.antontron.onUpdateStatus((status) => {
+      setUpdateStatus(status);
+    });
+  }, []);
+
+  const handleApplyUpdate = useCallback(async () => {
+    if (updateApplying) return;
+    setUpdateApplying(true);
+    setUpdateStatus({ phase: 'downloading', version: updateStatus?.version });
+    try {
+      await window.antontron.applyUpdate();
+      // Window will reload with the new bundle — no further action needed
+    } catch {
+      setUpdateApplying(false);
+      setUpdateStatus({ phase: 'error' });
+    }
+  }, [updateApplying, updateStatus]);
 
   // ── Boot lifecycle decisions ─────────────────────────────────────
   // Both of these used to live inside HomeView, but the user can
@@ -2110,6 +2135,8 @@ function AppCore() {
         projects={projects}
         serverBusy={serverBusy}
         serverBusyKind={serverBusyKind}
+        updateAvailable={updateStatus?.phase === 'available' ? { version: updateStatus.version } : null}
+        onApplyUpdate={handleApplyUpdate}
         onShowServerHelp={() => setServerHelpOpen(true)}
         onToggleServer={async () => {
           if (serverBusy) return;
@@ -2446,6 +2473,36 @@ function AppCore() {
       >
         {theme === 'dark' ? Ico.sun(15) : Ico.moon(15)}
       </button>
+
+      {/* OTA update overlay — shown during auto-update download/reload */}
+      {(updateStatus?.phase === 'downloading' || updateStatus?.phase === 'reloading') && (
+        <div style={{
+          position: 'fixed', inset: 0, zIndex: 9999,
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          flexDirection: 'column', gap: 16,
+          background: 'rgba(10, 10, 15, 0.85)',
+          backdropFilter: 'blur(8px)',
+          WebkitBackdropFilter: 'blur(8px)',
+        }}>
+          <div style={{
+            width: 40, height: 40,
+            border: '3px solid rgba(93,146,135,0.3)',
+            borderTopColor: 'var(--sage-500, #5D9287)',
+            borderRadius: '50%',
+            animation: 'spin 800ms linear infinite',
+          }} />
+          <div style={{
+            fontSize: 14, fontWeight: 500,
+            color: 'var(--text-strong, #e0e0e0)',
+            fontFamily: 'var(--font-sans)',
+          }}>
+            {updateStatus.phase === 'downloading'
+              ? `Updating${updateStatus.version ? ` to ${updateStatus.version}` : ''}...`
+              : 'Almost there...'}
+          </div>
+          <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+        </div>
+      )}
     </div>
   );
 }

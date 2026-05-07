@@ -386,6 +386,19 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               </Section>
             </CollapsibleGroup>
 
+            <CollapsibleGroup title="Updates" defaultOpen={false}>
+              <Section title="UI updates" subtitle="How Anton handles new UI versions delivered over the air.">
+                <Segmented
+                  value={settings.uiUpdateMode ?? 'manual'}
+                  onChange={(v) => setSetting('uiUpdateMode', v)}
+                  options={[
+                    { value: 'manual', label: 'Manual' },
+                    { value: 'auto',   label: 'Auto' },
+                  ]}
+                />
+              </Section>
+            </CollapsibleGroup>
+
             <CollapsibleGroup title="Memory" defaultOpen={false}>
               <Section title="Memory mode" subtitle="How Anton updates its long-term memory.">
                 <Segmented
