@@ -771,15 +771,6 @@ export async function createUrlAttachment(payload) {
   return req('/attachments/url', { method: 'POST', body: JSON.stringify(payload) });
 }
 
-export async function fetchProjectFiles(projectPath, query = '') {
-  const params = new URLSearchParams({ project_path: projectPath, q: query });
-  return req(`/attachments/project-files?${params.toString()}`);
-}
-
-export async function attachProjectFile(payload) {
-  return req('/attachments/project-file', { method: 'POST', body: JSON.stringify(payload) });
-}
-
 export async function deleteAttachment(id) {
   return req(`/attachments/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }

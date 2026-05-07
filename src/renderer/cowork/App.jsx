@@ -70,8 +70,8 @@ function describeConnectFormState(state) {
 import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
          createProject, updateSettings, streamNewSession, streamMessage,
          streamDataVaultSubmission,
-         uploadAttachments, createSnippetAttachment, createUrlAttachment, fetchProjectFiles,
-         attachProjectFile, deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
+         uploadAttachments, createSnippetAttachment,
+         deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
          pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
          renameConversation, deleteConversation, deleteConversationTurn, moveConversation,
@@ -899,26 +899,6 @@ function AppCore() {
   const handleAttachFiles = async (files) => {
     const data = await uploadAttachments(files, { projectPath: attachmentProjectPath, sessionId: attachmentSessionId });
     setComposerAttachments((prev) => [...prev, ...(data.attachments || [])]);
-  };
-
-  const handleAttachUrl = async (url) => {
-    const data = await createUrlAttachment({ url, project_path: attachmentProjectPath, session_id: attachmentSessionId });
-    setComposerAttachments((prev) => [...prev, data.attachment]);
-  };
-
-  const handleAttachSnippet = async ({ title, content }) => {
-    const data = await createSnippetAttachment({ title, content, project_path: attachmentProjectPath, session_id: attachmentSessionId });
-    setComposerAttachments((prev) => [...prev, data.attachment]);
-  };
-
-  const handleBrowseProjectFiles = async (query) => {
-    if (!attachmentProjectPath) return { files: [] };
-    return fetchProjectFiles(attachmentProjectPath, query);
-  };
-
-  const handleAttachProjectFile = async (path) => {
-    const data = await attachProjectFile({ project_path: attachmentProjectPath, path, session_id: attachmentSessionId });
-    setComposerAttachments((prev) => [...prev, data.attachment]);
   };
 
   const handleAttachConnector = async (connector) => {
