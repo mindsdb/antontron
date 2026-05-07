@@ -134,6 +134,16 @@ export function reduceStream(state, event, now = Date.now) {
   if (!event || typeof event !== 'object') return state;
   const type = event.type;
 
+  // Wall-clock timestamp the server stamped on this event. Live
+  // streams: equals (≈) Date.now() at arrival. Historical replays:
+  // the original moment the event was yielded. Without this, replay
+  // collapses every `now()` to the same JS-tick value and reasoning
+  // / execution durations all read as 0ms. Falls back to the live
+  // clock when an event lacks `at_ms` (older persisted streams).
+  const eventTs = (typeof event.at_ms === 'number' && Number.isFinite(event.at_ms))
+    ? event.at_ms
+    : now();
+
   // ── Lifecycle ─────────────────────────────────────────────────────
   if (type === 'response.created') {
     return {
@@ -180,18 +190,23 @@ export function reduceStream(state, event, now = Date.now) {
   // before any of them runs would patch the wrong step on result.
   if (role === 'thought.scratchpad.start') {
     const id = `step-${state.steps.length + 1}`;
-    const ts = now();
     const step = {
       id,
       label: 'Running code',
       badge: 'Script',
       icon: 'code',
       status: 'in_progress',
-      startedAt: ts,
+      startedAt: eventTs,
       completedAt: null,
-      reasoningStartedAt: ts,
+      reasoningStartedAt: eventTs,
       executionStartedAt: null,
       executionCompletedAt: null,
+      // Server-measured execution duration (ms). Set when the
+      // `scratchpad_done` progress event arrives carrying its
+      // `eta_seconds` field — that's the actual elapsed time
+      // anton's runtime reports, which is more accurate than
+      // diffing event arrival timestamps.
+      executionDurationMs: null,
       data: null,
       output: null,
       result: null,
@@ -212,7 +227,6 @@ export function reduceStream(state, event, now = Date.now) {
     const name     = parsed?.name                  ?? extractJsonString(event.content, 'name');
     const code     = parsed?.code                  ?? extractJsonString(event.content, 'code');
     if (!oneLiner && !name && !code) return state;
-    const ts = now();
     const toolUseId = event.tool_use_id || null;
     // Find the step the .start event created for this id. Fall back
     // to the trailing scratchpad step for legacy/replayed streams
@@ -221,8 +235,8 @@ export function reduceStream(state, event, now = Date.now) {
       ? state.steps.find((s) => s._isScratchpad && s._toolUseId === toolUseId)
       : state.steps[state.steps.length - 1];
     const executionStartedAt = target?._isScratchpad
-      ? (target.executionStartedAt || ts)
-      : ts;
+      ? (target.executionStartedAt || eventTs)
+      : eventTs;
     const patch = {
       label: oneLiner || name || 'Running code',
       data: parsed || { one_line_description: oneLiner, name, code, _truncated: true },
@@ -241,19 +255,18 @@ export function reduceStream(state, event, now = Date.now) {
     const stdout = bestEffortField(event.content, 'stdout');
     const stderr = bestEffortField(event.content, 'stderr');
     const parsed = safeJsonParse(event.content);
-    const ts = now();
     const toolUseId = event.tool_use_id || null;
     const target = toolUseId
       ? state.steps.find((s) => s._isScratchpad && s._toolUseId === toolUseId)
       : state.steps[state.steps.length - 1];
     const executionCompletedAt = target?._isScratchpad
-      ? (target.executionCompletedAt || ts)
-      : ts;
+      ? (target.executionCompletedAt || eventTs)
+      : eventTs;
     const patch = {
       output: typeof stdout === 'string' ? stdout : null,
       result: parsed || { stdout, stderr, _truncated: true },
       status: 'completed',
-      completedAt: ts,
+      completedAt: eventTs,
       executionCompletedAt,
       ...(typeof stderr === 'string' && stderr ? { stderr } : null),
     };
@@ -271,8 +284,19 @@ export function reduceStream(state, event, now = Date.now) {
     // come in, it'll carry the same status flip plus the output.)
     // Either way, this is when execution wraps.
     if (phase === 'scratchpad_done') {
-      const ts = now();
       const toolUseId = event.tool_use_id || null;
+      // Server-measured elapsed for this cell. anton sets it from
+      // `time.monotonic()` deltas on the actual `pad.execute_streaming`
+      // run, so it's the canonical execution duration we should
+      // display — independent of stream / replay timing.
+      const etaSeconds = (typeof event.eta_seconds === 'number'
+        && Number.isFinite(event.eta_seconds))
+        ? event.eta_seconds
+        : null;
+      const executionDurationMs = etaSeconds != null
+        ? Math.max(0, Math.round(etaSeconds * 1000))
+        : null;
+
       // Status flip: when the event carries a tool_use_id, find the
       // exact step by id and close ONLY that one. Otherwise fall
       // back to the trailing in-progress scratchpad (legacy stream).
@@ -283,14 +307,17 @@ export function reduceStream(state, event, now = Date.now) {
         );
         if (idx !== -1 && state.steps[idx].status === 'in_progress') {
           stepsClosed = state.steps.slice();
-          stepsClosed[idx] = { ...state.steps[idx], status: 'completed', completedAt: ts };
+          stepsClosed[idx] = { ...state.steps[idx], status: 'completed', completedAt: eventTs };
         } else {
           stepsClosed = state.steps;
         }
       } else {
-        stepsClosed = closeOpenScratchpadStep(state.steps, ts);
+        stepsClosed = closeOpenScratchpadStep(state.steps, eventTs);
       }
-      const patch = { executionCompletedAt: ts };
+      const patch = {
+        executionCompletedAt: eventTs,
+        ...(executionDurationMs != null ? { executionDurationMs } : null),
+      };
       const byId = patchScratchpadStepById(stepsClosed, toolUseId, patch);
       const stepsTimed = byId || patchLastScratchpadStep(stepsClosed, patch);
       return { ...state, steps: stepsTimed };
@@ -302,9 +329,8 @@ export function reduceStream(state, event, now = Date.now) {
     // event carries a tool_use_id, target the matching step
     // explicitly so multi-cell turns don't time the wrong step.
     if (phase === 'scratchpad_start') {
-      const ts = now();
       const toolUseId = event.tool_use_id || null;
-      const patch = { executionStartedAt: ts };
+      const patch = { executionStartedAt: eventTs };
       if (toolUseId) {
         const byId = patchScratchpadStepById(state.steps, toolUseId, patch);
         if (byId) return { ...state, steps: byId };
@@ -313,6 +339,7 @@ export function reduceStream(state, event, now = Date.now) {
           type: 'response.in_progress',
           thought_role: 'thought.scratchpad.start',
           tool_use_id: toolUseId,
+          at_ms: eventTs,
         }, now);
         const seededById = patchScratchpadStepById(seeded.steps, toolUseId, patch);
         return { ...seeded, steps: seededById || seeded.steps };
@@ -323,6 +350,7 @@ export function reduceStream(state, event, now = Date.now) {
         const seeded = reduceStream(state, {
           type: 'response.in_progress',
           thought_role: 'thought.scratchpad.start',
+          at_ms: eventTs,
         }, now);
         return { ...seeded, steps: patchLastScratchpadStep(seeded.steps, patch) };
       }

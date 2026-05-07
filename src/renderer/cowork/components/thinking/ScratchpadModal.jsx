@@ -248,10 +248,18 @@ function CellView({ cell, index, total, focused = false }) {
     cell.executionStartedAt && cell.reasoningStartedAt
       ? cell.executionStartedAt - cell.reasoningStartedAt
       : null;
-  const executionMs =
-    cell.executionCompletedAt && cell.executionStartedAt
-      ? cell.executionCompletedAt - cell.executionStartedAt
-      : null;
+  // Execution duration: prefer the server-measured value (anton
+  // tracks `time.monotonic()` around the runtime call and forwards
+  // it as `eta_seconds` on the scratchpad_done progress event). Fall
+  // back to the diff between event arrivals — useful only when
+  // historical events lacked the duration field, since live arrival
+  // diffs are subject to stream / queue jitter.
+  const executionMs = (typeof cell.executionDurationMs === 'number'
+    && Number.isFinite(cell.executionDurationMs))
+    ? cell.executionDurationMs
+    : (cell.executionCompletedAt && cell.executionStartedAt
+        ? cell.executionCompletedAt - cell.executionStartedAt
+        : null);
   const language = detectLanguage(data);
   const hasErr = !!stderr;
   // Auto-reveal code for the cell that has an error (likely what the

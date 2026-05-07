@@ -74,6 +74,16 @@ async def format_responses_stream(
     collected_text: list[str] = []
 
     def _event(event_type: str, data: dict) -> str:
+        # Wall-clock millisecond stamp on every event. The renderer
+        # uses this (over `Date.now()` at the moment of replay) so
+        # historical conversations rebuild correct reasoning /
+        # execution durations: synchronous replay through the stream
+        # reducer would otherwise see every `now()` collapse to the
+        # same JS-tick value, producing 0ms across the board.
+        # Persisted into the turns sidecar via `event_sink`, so the
+        # field is also there for future replays.
+        if "at_ms" not in data:
+            data["at_ms"] = int(time.time() * 1000)
         if event_sink is not None:
             try:
                 event_sink(event_type, data)
