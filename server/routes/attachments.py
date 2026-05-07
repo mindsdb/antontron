@@ -17,45 +17,6 @@ from .cowork_state import attachments_dir, load_state, save_state, utc_now_iso
 router = APIRouter(prefix="/v1/attachments", tags=["attachments"])
 
 TEXT_LIMIT = 120_000
-ATTACHMENT_CONTEXT_LIMIT = 200_000
-URL_READ_LIMIT = 1_000_000
-
-TEXT_EXTENSIONS = {
-    ".txt",
-    ".md",
-    ".markdown",
-    ".csv",
-    ".json",
-    ".jsonl",
-    ".py",
-    ".js",
-    ".jsx",
-    ".ts",
-    ".tsx",
-    ".css",
-    ".scss",
-    ".html",
-    ".htm",
-    ".xml",
-    ".yaml",
-    ".yml",
-    ".toml",
-    ".log",
-    ".sql",
-    ".sh",
-    ".zsh",
-    ".rb",
-    ".go",
-    ".rs",
-    ".java",
-    ".c",
-    ".cpp",
-    ".h",
-    ".hpp",
-}
-
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".svg"}
-SUPPORTED_ARCHIVE_EXTENSIONS = {".docx", ".xlsx", ".pptx"}
 
 
 class SnippetAttachmentRequest(BaseModel):
