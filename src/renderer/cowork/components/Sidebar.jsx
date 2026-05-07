@@ -3,17 +3,11 @@ import Ico from './Icons';
 import { Spinner } from './ui';
 import { TaskMenu } from './TaskMenu';
 import RecentsModal from './RecentsModal';
+import { host } from '../../platform/host';
 
 // Platform-aware modifier symbol for keyboard hints. Mac uses ⌘ glyph,
 // Windows/Linux use Ctrl+ literal.
-const IS_MAC = (() => {
-  try {
-    if (typeof window !== 'undefined' && window.antontron && typeof window.antontron.getPlatform === 'function') {
-      return window.antontron.getPlatform() === 'darwin';
-    }
-  } catch {}
-  return /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
-})();
+const IS_MAC = host.isMac() || /Mac|iPhone|iPod|iPad/.test(typeof navigator !== 'undefined' ? navigator.userAgent : '');
 const MOD_LABEL = IS_MAC ? '⌘' : 'Ctrl+';
 const shortcut = (key) => `${MOD_LABEL}${key}`;
 

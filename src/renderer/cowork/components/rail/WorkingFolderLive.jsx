@@ -17,6 +17,7 @@ import {
   listProjectFiles,
 } from '../../api';
 import { ArtifactViewer } from '../artifact';
+import { host } from '../../../platform/host';
 
 function timeAgo(ts) {
   if (ts == null || ts === '') return '';
@@ -128,7 +129,7 @@ export function WorkingFolderLive({ project, isStreaming }) {
 
   const [previewArt, setPreviewArt] = useState(null);
   const onOpen = async (path) => {
-    try { await window.antontron?.openPath?.(path); } catch {}
+    try { await host.openPath(path); } catch {}
   };
   const onOpenArtifact = (artifact) => {
     const isHtml = (artifact.ext || '').toLowerCase() === '.html'

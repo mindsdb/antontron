@@ -21,6 +21,7 @@ import SearchModal from './components/SearchModal';
 import ConnectorPicker from './components/connector/ConnectorPicker';
 import ServerOfflineHelpModal from './components/ServerOfflineHelpModal';
 import { setForm as setDataVaultForm, getFormState as getDataVaultFormState } from './components/datavault/formStore';
+import { host } from '../platform/host';
 
 // One-of-ten encouraging follow-ups picked when a connect task is
 // created. Reads as a friendly nudge after the connect-intro card —
@@ -646,7 +647,7 @@ function AppCore() {
 
     const tick = async () => {
       try {
-        const info = await window.antontron?.serverInfo?.();
+        const info = await host.serverInfo();
         if (cancelled || !info) return;
         if (typeof info.running === 'boolean') setServerOnline(info.running);
         if (info.starting) {
@@ -1667,7 +1668,7 @@ function AppCore() {
           let actuallyRunning = serverOnline;
           let actuallyStarting = false;
           try {
-            const info = await window.antontron?.serverInfo?.();
+            const info = await host.serverInfo();
             if (info) {
               if (typeof info.running === 'boolean') actuallyRunning = info.running;
               if (typeof info.starting === 'boolean') actuallyStarting = info.starting;
@@ -1679,8 +1680,8 @@ function AppCore() {
           setServerBusy(true);
           try {
             const result = goingUp
-              ? await window.antontron?.serverStart?.()
-              : await window.antontron?.serverStop?.();
+              ? await host.serverStart()
+              : await host.serverStop();
             if (result) {
               setServerOnline(!!result.running);
               if (result.running) setTimeout(refreshData, 400);
@@ -1890,7 +1891,7 @@ function AppCore() {
           setServerBusyKind('starting');
           setServerBusy(true);
           try {
-            const result = await window.antontron?.serverStart?.();
+            const result = await host.serverStart();
             if (result) {
               setServerOnline(!!result.running);
               if (result.running) setTimeout(refreshData, 400);

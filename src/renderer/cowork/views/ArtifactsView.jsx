@@ -27,6 +27,7 @@ import {
   HoverMenu,
   useCollectionShortcut,
 } from '../components/collection';
+import { host } from '../../platform/host';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
@@ -311,7 +312,7 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
   };
   const onOpenPublished = async () => {
     if (!published) return;
-    try { await window.antontron?.openExternal?.(artifact.publishedUrl); } catch {
+    try { await host.openExternal(artifact.publishedUrl); } catch {
       window.open(artifact.publishedUrl, '_blank', 'noreferrer');
     }
   };
@@ -865,12 +866,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
   // apply `transform` on hover, which would re-anchor a position:fixed
   // descendant to the card itself instead of the viewport.
   const [menuFor, setMenuFor] = useState(null); // { artifact, rect }
-  const isMacPlatform = (() => {
-    try {
-      if (window.antontron?.getPlatform) return window.antontron.getPlatform() === 'darwin';
-    } catch {}
-    return /Mac|iPhone|iPod|iPad/.test(navigator.userAgent);
-  })();
+  const isMacPlatform = host.isMac() || /Mac|iPhone|iPod|iPad/.test(typeof navigator !== 'undefined' ? navigator.userAgent : '');
   // Toast surfaces publish/unpublish results — primarily so failures
   // don't disappear into the console.
   const [toast, setToast] = useState(null); // { kind: 'ok'|'error', message }
@@ -977,7 +973,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
     if (!artifact?.path || busyPaths.has(artifact.path)) return;
     setBusy(artifact.path, true);
     try {
-      const result = await window.antontron?.trashItem?.(artifact.path);
+      const result = await host.trashItem(artifact.path);
       if (result && result.ok === false) {
         throw new Error(result.reason || 'Could not move to Trash.');
       }
@@ -1177,7 +1173,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
               icon: (Ico.link?.(13) || Ico.globe?.(13) || Ico.doc(13)),
               onClick: () => {
                 if (a.publishedUrl) {
-                  try { window.antontron?.openExternal?.(a.publishedUrl); }
+                  try { host.openExternal(a.publishedUrl); }
                   catch { window.open(a.publishedUrl, '_blank', 'noreferrer'); }
                 } else {
                   openArtifact(a.path);

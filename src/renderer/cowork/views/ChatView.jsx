@@ -25,6 +25,7 @@ import { getForm as getDataVaultForm, subscribe as subscribeDataVaultForm } from
 import { FormErrorBoundary } from '../components/datavault/FormErrorBoundary';
 import { revealArtifact } from '../api';
 import { normalizeArtifactRecord } from '../lib/artifactPaths';
+import { host } from '../../platform/host';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -392,9 +393,7 @@ function ArtifactCard({ artifact, onOpen }) {
   const displayPath = artifact.displayPath || path;
   const disabledReason = artifact.actionDisabledReason || '';
   const canAct = !!path && !disabledReason;
-  const platform = (() => {
-    try { return window.antontron?.getPlatform?.() || ''; } catch { return ''; }
-  })();
+  const platform = host.getPlatform();
   const revealLabel = platform === 'darwin' ? 'Show in Finder' : 'Show in folder';
 
   const showStatus = (kind, text) => {
@@ -418,7 +417,7 @@ function ArtifactCard({ artifact, onOpen }) {
       return;
     }
     try {
-      const result = await window.antontron?.openPath?.(path);
+      const result = await host.openPath(path);
       if (result && result.ok === false) throw new Error(result.reason || 'Could not open artifact.');
       showStatus('ok', 'Opened.');
     }
@@ -435,14 +434,12 @@ function ArtifactCard({ artifact, onOpen }) {
     }
     let bridgeError = null;
     try {
-      if (typeof window.antontron?.showItemInFolder === 'function') {
-        const result = await window.antontron.showItemInFolder(path);
-        if (result?.ok) {
-          showStatus('ok', platform === 'darwin' ? 'Shown in Finder.' : 'Shown in folder.');
-          return;
-        }
-        bridgeError = result?.reason || 'Could not show artifact.';
+      const result = await host.showItemInFolder(path);
+      if (result?.ok) {
+        showStatus('ok', platform === 'darwin' ? 'Shown in Finder.' : 'Shown in folder.');
+        return;
       }
+      bridgeError = result?.reason || 'Could not show artifact.';
     } catch (e) {
       bridgeError = e;
     }
