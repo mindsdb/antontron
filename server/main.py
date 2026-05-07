@@ -162,12 +162,15 @@ if ANTON_SERVE_SPA and SPA_DIR is not None:
         # HTML where they expected JSON.
         if full_path == "v1" or full_path.startswith("v1/") or full_path == "health":
             raise HTTPException(status_code=404)
-        # Resolve + bounds-check so a `..` traversal can't escape SPA_DIR.
-        target = (SPA_DIR / full_path).resolve()
-        try:
-            target.relative_to(SPA_DIR)
-        except ValueError:
+        # Resolve + bounds-check so `..` traversal or absolute-path
+        # injection can't escape SPA_DIR. SPA_DIR was already resolve()'d
+        # at startup; we compare normalized strings with a trailing
+        # separator so a sibling like /spa-other can't pass.
+        target = os.path.realpath(str(SPA_DIR / full_path))
+        spa_root = str(SPA_DIR)
+        if target != spa_root and not target.startswith(spa_root + os.sep):
             raise HTTPException(status_code=404)
+        target = Path(target)
         if target.is_file():
             return FileResponse(str(target))
         # Anything else → SPA shell, so client-side routes (e.g. /artifacts,
