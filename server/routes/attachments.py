@@ -151,7 +151,6 @@ def create_snippet(request: SnippetAttachmentRequest):
         "source": "snippet",
         "sessionId": request.session_id,
         "projectPath": request.project_path,
-        "mime": "text/plain",
         "size": len(request.content.encode("utf-8")),
         "text": request.content,
         "createdAt": utc_now_iso(),
