@@ -25,8 +25,10 @@ if _env_path.exists():
             _k, _, _v = _line.partition("=")
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 
 from anton_api import conversation_manager, projects_store, scratchpad_runtime
 from routes.responses import router as responses_router
@@ -51,6 +53,22 @@ logging.basicConfig(
     format="%(levelname)s  %(name)s  %(message)s",
 )
 logger = logging.getLogger("anton-server")
+
+
+# When ANTON_SERVE_SPA=1, serve the cowork web SPA at / from ANTON_SPA_DIR.
+# Used by the Docker image (cowork:web) — the same FastAPI process answers
+# both /v1/* (API) and / (SPA) on one port. Unset by default so the
+# Electron path is byte-identical to before.
+ANTON_SERVE_SPA = os.environ.get("ANTON_SERVE_SPA", "").lower() in ("1", "true", "yes")
+_spa_dir_env = os.environ.get("ANTON_SPA_DIR", "/app/dist/renderer-web")
+SPA_DIR: Path | None = Path(_spa_dir_env).resolve() if ANTON_SERVE_SPA else None
+if ANTON_SERVE_SPA and (SPA_DIR is None or not SPA_DIR.exists()):
+    logger.warning(
+        "ANTON_SERVE_SPA=1 but SPA bundle not found at %s; SPA serving disabled.",
+        _spa_dir_env,
+    )
+    ANTON_SERVE_SPA = False
+    SPA_DIR = None
 
 
 @asynccontextmanager
@@ -119,10 +137,42 @@ async def health():
 
 @app.get("/")
 async def root():
+    if ANTON_SERVE_SPA and SPA_DIR is not None:
+        return FileResponse(str(SPA_DIR / "index-web.html"))
     return {
         "message": "Anton CoWork API",
         "anton_available": conversation_manager.is_anton_available(),
     }
+
+
+# SPA static + client-side-routing fallback. Mounted AFTER all API routers
+# so they take priority; the catch-all only fires for paths none of them
+# claimed. /v1/* and /health are explicitly excluded so wrong API paths
+# return a clean 404 instead of falling back to index-web.html.
+if ANTON_SERVE_SPA and SPA_DIR is not None:
+    for _sub in ("assets", "fonts", "gravity-field"):
+        _sub_path = SPA_DIR / _sub
+        if _sub_path.exists():
+            app.mount(f"/{_sub}", StaticFiles(directory=str(_sub_path)), name=f"spa-{_sub}")
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str):
+        # Wrong /v1/* paths must 404 cleanly — never serve the SPA shell
+        # in place of a missing API endpoint or callers will silently get
+        # HTML where they expected JSON.
+        if full_path == "v1" or full_path.startswith("v1/") or full_path == "health":
+            raise HTTPException(status_code=404)
+        # Resolve + bounds-check so a `..` traversal can't escape SPA_DIR.
+        target = (SPA_DIR / full_path).resolve()
+        try:
+            target.relative_to(SPA_DIR)
+        except ValueError:
+            raise HTTPException(status_code=404)
+        if target.is_file():
+            return FileResponse(str(target))
+        # Anything else → SPA shell, so client-side routes (e.g. /artifacts,
+        # /projects/foo) work on browser refresh.
+        return FileResponse(str(SPA_DIR / "index-web.html"))
 
 
 if __name__ == "__main__":
