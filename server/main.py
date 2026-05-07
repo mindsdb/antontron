@@ -162,17 +162,17 @@ if ANTON_SERVE_SPA and SPA_DIR is not None:
         # HTML where they expected JSON.
         if full_path == "v1" or full_path.startswith("v1/") or full_path == "health":
             raise HTTPException(status_code=404)
-        # Resolve + bounds-check so `..` traversal or absolute-path
-        # injection can't escape SPA_DIR. SPA_DIR was already resolve()'d
-        # at startup; we compare normalized strings with a trailing
-        # separator so a sibling like /spa-other can't pass.
-        target = os.path.realpath(str(SPA_DIR / full_path))
-        spa_root = str(SPA_DIR)
-        if target != spa_root and not target.startswith(spa_root + os.sep):
+        # Resolve the candidate and confirm it stays inside SPA_DIR.
+        # Path.resolve() normalizes `..` and follows symlinks; the
+        # subsequent is_relative_to() check is the canonical path-traversal
+        # barrier that static analyzers (incl. CodeQL py/path-injection)
+        # recognize as a sanitizer. SPA_DIR was already resolve()'d at
+        # startup, so this comparison is fully normalized on both sides.
+        candidate = (SPA_DIR / full_path).resolve()
+        if not candidate.is_relative_to(SPA_DIR):
             raise HTTPException(status_code=404)
-        target = Path(target)
-        if target.is_file():
-            return FileResponse(str(target))
+        if candidate.is_file():
+            return FileResponse(str(candidate))
         # Anything else → SPA shell, so client-side routes (e.g. /artifacts,
         # /projects/foo) work on browser refresh.
         return FileResponse(str(SPA_DIR / "index-web.html"))
