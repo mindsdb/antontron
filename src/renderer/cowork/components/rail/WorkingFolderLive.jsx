@@ -3,7 +3,7 @@
 // - Orphans resolve active project name → full { name, path } via projects list.
 // - Loads files from GET /v1/projects/{name}/files (excludes `.context/` + `.anton/`).
 // - Polls every 3s while streaming, plus once when streaming ends.
-// - Highlights rows using mtime vs stream start and “live” (recent write).
+// - Poll-driven refresh only; row icons stay static (no streaming pulse).
 // - Click → HTML opens in-app viewer; other types → OS openPath.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -49,19 +49,17 @@ function fileEntryToRow(projectRoot, f) {
     .replace(/\b\w/g, (c) => c.toUpperCase());
   const mtimeSec = typeof f.modified === 'number' ? f.modified : null;
   const updatedMs = mtimeSec != null ? Math.round(mtimeSec * 1000) : 0;
-  const live = mtimeSec != null && Date.now() / 1000 - mtimeSec < 300;
   return {
     path: abs,
     title,
     ext,
     updated: updatedMs,
-    live,
     size: Number.isFinite(f.size) ? f.size : 0,
     publishedUrl: '',
   };
 }
 
-export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
+export function WorkingFolderLive({ project, isStreaming }) {
   const [resolvedProject, setResolvedProject] = useState(null);
   useEffect(() => {
     if (project) return;
@@ -169,12 +167,7 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
         </p>
       ) : (
         <div className="flex flex-col gap-0.5">
-          {rows.map((f) => {
-            const live = !!f.live;
-            const um = typeof f.updated === 'number' ? f.updated : null;
-            const recent = streamStartedAt && um != null ? um >= streamStartedAt : false;
-            const isNew = recent || (live && isStreaming);
-            return (
+          {rows.map((f) => (
               <button
                 key={f.path}
                 type="button"
@@ -187,24 +180,13 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
                 )}
                 style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
               >
-                {isNew ? (
-                  <span
-                    className="inline-block h-2 w-2 rounded-full bg-accent"
-                    style={{
-                      boxShadow: '0 0 8px rgba(34,211,238,0.55)',
-                      animation: isStreaming ? 'pulse-dot 1.6s ease-in-out infinite' : 'none',
-                    }}
-                  />
-                ) : (
-                  <span className="text-ink-4 inline-flex">{Ico.doc(13)}</span>
-                )}
+                <span className="text-ink-4 inline-flex">{Ico.doc(13)}</span>
                 <span className="text-[12.5px] text-ink truncate">{f.title || (f.path?.split('/').pop() || '')}</span>
                 <span className="text-[10.5px] text-ink-4">
                   {timeAgo(f.updated) || formatBytes(f.size)}
                 </span>
               </button>
-            );
-          })}
+          ))}
         </div>
       )}
 
