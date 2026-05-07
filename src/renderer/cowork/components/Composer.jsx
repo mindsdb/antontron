@@ -262,7 +262,6 @@ export default function Composer({
         ref={fileRef}
         type="file"
         multiple
-        accept="*/*,image/*"
         hidden
         onChange={(event) => handleAttachFiles(event.target.files)}
       />
