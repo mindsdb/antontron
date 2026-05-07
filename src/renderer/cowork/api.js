@@ -382,6 +382,12 @@ const enc = encodeURIComponent;
 /** Relative path from project root for LLM instructions (projects file API). */
 export const ANTON_PROJECT_INSTRUCTIONS_PATH = '.context/anton.md';
 
+/** True if `relPath` is under the project `.context/` tree (listing paths from GET …/files). */
+export function isUnderContextDir(relPath) {
+  const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return r === '.context' || r.startsWith('.context/');
+}
+
 export async function listProjectFiles(projectName) {
   if (!projectName) return { files: [] };
   return req(`/projects/${enc(projectName)}/files`);

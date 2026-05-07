@@ -1,14 +1,17 @@
 // Context card body — surfaces memories (Project + Global) AND
-// the project's own context files (anton.md + anything the user
-// dropped in via the new-project modal). Click any row to open
-// the corresponding modal: memories use the existing read-only
-// markdown viewer, project files use ContextFileModal which has
-// view + edit modes.
+// files under `.context/` (anton.md + uploads). Listed via the same
+// GET /projects/{name}/files as Working folder, but only `.context/`
+// rows appear here; everything else lives in Working folder only.
 
 import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import Ico from '../Icons';
-import { fetchMemory, fetchProjectFiles, ANTON_PROJECT_INSTRUCTIONS_PATH } from '../../api';
+import {
+  fetchMemory,
+  isUnderContextDir,
+  listProjectFiles,
+  ANTON_PROJECT_INSTRUCTIONS_PATH,
+} from '../../api';
 import { MarkdownContent } from '../markdown/MarkdownContent';
 import ContextFileModal from '../project/ContextFileModal';
 
@@ -153,27 +156,27 @@ export function ContextCard({ project }) {
     return () => { cancelled = true; };
   }, [project?.path]);
 
-  // Project files listing (composer browse / attachments route) —
-  // keyed by project filesystem path. Instructions file path for
-  // read/write is ANTON_PROJECT_INSTRUCTIONS_PATH (handled separately
-  // from how we list files here).
   const reloadFiles = () => {
-    if (!project?.path) { setProjectFiles([]); return; }
-    fetchProjectFiles(project.path)
-      .then((data) => setProjectFiles(Array.isArray(data?.files) ? data.files : []))
+    if (!project?.name) { setProjectFiles([]); return; }
+    listProjectFiles(project.name)
+      .then((data) => {
+        const raw = Array.isArray(data?.files) ? data.files : [];
+        setProjectFiles(raw.filter((f) => isUnderContextDir(f.path)));
+      })
       .catch(() => setProjectFiles([]));
   };
   useEffect(() => {
     let cancelled = false;
-    if (!project?.path) { setProjectFiles([]); return undefined; }
-    fetchProjectFiles(project.path)
+    if (!project?.name) { setProjectFiles([]); return undefined; }
+    listProjectFiles(project.name)
       .then((data) => {
         if (cancelled) return;
-        setProjectFiles(Array.isArray(data?.files) ? data.files : []);
+        const raw = Array.isArray(data?.files) ? data.files : [];
+        setProjectFiles(raw.filter((f) => isUnderContextDir(f.path)));
       })
       .catch(() => { if (!cancelled) setProjectFiles([]); });
     return () => { cancelled = true; };
-  }, [project?.path]);
+  }, [project?.name]);
 
   // Order: Project section first, Global second.
   const ordered = useMemo(() => {
@@ -204,13 +207,11 @@ export function ContextCard({ project }) {
 
   return (
     <div className="flex flex-col gap-3 pt-2">
-      {/* Project files section — anton.md (always) + uploaded docs.
-          Rendered first when we have a project so the working
-          instructions are the first thing the user sees. */}
-      {project?.path && hasProjectFiles && (
+      {/* `.context/` only — Working folder lists the rest of the project tree. */}
+      {project?.name && hasProjectFiles && (
         <div className="flex flex-col gap-0.5">
           <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
-            Project files
+            Context files
           </span>
           {projectFiles.map((f) => (
             <ContextFileRow

@@ -9,7 +9,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import clsx from 'clsx';
 import Ico from '../Icons';
-import { fetchActiveProject, fetchProjects, listProjectFiles } from '../../api';
+import {
+  fetchActiveProject,
+  fetchProjects,
+  isUnderContextDir,
+  listProjectFiles,
+} from '../../api';
 import { ArtifactViewer } from '../artifact';
 
 function timeAgo(ts) {
@@ -28,12 +33,6 @@ function formatBytes(n) {
   if (n < 1024) return `${n}B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}KB`;
   return `${(n / 1024 / 1024).toFixed(1)}MB`;
-}
-
-/** Project-relative path — true if under `.context/` (instructions + uploads). */
-function isUnderContextDir(relPath) {
-  const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
-  return r === '.context' || r.startsWith('.context/');
 }
 
 /** Project-file listing row → artifact-shaped row for previews / OS open. */
