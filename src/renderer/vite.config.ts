@@ -12,8 +12,24 @@ import path from 'path';
 // `npm run build` and `npm run dev` paths are byte-identical to before.
 const IS_WEB = process.env.BUILD_TARGET === 'web';
 
+// In dev, vite's default html serving picks `index.html` for `/`, which
+// is the Electron entry (depends on window.antontron and crashes in a
+// regular browser). When BUILD_TARGET=web, rewrite bare `/` to the web
+// entry so `http://localhost:5173/` is the canonical URL.
+const webRootRewrite = {
+  name: 'cowork-web-root-rewrite',
+  configureServer(server: any) {
+    server.middlewares.use((req: any, _res: any, next: any) => {
+      if (req.url === '/' || req.url === '') {
+        req.url = '/index-web.html';
+      }
+      next();
+    });
+  },
+};
+
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), ...(IS_WEB ? [webRootRewrite] : [])],
   root: __dirname,
   base: './',
   build: {

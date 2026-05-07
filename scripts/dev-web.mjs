@@ -46,9 +46,12 @@ async function main() {
 
   // Boot Vite. inherit stdio so HMR output, error overlays, and the
   // "press q to quit" hint render the way developers expect.
+  // BUILD_TARGET=web activates the cowork-web-root-rewrite middleware
+  // in vite.config.ts which maps `/` to `/index-web.html` — so the
+  // bare URL is the canonical one.
   viteChild = spawn(
     'npx',
-    ['vite', 'dev', 'src/renderer'],
+    ['vite', 'dev', 'src/renderer', '--open', '/'],
     {
       stdio: 'inherit',
       env: { ...process.env, BUILD_TARGET: 'web' },
