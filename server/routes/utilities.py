@@ -30,10 +30,29 @@ def _safe_text(path: Path, limit: int = 80_000) -> str:
     return text[:limit]
 
 
-def _memory_roots(project_path: Optional[str] = None) -> list[tuple[str, Path]]:
-    roots = [("Global", Path.home() / ".anton" / "memory")]
+def _memory_roots(project_path: Optional[str] = None) -> list[tuple[str, Optional[str], Path]]:
+    """Enumerate (scope, project_name, root) tuples for the memory listing.
+
+    `scope` is "Global" or "Project". Global has no project_name. When
+    `project_path` is set we list only that one project (legacy
+    single-project shape). When `project_path` is None we list every
+    project on disk so the UI can present a unified view of all memory
+    grouped by project.
+    """
+    roots: list[tuple[str, Optional[str], Path]] = [
+        ("Global", None, Path.home() / ".anton" / "memory"),
+    ]
     if project_path:
-        roots.append(("Project", Path(project_path).expanduser().resolve() / ".anton" / "memory"))
+        target = Path(project_path).expanduser().resolve()
+        roots.append(("Project", target.name, target / ".anton" / "memory"))
+        return roots
+    try:
+        from anton_api import projects_store
+        for project in projects_store.list_projects():
+            target = Path(project["path"]).expanduser().resolve()
+            roots.append(("Project", project["name"], target / ".anton" / "memory"))
+    except Exception:
+        logger.warning("Could not enumerate projects for memory listing", exc_info=True)
     return roots
 
 
@@ -86,11 +105,16 @@ def _backup_target(path: Path, namespace: str) -> None:
         logger.warning("Could not backup %s before mutation", path)
 
 
-def _memory_file_payload(path: Path, root: Path, scope: str) -> dict[str, Any]:
+def _memory_file_payload(
+    path: Path,
+    root: Path,
+    scope: str,
+    project_name: Optional[str] = None,
+) -> dict[str, Any]:
     text = _safe_text(path, 16_000)
     resolved_root = root.resolve()
     resolved_path = path.resolve()
-    return {
+    payload: dict[str, Any] = {
         "name": path.stem.replace("-", " ").replace("_", " ").title(),
         "path": str(resolved_path),
         "relativePath": str(resolved_path.relative_to(resolved_root)),
@@ -99,20 +123,35 @@ def _memory_file_payload(path: Path, root: Path, scope: str) -> dict[str, Any]:
         "preview": "\n".join([line for line in text.splitlines() if line.strip()][:8])[:700],
         "content": text,
     }
+    if project_name:
+        # `projectPath` is the project root (two levels up from
+        # `<project>/.anton/memory/`) — the UI passes this back to
+        # save/delete so writes hit the right project regardless of
+        # which project is currently "active" in the sidebar.
+        payload["projectName"] = project_name
+        payload["projectPath"] = str(resolved_root.parent.parent)
+    return payload
 
 
 @router.get("/memory")
 async def list_memory(project_path: Optional[str] = None):
     sections = []
-    for label, root in _memory_roots(project_path):
+    for scope, project_name, root in _memory_roots(project_path):
         files = []
         if root.is_dir():
             for path in sorted(root.rglob("*.md")):
                 if not path.is_file():
                     continue
-                text = _safe_text(path, 16_000)
-                files.append(_memory_file_payload(path, root, label))
-        sections.append({"scope": label, "root": str(root), "files": files})
+                files.append(_memory_file_payload(path, root, scope, project_name))
+        section: dict[str, Any] = {
+            "scope": scope,
+            "root": str(root),
+            "files": files,
+        }
+        if project_name:
+            section["projectName"] = project_name
+            section["projectPath"] = str(root.parent.parent)
+        sections.append(section)
     return {"sections": sections}
 
 
@@ -129,7 +168,10 @@ async def save_memory(req: MemorySaveRequest):
     target.parent.mkdir(parents=True, exist_ok=True)
     _backup_target(target, "memory")
     target.write_text(req.content, encoding="utf-8")
-    return {"status": "ok", "file": _memory_file_payload(target, root, req.scope.title())}
+    project_name: Optional[str] = None
+    if req.scope.strip().lower() == "project" and req.projectPath:
+        project_name = Path(req.projectPath).expanduser().resolve().name
+    return {"status": "ok", "file": _memory_file_payload(target, root, req.scope.title(), project_name)}
 
 
 @router.delete("/memory")

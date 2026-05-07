@@ -433,7 +433,11 @@ function NewProjectCard({ onCreate, creating, onCreatingChange }) {
 
 // ─── List view ───────────────────────────────────────────────────────────
 
-const LIST_GRID = '1.6fr 2fr 70px 70px 70px 70px 110px 36px';
+// Adds an "Active" column between Tasks and Memories — the count of
+// currently-streaming tasks in this project. Client-side derivable
+// from `tasks` (status === 'active'), so no new server endpoint
+// needed; the data is already on the client.
+const LIST_GRID = '1.6fr 2fr 70px 70px 70px 70px 70px 110px 36px';
 
 function ListHeader() {
   const Cell = ({ children, align }) => (
@@ -453,6 +457,7 @@ function ListHeader() {
       <Cell>Name</Cell>
       <Cell>Last activity</Cell>
       <Cell align="right">Tasks</Cell>
+      <Cell align="right">Active</Cell>
       <Cell align="right">Memories</Cell>
       <Cell align="right">Sched.</Cell>
       <Cell align="right">Artifacts</Cell>
@@ -471,6 +476,33 @@ function D1Num({ value }) {
       textAlign: 'right',
       fontVariantNumeric: 'tabular-nums',
     }}>{value ?? 0}</span>
+  );
+}
+
+// Same shape as D1Num but with a pulsing accent dot + accent number
+// when > 0. Used by the "Active" column so live projects stand out
+// without dragging in a full status pill.
+function ActiveNum({ value }) {
+  const isZero = !value;
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
+      gap: 6,
+      fontFamily: FONT_MONO, fontSize: 12,
+      color: isZero ? 'var(--ink-5)' : 'var(--accent)',
+      textAlign: 'right',
+      fontVariantNumeric: 'tabular-nums',
+    }}>
+      {!isZero && (
+        <span aria-hidden className="pulse-dot" style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: 'var(--accent)',
+          boxShadow: '0 0 6px color-mix(in srgb, var(--accent) 55%, transparent)',
+          flexShrink: 0,
+        }} />
+      )}
+      {value ?? 0}
+    </span>
   );
 }
 
@@ -503,7 +535,12 @@ function ListRow({ project, tasks, scheduled, pinned, onOpen, onTogglePin, onMen
   const triggerRef = useRef(null);
   const { mem, art } = useRowStats(project);
   const summary = activitySummaryFor(project, tasks);
-  const taskCount = (tasks || []).filter((t) => t.projectName === project.name || t.projectPath === project.path).length;
+  const projectTasks = (tasks || []).filter((t) => t.projectName === project.name || t.projectPath === project.path);
+  const taskCount = projectTasks.length;
+  // App.jsx sets task.status to 'active' while a turn is streaming
+  // and back to 'idle' on completion, so this count reflects the
+  // live in-flight work for the project.
+  const activeTaskCount = projectTasks.filter((t) => t.status === 'active').length;
   const schedCount = (scheduled || []).filter((s) => (s.project || s.projectName) === project.name).length;
   const updated = relativeAge(timestampOfProject(project, tasks));
   const active = isActive(project, tasks);
@@ -562,6 +599,7 @@ function ListRow({ project, tasks, scheduled, pinned, onOpen, onTogglePin, onMen
 
       {/* Number cells */}
       <D1Num value={taskCount} />
+      <ActiveNum value={activeTaskCount} />
       <D1Num value={mem} />
       <D1Num value={schedCount} />
       <D1Num value={art} />

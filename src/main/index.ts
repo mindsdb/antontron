@@ -5,7 +5,7 @@ import * as os from 'os';
 import * as https from 'https';
 import * as http from 'http';
 import { IPC } from '../shared/ipc-channels';
-import { checkAntonInstalled, runInstaller } from './installer';
+import { checkAntonInstalled, checkInstallStatus, runInstaller } from './installer';
 import { startServer, stopServer, isServerRunning, isServerStarting, getServerPort, getServerDiagnostics } from './server-process';
 import { oauthConnect } from './oauth-service';
 import { startAnton, writeToAnton, resizeAnton, killAnton, isAntonRunning } from './anton-process';
@@ -494,7 +494,11 @@ function createWindow() {
 // IPC handlers
 function setupIPC() {
   ipcMain.handle(IPC.INSTALL_CHECK, async () => {
-    return checkAntonInstalled();
+    // Return both the CLI presence AND the server-deps readiness so
+    // the renderer can route to setup when either is missing — covers
+    // the case where the user already has the anton CLI installed
+    // independently but doesn't have fastapi/uvicorn/etc. yet.
+    return checkInstallStatus();
   });
 
   ipcMain.handle(IPC.INSTALL_START, async () => {
@@ -1039,11 +1043,16 @@ app.whenReady().then(() => {
   startEnvWatcher();
   createWindow();
 
-  // If anton is already installed (returning user), start the bundled
-  // python server in the background. Skips silently if anton isn't
-  // installed yet — the installer will start it after install completes.
-  checkAntonInstalled().then(async (installed) => {
-    if (!installed) return;
+  // If anton is already installed AND the server-runtime Python deps
+  // are importable, start the bundled python server in the
+  // background. Skips silently if either is missing — the renderer's
+  // boot flow will route to the setup screen, which handles installing
+  // (or re-installing with extras) and then starts the server itself.
+  // Without the deps check, a returning user with a stand-alone
+  // `anton` install would see the server fail to start with a Python
+  // ImportError they can't act on.
+  checkInstallStatus().then(async ({ antonInstalled, serverDepsReady }) => {
+    if (!antonInstalled || !serverDepsReady) return;
     const result = await startServer();
     if (!result.ok) {
       console.error(`[server] start failed: ${result.reason}`);

@@ -848,8 +848,14 @@ async def _build_chat_session(
         "You are forbidden from accessing any files outside of this project."
     )
     output_context = (
-        f"Save generated files and dashboards in the project directory at {str(base)}."
-        "When you create a user-facing HTML dashboard or report, save it there."
+        # Anchor user-facing artifacts at .anton/output/ so the
+        # artifacts view picks them up and inline previews resolve.
+        # Files written elsewhere in the workspace still work, but
+        # this is the canonical location.
+        f"Save user-facing artifacts (HTML dashboards, CSVs, PDFs, charts, reports) under {str(base)}/.anton/output/<filename>. "
+        f"Use a bare filename — never nest into deeper subfolders. "
+        f"When you write a file from a scratchpad, use an absolute path so it always lands in the right place: "
+        f"e.g. open('{str(base)}/.anton/output/report.html', 'w')."
     )
 
     data_vault = LocalDataVault() if LocalDataVault is not None else None

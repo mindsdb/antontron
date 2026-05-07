@@ -88,8 +88,123 @@ const ACCENT_VARS = {
 
 const THINKING_PLACEHOLDER = 'Thinking...';
 
+// Friendly continuation prompts. We reach for one of these when the
+// user lands on a conversation that was streaming when the app or
+// server died (or the user closed the window mid-turn). The prompt
+// becomes a synthetic assistant message (or the tail of one) so the
+// user has something to react to instead of staring at frozen
+// "thinking" indicators.
+const CONTINUE_PROMPTS = [
+  'Looks like we paused mid-flow. Want to pick up where we left off?',
+  'Got cut off before I could finish. Should I keep going?',
+  "Hey — looks like our last run got cut short. Continue from here?",
+  "I lost my place when the session ended. Want me to resume the work?",
+  "Things stopped before I wrapped up. Ready to continue?",
+  "Looks like that turn didn't finish. Want me to take another swing at it?",
+  'We left this one mid-thought — keep going, or pivot to something else?',
+  "Got disconnected. Should I resume from where I was?",
+  "That last task didn't complete. Want to pick it back up?",
+  'Picking back up — should I continue, or are we moving on?',
+];
+
+function pickContinuePrompt() {
+  return CONTINUE_PROMPTS[Math.floor(Math.random() * CONTINUE_PROMPTS.length)];
+}
+
 function stripStreaming(messages) {
   return messages.filter((m) => m.role !== '_streaming');
+}
+
+// Status values the stream reducer leaves behind for IN-FLIGHT step
+// activity. A clean turn closes everything to 'completed' / 'done' /
+// 'error' / 'cancelled'. Anything else is "this step was running
+// when the stream died" — we'll mark them done on reload so the rail
+// stops claiming work is still happening.
+const RUNNING_STEP_STATUSES = new Set([
+  'pending', 'thinking', 'streaming', 'in_progress', 'running',
+]);
+
+// Reconcile a task's stored streaming/running state against whether
+// a real SSE stream is alive for it RIGHT NOW. Called when the user
+// navigates into a task. Three concerns:
+//
+//   1. `_streaming` UI placeholder rows — if no live stream exists
+//      for this task, the placeholder is a zombie from a previous
+//      run; drop it.
+//   2. Step rows whose `status` says they're still working —
+//      collapse them to `completed` so the progress box doesn't
+//      keep animating.
+//   3. If anything was clearly mid-flight (zombie placeholder, or a
+//      trailing user message with no assistant reply), append a
+//      friendly "continue?" assistant message — appending to the
+//      last assistant message when there is one, else inserting a
+//      fresh one. This is renderer-side only; it never goes to the
+//      server (anton's history stays clean) and it gets replaced as
+//      soon as the user sends their next message.
+function reconcileTaskMessages(messages, isLive) {
+  if (!Array.isArray(messages)) return messages;
+  if (isLive) return messages; // legitimate in-flight, leave alone
+  const hadStreaming = messages.some((m) => m && m.role === '_streaming');
+  // Pass 1 — strip _streaming + activity placeholders, mark
+  // running steps as completed. Each rewritten message gets a flag
+  // so we can avoid double-tagging continuation prompts.
+  const cleaned = messages
+    .filter((m) => m && m.role !== '_streaming' && m.role !== 'activity')
+    .map((m) => {
+      if (m.role !== 'assistant') return m;
+      if (!Array.isArray(m.steps) || m.steps.length === 0) return m;
+      let dirty = false;
+      const nextSteps = m.steps.map((s) => {
+        if (s && RUNNING_STEP_STATUSES.has(s.status)) {
+          dirty = true;
+          return { ...s, status: 'completed', completedAt: s.completedAt || Date.now() };
+        }
+        return s;
+      });
+      // Also shake out a top-level message-level streamStatus if any
+      // (the live stream sets it to 'streaming' / 'tool' / etc.).
+      const streamStatusFix = m.streamStatus && m.streamStatus !== 'done'
+        ? { streamStatus: 'done' }
+        : null;
+      if (!dirty && !streamStatusFix) return m;
+      return { ...m, ...(dirty ? { steps: nextSteps } : {}), ...(streamStatusFix || {}) };
+    });
+
+  // Decide whether a continuation prompt is warranted.
+  // Triggers:
+  //   • we just stripped a `_streaming` row, OR
+  //   • the last surviving message is a user message with no reply,
+  //     OR an assistant message we just had to clean up.
+  let wantContinuation = hadStreaming;
+  if (!wantContinuation && cleaned.length > 0) {
+    const last = cleaned[cleaned.length - 1];
+    if (last && last.role === 'user') wantContinuation = true;
+  }
+  if (!wantContinuation) return cleaned;
+
+  const prompt = pickContinuePrompt();
+  const last = cleaned[cleaned.length - 1];
+  if (last && last.role === 'assistant' && !last._continuationAppended) {
+    // Append to the existing assistant message (per request: "if the
+    // last message is from anton, append into it").
+    const sep = last.content && last.content.length ? '\n\n' : '';
+    return [
+      ...cleaned.slice(0, -1),
+      { ...last, content: (last.content || '') + sep + prompt, _continuationAppended: true },
+    ];
+  }
+  // Otherwise inject a fresh assistant message.
+  return [
+    ...cleaned,
+    {
+      role: 'assistant',
+      content: prompt,
+      steps: [],
+      startedAt: Date.now(),
+      _continuationAppended: true,
+      _client_only: true,
+    },
+  ];
 }
 
 function removeThinkingPlaceholder(messages) {
@@ -400,6 +515,13 @@ function AppCore() {
   // both the SSE read and the in-flight scratchpad cell.
   const activeStreamCtrlRef = useRef(null);
   const activeScratchpadRef = useRef(null);
+  // Which task id (if any) the active stream belongs to. Used to
+  // distinguish "this conversation is mid-flight, keep the running
+  // indicators" from "this conversation has zombie running indicators
+  // from a stream that died (server restart, network blip, app close
+  // mid-turn)" when the user navigates back to it. See
+  // `reconcileTaskMessages` for the cleanup it enables.
+  const activeStreamingTaskIdRef = useRef(null);
 
   const handleStopStream = useCallback(async () => {
     // 1) Cancel the running scratchpad (if any) so anton stops
@@ -415,6 +537,7 @@ function AppCore() {
       activeStreamCtrlRef.current = null;
     }
     activeScratchpadRef.current = null;
+    activeStreamingTaskIdRef.current = null;
 
     // 3) Roll the streaming placeholder into a final assistant
     //    message. Drop the in-flight steps so the rail's Progress
@@ -775,6 +898,15 @@ function AppCore() {
     });
       }).catch(() => {});
 
+      // Is this conversation actually mid-stream right now? If yes,
+      // we LEAVE running indicators alone. If no, the reconcile pass
+      // will collapse zombie steps and may inject a "want to
+      // continue?" prompt for the user.
+      const isLive = (
+        !!activeStreamCtrlRef.current
+        && activeStreamingTaskIdRef.current === id
+      );
+
       // If this task didn't get its messages preloaded (we only fan
       // out to the recent N at startup), fetch them now so the chat
       // view doesn't render empty.
@@ -790,8 +922,9 @@ function AppCore() {
           //      created before the server sidecar shipped.
           const fromServer = hydrateMessagesFromServerEvents(fresh.messages);
           const enriched = mergeConvTurns(id, fromServer);
+          const reconciled = reconcileTaskMessages(enriched, isLive);
           setTasks((prev) => prev.map((t) =>
-            t.id === id ? { ...t, messages: enriched } : t
+            t.id === id ? { ...t, messages: reconciled } : t
           ));
         }).catch(() => {});
       } else {
@@ -800,7 +933,8 @@ function AppCore() {
         setTasks((prev) => prev.map((t) => {
           if (t.id !== id) return t;
           const fromServer = hydrateMessagesFromServerEvents(t.messages);
-          return { ...t, messages: mergeConvTurns(id, fromServer) };
+          const enriched = mergeConvTurns(id, fromServer);
+          return { ...t, messages: reconcileTaskMessages(enriched, isLive) };
         }));
       }
     }
@@ -1066,6 +1200,9 @@ function AppCore() {
           : t,
       ));
       activeStreamCtrlRef.current = streamNewSessionFn();
+      // Tag which task is mid-flight so reconcileTaskMessages can
+      // tell legitimate running indicators from zombies on reload.
+      activeStreamingTaskIdRef.current = tempId;
     };
     const streamNewSessionFn = () => streamNewSession(text, {
       projectName: effectiveProjectName,
@@ -1126,6 +1263,7 @@ function AppCore() {
       onDone(sid) {
         activeStreamCtrlRef.current = null;
         activeScratchpadRef.current = null;
+        activeStreamingTaskIdRef.current = null;
         const finalId = sid || resolvedId;
         const finalContent = streamState.bodyText || assistantContent;
         const finalSteps = streamState.steps;
@@ -1160,6 +1298,9 @@ function AppCore() {
         fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
       },
       onError(message, event) {
+        activeStreamCtrlRef.current = null;
+        activeScratchpadRef.current = null;
+        activeStreamingTaskIdRef.current = null;
         setTasks((prev) => prev.map((t) => {
           if (t.id !== resolvedId && t.id !== tempId) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
@@ -1234,6 +1375,9 @@ function AppCore() {
     const connectContext = describeConnectFormState(connectFormState);
     const sendText = connectContext ? `${text}\n\n${connectContext}` : text;
 
+    // Tag this task as currently streaming so reconcileTaskMessages
+    // can distinguish a real in-flight turn from a zombie placeholder.
+    activeStreamingTaskIdRef.current = id;
     activeStreamCtrlRef.current = streamMessage(id, sendText, {
       projectName: taskProjectName,
       projectPath: taskProjectPath,
@@ -1254,6 +1398,7 @@ function AppCore() {
       onDone() {
         activeStreamCtrlRef.current = null;
         activeScratchpadRef.current = null;
+        activeStreamingTaskIdRef.current = null;
         const finalContent = streamState.bodyText || assistantContent;
         const finalSteps = streamState.steps;
         const finalStartedAt = streamState.startedAt;
@@ -1278,6 +1423,9 @@ function AppCore() {
         fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
       },
       onError(message, event) {
+        activeStreamCtrlRef.current = null;
+        activeScratchpadRef.current = null;
+        activeStreamingTaskIdRef.current = null;
         setTasks((prev) => prev.map((t) => {
           if (t.id !== id) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
@@ -1320,6 +1468,7 @@ function AppCore() {
       }));
     };
 
+    activeStreamingTaskIdRef.current = id;
     activeStreamCtrlRef.current = streamDataVaultSubmission({
       formId,
       conversationId: id,
@@ -1335,6 +1484,7 @@ function AppCore() {
       },
       onDone() {
         activeStreamCtrlRef.current = null;
+        activeStreamingTaskIdRef.current = null;
         const finalContent = streamState.bodyText || assistantContent;
         const finalSteps = streamState.steps;
         const finalStartedAt = streamState.startedAt;
@@ -1362,6 +1512,8 @@ function AppCore() {
           .catch(() => {});
       },
       onError(message) {
+        activeStreamCtrlRef.current = null;
+        activeStreamingTaskIdRef.current = null;
         setTasks((prev) => prev.map((t) => {
           if (t.id !== id) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
