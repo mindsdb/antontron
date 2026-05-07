@@ -3,7 +3,7 @@
 // GET /projects/{name}/files as Working folder, but only `.context/`
 // rows appear here; everything else lives in Working folder only.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import Ico from '../Icons';
 import {
@@ -189,15 +189,27 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
 
   const sessionRelevant = conversationId && !String(conversationId).startsWith('tmp-');
 
-  useEffect(() => {
+  // `useEffect` runs after paint — switching tasks would briefly show the
+  // previous task's rows with "Loading attachments…". This runs first
+  // and clears before paint. Loading is only set here on conversation
+  // change (not on refreshKey), so same-task refetches stay quiet.
+  useLayoutEffect(() => {
     if (!sessionRelevant) {
       setSessionAttachments([]);
       setAttachmentsError(null);
       setAttachmentsLoading(false);
       return;
     }
-    let cancelled = false;
+    setSessionAttachments([]);
+    setAttachmentsError(null);
     setAttachmentsLoading(true);
+  }, [conversationId, sessionRelevant]);
+
+  useEffect(() => {
+    if (!sessionRelevant) {
+      return undefined;
+    }
+    let cancelled = false;
     setAttachmentsError(null);
     fetchAttachments(conversationId)
       .then((data) => {
@@ -287,9 +299,10 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
               No files attached to this task yet.
             </p>
           )}
-          {sessionAttachments.map((item) => (
-            <SessionAttachmentRow key={item.id} item={item} />
-          ))}
+          {!attachmentsLoading
+            && sessionAttachments.map((item) => (
+              <SessionAttachmentRow key={item.id} item={item} />
+            ))}
         </div>
       )}
 
