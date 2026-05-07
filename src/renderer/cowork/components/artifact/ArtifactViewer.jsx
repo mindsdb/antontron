@@ -432,26 +432,31 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
           anchorRect={menuRect}
           onClose={() => setMenuRect(null)}
           items={[
-            {
+            // Open in OS / Delete drop out in the hosted web shell —
+            // both depend on the renderer sharing a filesystem with the
+            // server, which is only true in Electron.
+            ...(host.isWeb ? [] : [{
               label: 'Open in OS',
               icon: Ico.externalLink(13),
               disabled: !hasActionPath,
               onClick: onOpenOS,
-            },
+            }]),
             {
               label: publishedUrl ? 'Unpublish' : 'Publish',
               icon: Ico.upload(13),
               disabled: busy || !hasActionPath,
               onClick: publishedUrl ? onUnpublish : onPublish,
             },
-            { divider: true },
-            {
-              label: 'Delete',
-              icon: Ico.trash(13),
-              danger: true,
-              disabled: busy || !hasActionPath,
-              onClick: onTrash,
-            },
+            ...(host.isWeb ? [] : [
+              { divider: true },
+              {
+                label: 'Delete',
+                icon: Ico.trash(13),
+                danger: true,
+                disabled: busy || !hasActionPath,
+                onClick: onTrash,
+              },
+            ]),
           ]}
         />
 

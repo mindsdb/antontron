@@ -417,7 +417,10 @@ export default function Sidebar({
           )}
         </div>
 
-        {/* Footer status */}
+        {/* Footer status — Electron-only. In the hosted web shell the
+            FastAPI process IS the host, so start/stop/diagnostics have
+            no meaning and we drop the entire pill + power button. */}
+        {!host.isWeb && (
         <div className="anton-sidebar__footer">
           {/* The whole "backend · <status>" pill is the help affordance
               now — click anywhere on it to open the server-state modal.
@@ -478,6 +481,7 @@ export default function Sidebar({
             </button>
           </div>
         </div>
+        )}
       </div>
 
       <RecentsModal

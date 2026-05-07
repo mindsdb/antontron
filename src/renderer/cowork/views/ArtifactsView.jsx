@@ -1180,7 +1180,10 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
                 }
               },
             });
-          } else {
+          } else if (!host.isWeb) {
+            // Reveal hits the server's /artifacts/reveal endpoint which
+            // shells out to the OS opener — meaningful only on the
+            // desktop where the renderer and server share a filesystem.
             items.push({
               id: 'reveal',
               label: isMacPlatform ? 'Show in Finder' : 'Show in Explorer',
@@ -1188,14 +1191,17 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
               onClick: () => { try { revealArtifact(a.path); } catch {} },
             });
           }
-          items.push({ separator: true });
-          items.push({
-            id: 'delete',
-            label: 'Delete',
-            icon: Ico.trash(13),
-            danger: true,
-            onClick: () => handleTrash(a),
-          });
+          // Delete uses host.trashItem (OS Trash) — no equivalent in web.
+          if (!host.isWeb) {
+            items.push({ separator: true });
+            items.push({
+              id: 'delete',
+              label: 'Delete',
+              icon: Ico.trash(13),
+              danger: true,
+              onClick: () => handleTrash(a),
+            });
+          }
           return items;
         })()}
       />

@@ -501,12 +501,16 @@ function ArtifactCard({ artifact, onOpen }) {
             {status.text}
           </span>
         )}
-        <SmallBtn disabled={!canAct} onClick={handleReveal} title={canAct ? `${revealLabel}: ${path}` : disabledReason || 'No file path'}>
-          {revealLabel}
-        </SmallBtn>
-        <SmallBtn primary disabled={!canAct} onClick={handleOpen} title={canAct ? `Open ${path}` : disabledReason || 'No file path'}>
-          Open
-        </SmallBtn>
+        {!host.isWeb && (
+          <SmallBtn disabled={!canAct} onClick={handleReveal} title={canAct ? `${revealLabel}: ${path}` : disabledReason || 'No file path'}>
+            {revealLabel}
+          </SmallBtn>
+        )}
+        {(!host.isWeb || isHtml) && (
+          <SmallBtn primary disabled={!canAct} onClick={handleOpen} title={canAct ? `Open ${path}` : disabledReason || 'No file path'}>
+            Open
+          </SmallBtn>
+        )}
       </div>
     </div>
   );

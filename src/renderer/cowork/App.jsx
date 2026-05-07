@@ -535,7 +535,11 @@ function AppCore() {
   const [selectedScheduleId, setSelectedScheduleId] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
   const [selectedModel, setSelectedModel] = useState(MOCK_DATA.models[0]);
-  const [serverOnline, setServerOnline] = useState(false);
+  // In the hosted web shell the FastAPI process IS the host — there
+  // is no subprocess to start/stop, and the SPA only loads at all if
+  // the server is up. Seed online so downstream gates (`if (!serverOnline) return;`)
+  // don't block the initial render waiting for a poll that never matters.
+  const [serverOnline, setServerOnline] = useState(host.isWeb);
   const [serverBusy, setServerBusy] = useState(false);
   const [serverBusyKind, setServerBusyKind] = useState('starting'); // 'starting' | 'stopping'
   const [health, setHealth] = useState({ status: 'offline', anton_available: false, config_ready: false });
@@ -642,6 +646,7 @@ function AppCore() {
   // has returned. While main is mid-start, show the spinner; poll
   // every 600 ms until it resolves.
   useEffect(() => {
+    if (host.isWeb) return; // No server lifecycle to poll in the hosted web shell.
     let cancelled = false;
     let timer = null;
 
@@ -1878,6 +1883,7 @@ function AppCore() {
         onPick={handleConnectorPicked}
       />
 
+      {!host.isWeb && (
       <ServerOfflineHelpModal
         open={serverHelpOpen}
         onClose={() => setServerHelpOpen(false)}
@@ -1901,6 +1907,7 @@ function AppCore() {
           }
         }}
       />
+      )}
 
       <ConfirmModal
         open={pendingDeleteTaskId != null}

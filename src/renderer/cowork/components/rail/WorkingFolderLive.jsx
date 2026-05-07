@@ -153,9 +153,13 @@ export function WorkingFolderLive({ project, isStreaming }) {
             {effectiveProject.name}
           </span>
           <span
-            className="text-[10.5px] text-ink-4 truncate cursor-pointer hover:text-ink-3"
-            title={antonFolder ? `Open ${antonFolder}` : effectiveProject.path}
-            onClick={() => antonFolder && onOpen(antonFolder)}
+            className={
+              host.isWeb
+                ? 'text-[10.5px] text-ink-4 truncate'
+                : 'text-[10.5px] text-ink-4 truncate cursor-pointer hover:text-ink-3'
+            }
+            title={!host.isWeb && antonFolder ? `Open ${antonFolder}` : effectiveProject.path}
+            onClick={host.isWeb ? undefined : () => antonFolder && onOpen(antonFolder)}
           >{effectiveProject.path}</span>
         </div>
       ) : (
