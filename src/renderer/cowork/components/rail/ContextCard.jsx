@@ -7,12 +7,13 @@ import { useEffect, useMemo, useState } from 'react';
 import clsx from 'clsx';
 import Ico from '../Icons';
 import {
+  deleteMemory,
   fetchMemory,
   isUnderContextDir,
   listProjectFiles,
+  saveMemory,
   ANTON_PROJECT_INSTRUCTIONS_PATH,
 } from '../../api';
-import { MarkdownContent } from '../markdown/MarkdownContent';
 import ContextFileModal from '../project/ContextFileModal';
 
 function relativeAge(ts) {
@@ -63,48 +64,6 @@ function MemoryRow({ entry, onOpen }) {
   );
 }
 
-function MemoryModal({ open, onClose, entry }) {
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e) => { if (e.key === 'Escape') onClose?.(); };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [open, onClose]);
-
-  if (!open || !entry) return null;
-  return (
-    <div
-      onClick={(e) => { if (e.target === e.currentTarget) onClose?.(); }}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
-      style={{ WebkitAppRegion: 'no-drag' }}
-    >
-      <div className="flex h-[80vh] w-[min(720px,92vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl">
-        <div className="flex flex-none items-center justify-between border-b border-line px-5 py-3">
-          <div className="flex items-baseline gap-3 min-w-0">
-            <span className="font-display text-[13px] font-semibold uppercase tracking-wider text-ink">
-              {entry.scope || 'Memory'}
-            </span>
-            <span className="text-[12px] text-ink-3 truncate" title={entry.relativePath}>
-              {entry.relativePath || entry.name}
-            </span>
-          </div>
-          <button
-            type="button"
-            onClick={onClose}
-            title="Close"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-ink-3 hover:bg-surface-2 hover:text-ink"
-          >
-            ×
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto px-6 py-5" style={{ WebkitAppRegion: 'no-drag' }}>
-          <MarkdownContent text={entry.content || '(empty)'} id={`mem-${entry.relativePath}`} complete />
-        </div>
-      </div>
-    </div>
-  );
-}
-
 // Row for a project context file (anton.md or any uploaded file).
 // Same visual rhythm as MemoryRow but distinguishes the always-
 // present anton.md with a subtle "Project instructions" label.
@@ -141,10 +100,11 @@ function ContextFileRow({ file, onOpen }) {
 export function ContextCard({ project }) {
   const [sections, setSections] = useState([]);
   const [projectFiles, setProjectFiles] = useState([]);
+  // `openEntry` is a memory file; `openFile` is a project context
+  // file. Both feed into `ContextFileModal` (one component, two
+  // wirings) so the UX feels identical regardless of which surface
+  // the row was opened from.
   const [openEntry, setOpenEntry] = useState(null);
-  // Project-file editor is a separate modal because the shape (view
-  // + edit + save + delete) is different from the read-only memory
-  // viewer.
   const [openFile, setOpenFile] = useState(null);
   const [showAll, setShowAll] = useState(false);
 
@@ -253,7 +213,45 @@ export function ContextCard({ project }) {
         );
       })}
 
-      <MemoryModal open={!!openEntry} entry={openEntry} onClose={() => setOpenEntry(null)} />
+      <ContextFileModal
+        open={!!openEntry}
+        title={openEntry?.relativePath || openEntry?.name || ''}
+        subtitle={
+          openEntry?.scope === 'Project' && openEntry?.projectName
+            ? `Project · ${openEntry.projectName}`
+            : (openEntry?.scope || '')
+        }
+        initialContent={openEntry?.content || ''}
+        saver={async (content) => {
+          if (!openEntry) return;
+          await saveMemory({
+            scope: openEntry.scope,
+            relativePath: openEntry.relativePath,
+            content,
+            projectPath: openEntry.scope === 'Project' ? openEntry.projectPath : null,
+          });
+        }}
+        remover={async () => {
+          if (!openEntry) return;
+          await deleteMemory({
+            scope: openEntry.scope,
+            relativePath: openEntry.relativePath,
+            projectPath: openEntry.scope === 'Project' ? openEntry.projectPath : null,
+          });
+        }}
+        emptyMessage="(empty memory file)"
+        placeholder="Memory contents — what should Anton remember?"
+        dense
+        onClose={() => setOpenEntry(null)}
+        onChanged={() => {
+          // Refresh the rail's memory listing so adds/edits/deletes
+          // surface immediately. Same project_path the rail uses on
+          // initial load — keeps the displayed sections coherent.
+          fetchMemory(project?.path)
+            .then((data) => { if (data?.sections) setSections(data.sections); })
+            .catch(() => {});
+        }}
+      />
       <ContextFileModal
         open={!!openFile}
         projectName={project?.name}

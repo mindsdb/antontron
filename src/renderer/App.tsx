@@ -30,8 +30,14 @@ export default function App() {
           return;
         }
 
-        const installed = await window.antontron.checkInstall();
-        if (!installed) {
+        // The check now returns both halves of "ready to start the
+        // server": is the anton CLI installed, AND are the Python
+        // deps the bundled FastAPI server needs (fastapi, uvicorn,
+        // python-multipart, pydantic) actually importable from the
+        // tool venv. Either being false means setup needs to run —
+        // setup re-installs anton with the `--with` extras included.
+        const status = await window.antontron.checkInstall();
+        if (!status.antonInstalled || !status.serverDepsReady) {
           setPage('setup');
           return;
         }
@@ -49,8 +55,8 @@ export default function App() {
   }, []);
 
   const advanceFromTerms = async () => {
-    const installed = await window.antontron.checkInstall();
-    if (!installed) {
+    const status = await window.antontron.checkInstall();
+    if (!status.antonInstalled || !status.serverDepsReady) {
       setPage('setup');
       return;
     }

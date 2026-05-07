@@ -16,7 +16,7 @@ interface ExplainabilityRecord {
 }
 
 interface AntonTronAPI {
-  checkInstall: () => Promise<boolean>;
+  checkInstall: () => Promise<{ antonInstalled: boolean; serverDepsReady: boolean }>;
   startInstall: () => Promise<boolean>;
   cancelInstall: () => Promise<boolean>;
   onInstallLog: (cb: (msg: string) => void) => () => void;
