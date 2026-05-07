@@ -269,6 +269,58 @@ export async function checkAntonInstalled(): Promise<boolean> {
   return commandExists('anton');
 }
 
+// True iff every server-runtime Python dependency imports cleanly
+// from the tool venv. Catches the common case where a user already
+// has `anton` (CLI) installed via `uv tool install anton` or
+// `pip install anton` — but WITHOUT the server extras (fastapi,
+// uvicorn, etc.) that the bundled FastAPI server in server/main.py
+// needs to spawn. Without this check, antontron would skip its setup
+// screen and the server would silently fail to start with a Python
+// ImportError surfaced as a generic "backend offline."
+export async function checkServerDepsReady(): Promise<boolean> {
+  const py = getAntonToolPython();
+  if (!fileExists(py)) return false;
+  // One-liner: try every import. We don't care about per-package
+  // diagnostics here — that's runInstaller's verify step's job.
+  // Just answer "all good" or "needs setup."
+  const importExpr = SERVER_PYTHON_DEPS
+    .map((d) => `import ${d.importName}`)
+    .join('; ');
+  return new Promise<boolean>((resolve) => {
+    const env = { ...process.env, PATH: getEnvPath() };
+    const proc = spawn(py, ['-c', importExpr], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+    let resolved = false;
+    const finish = (ok: boolean) => {
+      if (resolved) return;
+      resolved = true;
+      resolve(ok);
+    };
+    proc.on('close', (code) => finish(code === 0));
+    proc.on('error', () => finish(false));
+    // Defensive timeout — a hung interpreter shouldn't pin the boot
+    // flow on this check.
+    setTimeout(() => {
+      if (resolved) return;
+      try { proc.kill('SIGTERM'); } catch {}
+      finish(false);
+    }, 4000);
+  });
+}
+
+// Convenience wrapper used by the boot flow IPC. Returns the full
+// readiness picture so the renderer can branch cleanly: setup is
+// needed when EITHER the CLI binary OR the server deps are missing.
+export async function checkInstallStatus(): Promise<{
+  antonInstalled: boolean;
+  serverDepsReady: boolean;
+}> {
+  const antonInstalled = await checkAntonInstalled();
+  // Only probe the deps if the tool itself is present — without it
+  // there's no python interpreter to import from.
+  const serverDepsReady = antonInstalled ? await checkServerDepsReady() : false;
+  return { antonInstalled, serverDepsReady };
+}
+
 export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions): Promise<boolean> {
   const steps = getSteps();
   const shouldAbort = opts?.shouldAbort ?? (() => false);

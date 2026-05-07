@@ -181,7 +181,7 @@ export function reduceStream(state, event, now = Date.now) {
   // label (matches mdb-ai's convention) and `name` as the tab id so
   // multiple cells under the same scratchpad name group together.
   if (role === 'thought.scratchpad.end') {
-    // The server clips content at ~2KB so long cells fail full JSON
+    // The server clips content at 64KB so long cells fail full JSON
     // parse. Fall back to regex-extracting the fields we care about
     // so the step still gets its real label.
     const parsed = safeJsonParse(event.content);
@@ -189,10 +189,23 @@ export function reduceStream(state, event, now = Date.now) {
     const name     = parsed?.name                  ?? extractJsonString(event.content, 'name');
     const code     = parsed?.code                  ?? extractJsonString(event.content, 'code');
     if (!oneLiner && !name && !code) return state;
+    // The .end event is the boundary between reasoning ("LLM
+    // streaming the JSON") and execution ("runtime running it"). We
+    // record executionStartedAt here as a FALLBACK — the canonical
+    // signal is the `phase: scratchpad_start` progress, but that's
+    // not always emitted (replayed historical streams in particular
+    // sometimes drop it). Without this fallback, reasoningMs and
+    // executionMs both stay null and the meta strip shows "—".
+    const ts = now();
+    const last = state.steps[state.steps.length - 1];
+    const executionStartedAt = last?._isScratchpad
+      ? (last.executionStartedAt || ts)
+      : ts;
     const steps = patchLastScratchpadStep(state.steps, {
       label: oneLiner || name || 'Running code',
       data: parsed || { one_line_description: oneLiner, name, code, _truncated: true },
       _scratchpadTabId: name || null,
+      executionStartedAt,
     });
     return { ...state, steps };
   }

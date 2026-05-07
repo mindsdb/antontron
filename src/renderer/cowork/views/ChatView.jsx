@@ -996,7 +996,7 @@ export default function ChatView({
             `marginBottom: 25` shortens the scroll container so the
             chat surface ends with a calm gap above the window edge
             instead of butting flush against it. */}
-        <div ref={scrollRef} data-scroll="true" style={{
+        <div ref={scrollRef} data-scroll="true" className="scroll-clean" style={{
           minHeight: 0, overflowY: 'auto', overflowX: 'hidden',
           padding: '32px 28px 180px',
           marginBottom: 25,

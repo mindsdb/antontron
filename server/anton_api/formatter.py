@@ -142,12 +142,18 @@ async def format_responses_stream(
                 role = Role.thought_recall_end.value
             else:
                 role = Role.thought_progress.value
+            # 64 KB cap — old 2 KB cap routinely chopped scratchpad
+            # JSON mid-`code` field, leaving the desktop renderer with
+            # an unparseable string and the inspector showing "No code
+            # captured for this cell." 64 KB covers every cell we've
+            # seen in practice without bloating the SSE stream or the
+            # persisted turns log.
             seq += 1
             yield _event("response.in_progress", {
                 "type": "response.in_progress",
                 "sequence_number": seq,
                 "thought_role": role,
-                "content": accumulated[:2000],
+                "content": accumulated[:65536],
             })
 
         elif isinstance(event, StreamToolResult):
@@ -156,7 +162,7 @@ async def format_responses_stream(
                 "type": "response.in_progress",
                 "sequence_number": seq,
                 "thought_role": Role.thought_scratchpad_result.value,
-                "content": event.content[:2000],
+                "content": event.content[:65536],
                 "tool_name": getattr(event, "name", "") or "",
                 "tool_action": getattr(event, "action", "") or "",
             })

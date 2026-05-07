@@ -8,7 +8,7 @@
 // Code is syntax-highlighted via prism (CodeBlock component) and uses
 // JetBrains Mono for the editor font. Theme follows body[data-theme].
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
 import Ico from '../Icons';
 import { CodeBlock } from './CodeBlock';
@@ -28,17 +28,33 @@ function detectLanguage(data) {
   return 'python';
 }
 
+// Synthetic group key for cells that arrived without a
+// _scratchpadTabId — usually the LLM emitted the tool call without a
+// `name` field (or the JSON was truncated mid-stream and the field
+// was lost). Bucketing all of them under one tab keeps the strip
+// from fragmenting into a row of one-cell pads, and the per-cell
+// `step x/y` counter reflects the position within this single
+// group rather than 1/1 over and over.
+const UNNAMED_TAB_KEY = '__unnamed__';
+
 export function ScratchpadModal({ open, onClose, steps = [], focusStepId = null }) {
-  // Group cells by tab id (anton's `name`). Cells without a tab id
-  // stand alone with synthetic ids so they each get their own tab.
+  // Group cells by their canonical tab id (anton's `name` field).
+  // Trim + validate so the empty string and whitespace-only strings
+  // don't silently land in a "" group. Unnamed cells flow into a
+  // single UNNAMED_TAB_KEY bucket so we never split one logical
+  // pad across multiple tabs.
   const tabs = useMemo(() => {
     const byTab = new Map();
-    let standaloneCounter = 0;
     for (const s of steps) {
       if (!s._isScratchpad) continue;
-      const id = s._scratchpadTabId || `standalone-${++standaloneCounter}`;
-      if (!byTab.has(id)) byTab.set(id, { id, name: id, cells: [] });
-      byTab.get(id).cells.push(s);
+      const raw = s._scratchpadTabId;
+      const tabId = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+      const key = tabId || UNNAMED_TAB_KEY;
+      const displayName = tabId || 'Untitled';
+      if (!byTab.has(key)) {
+        byTab.set(key, { id: key, name: displayName, cells: [] });
+      }
+      byTab.get(key).cells.push(s);
     }
     return [...byTab.values()];
   }, [steps]);
@@ -46,7 +62,11 @@ export function ScratchpadModal({ open, onClose, steps = [], focusStepId = null 
   const focusTabId = useMemo(() => {
     if (!focusStepId) return tabs[0]?.id;
     const focused = steps.find((s) => s.id === focusStepId);
-    return focused?._scratchpadTabId || tabs[0]?.id;
+    if (!focused) return tabs[0]?.id;
+    const raw = focused._scratchpadTabId;
+    const trimmed = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+    const key = trimmed || UNNAMED_TAB_KEY;
+    return tabs.find((t) => t.id === key)?.id || tabs[0]?.id;
   }, [focusStepId, steps, tabs]);
 
   const [activeTabId, setActiveTabId] = useState(focusTabId);
@@ -72,15 +92,13 @@ export function ScratchpadModal({ open, onClose, steps = [], focusStepId = null 
     >
       <div className="flex h-[82vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl">
 
-        {/* Modal header */}
-        <div className="flex flex-none items-center justify-between border-b border-line px-5 py-3">
-          <div className="flex items-center gap-2">
+        {/* Modal header — title + close. Per-cell `step x/y` already
+            says the count, so we don't repeat it here. */}
+        <div className="flex flex-none items-center justify-between border-b border-line px-5 py-3.5">
+          <div className="flex items-center gap-2.5">
             <span className="inline-flex text-ink-3">{Ico.code(15)}</span>
-            <span className="font-display text-[13px] font-semibold uppercase tracking-wider text-ink">
+            <span className="font-display text-[15px] font-semibold tracking-tight text-ink">
               Scratchpad
-            </span>
-            <span className="font-mono text-[11px] text-ink-4">
-              {tabs.length} pad{tabs.length === 1 ? '' : 's'} · {activeTab?.cells.length || 0} step{activeTab?.cells.length === 1 ? '' : 's'}
             </span>
           </div>
           <button
@@ -93,24 +111,40 @@ export function ScratchpadModal({ open, onClose, steps = [], focusStepId = null 
           </button>
         </div>
 
-        {/* Tab strip — only when more than one pad */}
+        {/* Tab strip — only when more than one pad. Bottom-border
+            underline indicator instead of pill buttons; matches the
+            segmented-control language used elsewhere in the app
+            (e.g. the connector picker's filter row). Each tab shows
+            the pad name + a small count badge so the user can see
+            the cell distribution at a glance. */}
         {tabs.length > 1 && (
-          <div className="flex flex-none gap-1 overflow-x-auto border-b border-line bg-surface-2 px-3 py-2">
-            {tabs.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setActiveTabId(t.id)}
-                className={clsx(
-                  'flex-none cursor-pointer rounded-md border px-3 py-1 font-mono text-[11px] tracking-wider',
-                  t.id === activeTabId
-                    ? 'border-accent bg-accent text-white'
-                    : 'border-line bg-surface text-ink-2 hover:bg-surface-3'
-                )}
-              >
-                {t.name}
-              </button>
-            ))}
+          <div className="flex flex-none gap-1 overflow-x-auto border-b border-line bg-surface px-2">
+            {tabs.map((t) => {
+              const active = t.id === activeTabId;
+              return (
+                <button
+                  key={t.id}
+                  type="button"
+                  onClick={() => setActiveTabId(t.id)}
+                  className={clsx(
+                    'relative flex flex-none cursor-pointer items-center gap-2 px-3 py-2.5',
+                    'font-display text-[12.5px] font-medium tracking-tight',
+                    'transition-colors',
+                    active ? 'text-ink' : 'text-ink-3 hover:text-ink-2'
+                  )}
+                >
+                  <span className="truncate max-w-[180px]" title={t.name}>{t.name}</span>
+                  <span className={clsx(
+                    'inline-flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5',
+                    'font-mono text-[10.5px] font-medium tabular-nums',
+                    active ? 'bg-accent/15 text-accent' : 'bg-surface-2 text-ink-4'
+                  )}>{t.cells.length}</span>
+                  {active && (
+                    <span className="absolute inset-x-2 -bottom-px h-[2px] rounded-full bg-accent" />
+                  )}
+                </button>
+              );
+            })}
           </div>
         )}
 
@@ -122,6 +156,7 @@ export function ScratchpadModal({ open, onClose, steps = [], focusStepId = null 
               cell={cell}
               index={i + 1}
               total={activeTab.cells.length}
+              focused={cell.id === focusStepId}
             />
           ))}
           {(!activeTab || activeTab.cells.length === 0) && (
@@ -133,10 +168,39 @@ export function ScratchpadModal({ open, onClose, steps = [], focusStepId = null 
   );
 }
 
-function CellView({ cell, index, total }) {
+function CellView({ cell, index, total, focused = false }) {
   const [showCode, setShowCode] = useState(false);
+  const containerRef = useRef(null);
   const data = cell.data || {};
-  const code = data.code || '';
+
+  // When the modal opens with this cell as the click target,
+  // scroll it into view inside the cells column and briefly
+  // highlight its left border so the user knows which cell their
+  // click landed on. Only fires when `focused` flips true; the
+  // highlight auto-clears after ~1.6s.
+  const [highlight, setHighlight] = useState(false);
+  useEffect(() => {
+    if (!focused) return undefined;
+    const node = containerRef.current;
+    if (!node) return undefined;
+    const id = requestAnimationFrame(() => {
+      try { node.scrollIntoView({ block: 'start', behavior: 'smooth' }); }
+      catch { node.scrollIntoView(); }
+    });
+    setHighlight(true);
+    const t = setTimeout(() => setHighlight(false), 1600);
+    return () => { cancelAnimationFrame(id); clearTimeout(t); };
+  }, [focused]);
+  // The cell's input event (.end) and result event (.result) BOTH
+  // carry the source code. Server clips long tool events at 64 KB —
+  // for the rare cell that exceeds that, one of the two fields may
+  // still hold a parseable copy. Try data.code first (canonical),
+  // then result.code (sent with stdout/stderr), then result.input.code.
+  const code =
+       data.code
+    || cell.result?.code
+    || cell.result?.input?.code
+    || '';
   const stdout = cell.output || cell.result?.stdout || '';
   const stderr = cell.stderr || cell.result?.stderr || '';
   const reasoningMs =
@@ -154,37 +218,59 @@ function CellView({ cell, index, total }) {
   useEffect(() => { if (hasErr) setShowCode(true); }, [hasErr]);
 
   return (
-    <div className="border-b border-line px-6 py-5 last:border-b-0">
-      {/* Step header */}
-      <div className="flex items-baseline justify-between gap-3">
+    <div
+      ref={containerRef}
+      className={clsx(
+        'border-b border-line py-5 last:border-b-0',
+        // Inset the card 4px so the highlight bar can sit at the
+        // exact left edge of the cell when focused. Padding stays
+        // consistent in both states.
+        'pl-6 pr-6',
+        // Subtle accent left-border that fades out — visible cue for
+        // "this is the cell you clicked." Transparent border preserves
+        // layout so non-focused cells don't shift.
+        'border-l-2',
+        highlight ? 'border-l-accent bg-surface-2' : 'border-l-transparent',
+        'transition-colors duration-700',
+      )}
+    >
+      {/* Step header — `step x/y` badge on the left, then a stacked
+          column with the description + timing meta. The meta strip
+          sits in the same column so reason/exec align under the
+          description text rather than under the step badge. */}
+      <div className="flex items-start justify-between gap-3">
         <div className="flex min-w-0 items-baseline gap-3">
-          <span className="font-mono text-[10.5px] tracking-wider text-ink-4">
+          <span className="font-mono text-[10.5px] tracking-wider text-ink-4 flex-none">
             step {index}/{total}
           </span>
-          <span className="truncate font-display text-[14px] font-semibold tracking-tight text-ink">
-            {data.one_line_description || cell.label || 'Untitled'}
-          </span>
+          <div className="min-w-0 flex flex-col gap-1">
+            <span className="truncate font-display text-[14px] font-semibold tracking-tight text-ink">
+              {data.one_line_description || cell.label || 'Untitled'}
+            </span>
+            {/* Always render reason + exec, even when timing data is
+                missing — a "—" placeholder reads as "no data" without
+                the meta strip going missing entirely. */}
+            <div className="flex items-center gap-3 font-mono text-[10.5px] text-ink-4">
+              <span>reason: <span className="text-ink-3">{fmtMs(reasoningMs) ?? '—'}</span></span>
+              <span>exec: <span className="text-ink-3">{fmtMs(executionMs) ?? '—'}</span></span>
+            </div>
+          </div>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowCode((v) => !v)}
-          className={clsx(
-            'flex flex-none cursor-pointer items-center gap-1 rounded-md border border-line px-2 py-1',
-            'font-mono text-[10.5px] tracking-wider',
-            showCode ? 'bg-accent text-white border-accent' : 'bg-transparent text-ink-3 hover:bg-surface-2 hover:text-ink'
-          )}
-        >
-          {showCode ? 'Hide code' : 'Show code'}
-        </button>
-      </div>
-
-      {/* Meta strip — timing + packages only. No `action` chip; the
-          one-line description above already says what the step does. */}
-      <div className="mt-1 flex items-center gap-3 font-mono text-[10.5px] text-ink-4">
-        {fmtMs(reasoningMs) && <span>reason: <span className="text-ink-3">{fmtMs(reasoningMs)}</span></span>}
-        {fmtMs(executionMs) && <span>exec: <span className="text-ink-3">{fmtMs(executionMs)}</span></span>}
-        {Array.isArray(data.packages) && data.packages.length > 0 && (
-          <span>pkgs: <span className="text-ink-3">{data.packages.join(', ')}</span></span>
+        {code && (
+          <button
+            type="button"
+            onClick={() => setShowCode((v) => !v)}
+            className={clsx(
+              'flex flex-none cursor-pointer items-center gap-1 rounded-md px-2 py-1',
+              'font-body text-[11.5px] font-medium',
+              'transition-colors',
+              showCode
+                ? 'bg-surface-2 text-ink hover:bg-surface-3'
+                : 'text-ink-3 hover:text-ink hover:bg-surface-2'
+            )}
+          >
+            {showCode ? 'Hide code' : 'Show code'}
+          </button>
         )}
       </div>
 
@@ -198,14 +284,29 @@ function CellView({ cell, index, total }) {
         </pre>
       )}
 
-      {/* Code + stderr — revealed by the toggle */}
+      {/* Code + stderr — revealed by the toggle (or auto-revealed
+          when there's an error). The Code section only renders when
+          we actually have code; otherwise we'd print "No code
+          captured" above the stderr block, which adds nothing. */}
       {showCode && (
         <>
-          <Section label="Code">
-            {code
-              ? <div className="overflow-hidden rounded-md border border-line"><CodeBlock code={code} language={language} /></div>
-              : <p className="font-body text-[12.5px] italic text-ink-4">No code captured for this cell.</p>}
-          </Section>
+          {code && (
+            <Section
+              label="Code"
+              right={Array.isArray(data.packages) && data.packages.length > 0 ? (
+                <span
+                  className="font-mono text-[10.5px] text-ink-4 truncate max-w-[60%]"
+                  title={data.packages.join(', ')}
+                >
+                  pkgs: <span className="text-ink-3">{data.packages.join(', ')}</span>
+                </span>
+              ) : null}
+            >
+              <div className="overflow-hidden rounded-md border border-line">
+                <CodeBlock code={code} language={language} />
+              </div>
+            </Section>
+          )}
 
           {hasErr && (
             <Section label="Stderr">
@@ -220,15 +321,18 @@ function CellView({ cell, index, total }) {
   );
 }
 
-function Section({ label, muted = false, children }) {
+function Section({ label, muted = false, right, children }) {
   return (
     <div className="mt-4 flex flex-col gap-1.5">
-      <span className={clsx(
-        'font-display text-[10.5px] font-semibold uppercase tracking-widest',
-        muted ? 'text-ink-4 opacity-60' : 'text-ink-4'
-      )}>
-        {label}
-      </span>
+      <div className="flex items-baseline justify-between gap-3">
+        <span className={clsx(
+          'font-display text-[10.5px] font-semibold uppercase tracking-widest',
+          muted ? 'text-ink-4 opacity-60' : 'text-ink-4'
+        )}>
+          {label}
+        </span>
+        {right}
+      </div>
       {children}
     </div>
   );
