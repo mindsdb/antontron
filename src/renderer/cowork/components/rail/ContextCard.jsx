@@ -107,8 +107,7 @@ function sessionAttachmentIsOpenable(item) {
 
 function SessionAttachmentRow({ item, onOpen, openable }) {
   const label = item.name || item.id || 'Attachment';
-  const sub = item.textPreview
-    || (item.mime ? String(item.mime).split('/').pop() : '')
+  const sub = (item.mime ? String(item.mime).split('/').pop() : '')
     || (item.size ? `${Math.ceil(item.size / 1024)} KB` : '');
   const when = item.updatedAt || item.createdAt;
   const title = item.note || item.textPreview || label;
@@ -205,7 +204,16 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
     }
     const text = (item.text && String(item.text)) || (item.textPreview && String(item.textPreview)) || '';
     if (text.trim()) {
-      setReadOnlySnippet({ title: item.name || item.id || 'Attachment', text });
+      const subtitle = item.kind === 'connector'
+        ? 'Connector'
+        : item.kind === 'url'
+          ? 'Link'
+          : 'Snippet';
+      setReadOnlySnippet({
+        title: item.name || item.id || 'Attachment',
+        text,
+        subtitle,
+      });
     }
   }, []);
 
@@ -314,6 +322,15 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
   const totalMemoryFiles = useMemo(() => ordered.reduce((n, s) => n + s.files.length, 0), [ordered]);
   const hasProjectFiles = projectFiles.length > 0;
 
+  const sessionFileAttachments = useMemo(
+    () => sessionAttachments.filter((a) => a.kind === 'file'),
+    [sessionAttachments],
+  );
+  const sessionConnectorAttachments = useMemo(
+    () => sessionAttachments.filter((a) => a.kind !== 'file'),
+    [sessionAttachments],
+  );
+
   const blockGlobalEmpty = totalMemoryFiles === 0 && !hasProjectFiles && !sessionRelevant;
 
   if (blockGlobalEmpty) {
@@ -343,10 +360,7 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
       )}
 
       {sessionRelevant && (
-        <div className="flex flex-col gap-0.5">
-          <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
-            Uploads
-          </span>
+        <div className="flex flex-col gap-3">
           {attachmentsLoading && (
             <p className="text-[12px] text-ink-4 px-1 pb-0.5">Loading attachments…</p>
           )}
@@ -355,20 +369,49 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
               {attachmentsError}
             </p>
           )}
-          {!attachmentsLoading && !attachmentsError && sessionAttachments.length === 0 && (
-            <p className="text-[12px] text-ink-4 px-1 pb-0.5">
-              No files attached to this task yet.
-            </p>
+
+          {!attachmentsLoading && !attachmentsError && (
+            <>
+              <div className="flex flex-col gap-0.5">
+                <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
+                  Uploads
+                </span>
+                {sessionFileAttachments.length === 0 ? (
+                  <p className="text-[12px] text-ink-4 px-1 pb-0.5">
+                    No file uploads for this task.
+                  </p>
+                ) : (
+                  sessionFileAttachments.map((item) => (
+                    <SessionAttachmentRow
+                      key={item.id}
+                      item={item}
+                      openable={sessionAttachmentIsOpenable(item)}
+                      onOpen={() => handleOpenSessionAttachment(item)}
+                    />
+                  ))
+                )}
+              </div>
+
+              <div className="flex flex-col gap-0.5">
+                <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
+                  Connectors
+                </span>
+                {sessionConnectorAttachments.length === 0 ? (
+                  <p className="text-[12px] text-ink-4 px-1 pb-0.5">
+                    No connectors for this task.
+                  </p>
+                ) : (
+                  sessionConnectorAttachments.map((item) => (
+                    <SessionAttachmentRow
+                      key={item.id}
+                      item={item}
+                      openable={false}
+                    />
+                  ))
+                )}
+              </div>
+            </>
           )}
-          {!attachmentsLoading
-            && sessionAttachments.map((item) => (
-              <SessionAttachmentRow
-                key={item.id}
-                item={item}
-                openable={sessionAttachmentIsOpenable(item)}
-                onOpen={() => handleOpenSessionAttachment(item)}
-              />
-            ))}
         </div>
       )}
 
@@ -460,7 +503,7 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
       <ContextFileModal
         open={!!readOnlySnippet}
         title={readOnlySnippet?.title}
-        subtitle="Upload"
+        subtitle={readOnlySnippet?.subtitle ?? 'Snippet'}
         initialContent={readOnlySnippet?.text ?? ''}
         readOnly
         dense
