@@ -1,7 +1,7 @@
 // Live working-folder card body.
 //
 // - Orphans resolve active project name → full { name, path } via projects list.
-// - Loads files from GET /v1/projects/{name}/files (excludes `.context/`).
+// - Loads files from GET /v1/projects/{name}/files (excludes `.context/` + `.anton/`).
 // - Polls every 3s while streaming, plus once when streaming ends.
 // - Highlights rows using mtime vs stream start and “live” (recent write).
 // - Click → HTML opens in-app viewer; other types → OS openPath.
@@ -12,6 +12,7 @@ import Ico from '../Icons';
 import {
   fetchActiveProject,
   fetchProjects,
+  isUnderAntonDir,
   isUnderContextDir,
   listProjectFiles,
 } from '../../api';
@@ -99,7 +100,7 @@ export function WorkingFolderLive({ project, isStreaming, streamStartedAt }) {
       const data = await listProjectFiles(proj.name);
       const list = Array.isArray(data?.files) ? data.files : [];
       const next = list
-        .filter((f) => !f.is_dir && !isUnderContextDir(f.path))
+        .filter((f) => !f.is_dir && !isUnderContextDir(f.path) && !isUnderAntonDir(f.path))
         .map((f) => fileEntryToRow(proj.path, f))
         .sort((a, b) => (b.updated || 0) - (a.updated || 0))
         .slice(0, 12);

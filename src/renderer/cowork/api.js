@@ -388,6 +388,12 @@ export function isUnderContextDir(relPath) {
   return r === '.context' || r.startsWith('.context/');
 }
 
+/** True if `relPath` is under the project `.anton/` tree (runtime state, outputs, etc.). */
+export function isUnderAntonDir(relPath) {
+  const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return r === '.anton' || r.startsWith('.anton/');
+}
+
 export async function listProjectFiles(projectName) {
   if (!projectName) return { files: [] };
   return req(`/projects/${enc(projectName)}/files`);
