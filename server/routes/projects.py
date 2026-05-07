@@ -8,8 +8,8 @@ Mirrors the original antontron IPC handlers (src/main/index.ts):
   PATCH  /v1/projects/{name}                → rename
   DELETE /v1/projects/{name}                → delete
 
-Project file CRUD (the "context" directory each project owns —
-`anton.md` plus any user-uploaded reference docs):
+Project file CRUD (files live at the project root; `anton.md` alone is
+stored under `.context/` and exposed in the API as `anton.md`):
   GET    /v1/projects/{name}/files          → list files
   GET    /v1/projects/{name}/files/{path}   → read file body (text)
   PUT    /v1/projects/{name}/files/{path}   → write/replace file body
@@ -147,6 +147,10 @@ def _context_dir(project_name: str) -> Path:
     return ctx
 
 
+def _anton_md_disk_path(project_name: str) -> Path:
+    return _context_dir(project_name) / ANTON_INSTRUCTIONS_FILENAME
+
+
 def _safe_relpath(rel: str, base: Path) -> Path:
     """Resolve `rel` against `base` and reject any path that escapes
     the base directory (`../`, absolute paths, symlink trickery).
@@ -202,9 +206,11 @@ async def list_project_files(name: str):
         if meta:
             files.append(meta)
 
-    if not any(f["path"] == ANTON_INSTRUCTIONS_FILENAME for f in files):
+    if not any(
+        f["path"] == _anton_md_disk_path(name).relative_to(base).as_posix() for f in files
+    ):
         files.insert(0, {
-            "path":     ANTON_INSTRUCTIONS_FILENAME,
+            "path":     _anton_md_disk_path(name).relative_to(base).as_posix(),
             "name":     ANTON_INSTRUCTIONS_FILENAME,
             "size":     0,
             "modified": None,
@@ -213,7 +219,9 @@ async def list_project_files(name: str):
         })
     else:
         # Surface anton.md first regardless of name sort order.
-        files.sort(key=lambda f: (f["path"] != ANTON_INSTRUCTIONS_FILENAME, f["path"]))
+        files.sort(
+            key=lambda f: (f["path"] != _anton_md_disk_path(name).relative_to(base).as_posix(), f["path"])
+        )
 
     return {"files": files}
 
@@ -226,7 +234,7 @@ async def read_project_file(name: str, path: str):
         # `anton.md` is allowed to be requested before it's been
         # written — return an empty body so the editor can open in
         # author mode. Any other missing path is a 404.
-        if path == ANTON_INSTRUCTIONS_FILENAME:
+        if path == _anton_md_disk_path(name).relative_to(base).as_posix():
             return {"path": path, "content": "", "size": 0, "modified": None}
         raise HTTPException(status_code=404, detail="File not found")
     if target.is_dir():
