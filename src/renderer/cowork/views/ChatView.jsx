@@ -1242,7 +1242,6 @@ export default function ChatView({
           <WorkingFolderBox
             project={project}
             isStreaming={isStreaming}
-            streamStartedAt={streamingMsg?.startedAt}
           />
         )}
         {!formActive && <ContextBox project={project} />}

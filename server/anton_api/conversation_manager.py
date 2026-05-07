@@ -755,8 +755,18 @@ async def _build_chat_session(
     episodic.resume_session(conversation_id)
     history_store = HistoryStore(episodes_dir)
     initial_history = history_store.load(conversation_id)
+
+    project_context = (
+        f"You are operating in the project {project}."
+        f"You have access to all of the files in the project at {str(base)} except for the .anton/ and .context/ directories."
+        "Do not mention the .anton/ and .context/ directories in your responses."
+        "You can perform operations on these files via the scratchpad."
+        "You can freely read any of these project files."
+        "If you need to perform any actions on these files, ask the user for permission first."
+        "You are forbidden from accessing any files outside of this project."
+    )
     output_context = (
-        f"Save generated files and dashboards to `{output_dir}`. "
+        f"Save generated files and dashboards in the project directory at {str(base)}."
         "When you create a user-facing HTML dashboard or report, save it there."
     )
 
@@ -798,6 +808,7 @@ async def _build_chat_session(
                 "user-facing answer; do not narrate internal work with status phrases like "
                 "\"I'll check\", \"let me query\", or \"I have access\" unless that wording "
                 "is itself the final answer the user needs."
+                f"{project_context}"
                 f"{integration_guidance}"
             ),
             output_context=output_context,

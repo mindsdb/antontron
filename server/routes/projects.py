@@ -8,8 +8,8 @@ Mirrors the original antontron IPC handlers (src/main/index.ts):
   PATCH  /v1/projects/{name}                → rename
   DELETE /v1/projects/{name}                → delete
 
-Project file CRUD (the "context" directory each project owns —
-`anton.md` plus any user-uploaded reference docs):
+Project file CRUD (files live at the project root; `anton.md` alone is
+stored under `.context/` and exposed in the API as `anton.md`):
   GET    /v1/projects/{name}/files          → list files
   GET    /v1/projects/{name}/files/{path}   → read file body (text)
   PUT    /v1/projects/{name}/files/{path}   → write/replace file body
@@ -147,6 +147,10 @@ def _context_dir(project_name: str) -> Path:
     return ctx
 
 
+def _anton_md_disk_path(project_name: str) -> Path:
+    return _context_dir(project_name) / ANTON_INSTRUCTIONS_FILENAME
+
+
 def _safe_relpath(rel: str, base: Path) -> Path:
     """Resolve `rel` against `base` and reject any path that escapes
     the base directory (`../`, absolute paths, symlink trickery).
@@ -168,13 +172,23 @@ def _safe_relpath(rel: str, base: Path) -> Path:
     return candidate
 
 
-def _file_meta(p: Path, base: Path) -> dict[str, Any]:
-    """Compact descriptor for the listing response."""
+def _file_meta(p: Path, base: Path) -> dict[str, Any] | None:
+    """Compact descriptor for the listing response.
+
+    Skips entries whose resolved path is not under `base` (e.g. symlinks
+    that point outside the project — `rglob` + `resolve()` would otherwise
+    raise ValueError in `relative_to`).
+    """
     try:
         st = p.stat()
     except FileNotFoundError:
-        return None  # type: ignore[return-value]
-    rel = p.resolve().relative_to(base.resolve())
+        return None
+    try:
+        resolved = p.resolve()
+        base_resolved = base.resolve()
+        rel = resolved.relative_to(base_resolved)
+    except ValueError:
+        return None
     return {
         "path":     str(rel).replace("\\", "/"),
         "name":     p.name,
@@ -193,7 +207,7 @@ async def list_project_files(name: str):
     can render it as "empty, click to author" instead of having to
     branch on its absence.
     """
-    base = _context_dir(name)
+    base = _project_dir(name)
     files: list[dict[str, Any]] = []
     for p in sorted(base.rglob("*")):
         if p.is_dir():
@@ -202,9 +216,11 @@ async def list_project_files(name: str):
         if meta:
             files.append(meta)
 
-    if not any(f["path"] == ANTON_INSTRUCTIONS_FILENAME for f in files):
+    if not any(
+        f["path"] == _anton_md_disk_path(name).relative_to(base).as_posix() for f in files
+    ):
         files.insert(0, {
-            "path":     ANTON_INSTRUCTIONS_FILENAME,
+            "path":     _anton_md_disk_path(name).relative_to(base).as_posix(),
             "name":     ANTON_INSTRUCTIONS_FILENAME,
             "size":     0,
             "modified": None,
@@ -213,20 +229,22 @@ async def list_project_files(name: str):
         })
     else:
         # Surface anton.md first regardless of name sort order.
-        files.sort(key=lambda f: (f["path"] != ANTON_INSTRUCTIONS_FILENAME, f["path"]))
+        files.sort(
+            key=lambda f: (f["path"] != _anton_md_disk_path(name).relative_to(base).as_posix(), f["path"])
+        )
 
     return {"files": files}
 
 
 @router.get("/{name}/files/{path:path}")
 async def read_project_file(name: str, path: str):
-    base = _context_dir(name)
+    base = _project_dir(name)
     target = _safe_relpath(path, base)
     if not target.exists():
         # `anton.md` is allowed to be requested before it's been
         # written — return an empty body so the editor can open in
         # author mode. Any other missing path is a 404.
-        if path == ANTON_INSTRUCTIONS_FILENAME:
+        if path == _anton_md_disk_path(name).relative_to(base).as_posix():
             return {"path": path, "content": "", "size": 0, "modified": None}
         raise HTTPException(status_code=404, detail="File not found")
     if target.is_dir():
@@ -248,7 +266,7 @@ async def read_project_file(name: str, path: str):
 
 @router.put("/{name}/files/{path:path}")
 async def write_project_file(name: str, path: str, req: FileWriteRequest):
-    base = _context_dir(name)
+    base = _project_dir(name)
     target = _safe_relpath(path, base)
     if target.exists() and target.is_dir():
         raise HTTPException(status_code=400, detail="Path is a directory")
@@ -274,7 +292,7 @@ async def upload_project_files(
     its original filename (sanitised). Returns a per-file result so
     the caller can tell which uploads succeeded.
     """
-    base = _context_dir(name)
+    base = _project_dir(name)
     results: list[dict[str, Any]] = []
     for f in files:
         if not f.filename:
@@ -305,7 +323,7 @@ async def upload_project_files(
 
 @router.delete("/{name}/files/{path:path}")
 async def delete_project_file(name: str, path: str):
-    base = _context_dir(name)
+    base = _project_dir(name)
     target = _safe_relpath(path, base)
     if not target.exists():
         raise HTTPException(status_code=404, detail="File not found")

@@ -371,16 +371,33 @@ export async function deleteProject(name) {
   return res.json();
 }
 
-// ── Project files (context dir) ─────────────────────────────────
+// ── Project files ────────────────────────────────────────────────
 //
-// Each project has a `.context/` subdirectory the user fills with
-// reference docs (anton.md being the always-present working
-// instructions). These helpers wrap the GET/PUT/POST/DELETE
-// endpoints in routes/projects.py so the renderer can list, read,
-// edit, upload, and remove files without mixing fetch boilerplate
-// into every component that touches them.
+// Most paths are relative to the project root. Project instructions
+// live at ANTON_PROJECT_INSTRUCTIONS_PATH (on disk: `.context/anton.md`).
+// These helpers wrap routes/projects.py.
 
 const enc = encodeURIComponent;
+
+/** Relative path from project root for LLM instructions (projects file API). */
+export const ANTON_PROJECT_INSTRUCTIONS_PATH = '.context/anton.md';
+
+/** True if `relPath` is under the project `.context/` tree (listing paths from GET …/files). */
+export function isUnderContextDir(relPath) {
+  const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return r === '.context' || r.startsWith('.context/');
+}
+
+/** True if `relPath` is under the project `.anton/` tree (runtime state, outputs, etc.). */
+export function isUnderAntonDir(relPath) {
+  const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return r === '.anton' || r.startsWith('.anton/');
+}
+
+export async function listProjectFiles(projectName) {
+  if (!projectName) return { files: [] };
+  return req(`/projects/${enc(projectName)}/files`);
+}
 
 export async function readProjectFile(projectName, path) {
   // `path` may have slashes — encode each segment, not the whole
@@ -758,15 +775,6 @@ export async function createSnippetAttachment(payload) {
 
 export async function createUrlAttachment(payload) {
   return req('/attachments/url', { method: 'POST', body: JSON.stringify(payload) });
-}
-
-export async function fetchProjectFiles(projectPath, query = '') {
-  const params = new URLSearchParams({ project_path: projectPath, q: query });
-  return req(`/attachments/project-files?${params.toString()}`);
-}
-
-export async function attachProjectFile(payload) {
-  return req('/attachments/project-file', { method: 'POST', body: JSON.stringify(payload) });
 }
 
 export async function deleteAttachment(id) {
