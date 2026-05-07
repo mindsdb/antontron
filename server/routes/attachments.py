@@ -16,8 +16,6 @@ from .cowork_state import attachments_dir, load_state, save_state, utc_now_iso
 
 router = APIRouter(prefix="/v1/attachments", tags=["attachments"])
 
-TEXT_LIMIT = 120_000
-
 
 class SnippetAttachmentRequest(BaseModel):
     title: str = Field(default="Snippet", max_length=160)
@@ -85,8 +83,16 @@ def attachment_context(ids: list[str] | None) -> str:
             header_bits.append(item["source"])
         header = f"### {item.get('name') or item['id']} ({'; '.join(header_bits)})"
         sections.append(header)
-        path = f"File path: {item['path']}"
-        sections.append(path)
+
+        # path is only set for files, where it includes the path to the file.
+        if item.get("path"):
+            path = f"File path: {item['path']}"
+            sections.append(path)
+
+        # text is only set for snippets, where it includes instructions for use.
+        if item.get("text"):
+            text = f"Instructions: {item['text']}"
+            sections.append(text)
 
     return "\n\n".join(sections)
 
