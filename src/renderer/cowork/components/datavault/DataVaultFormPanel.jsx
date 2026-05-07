@@ -21,15 +21,17 @@ import {
   clearForm, getForm, patchForm, subscribe,
   getSelectedMethod, subscribeSelectedMethod, setSelectedMethod,
 } from './formStore';
-import { saveConnector, startGoogleDriveAuth, startGoogleCalendarAuth, fetchIntegrations, fetchDatasources } from '../../api';
+import { saveConnector, startGoogleDriveAuth, startGoogleCalendarAuth, startGmailAuth, fetchIntegrations, fetchDatasources } from '../../api';
 
 const BROWSER_OAUTH_START = {
   google_drive: startGoogleDriveAuth,
   google_calendar: startGoogleCalendarAuth,
+  gmail: startGmailAuth,
 };
 const BROWSER_OAUTH_TITLE = {
   google_drive: 'Google Drive connected',
   google_calendar: 'Google Calendar connected',
+  gmail: 'Gmail connected',
 };
 import { submitDataVaultForm } from '../../api';
 

@@ -9,15 +9,24 @@
   "logo_color": "#EA4335",
   "form": {
     "form_id": "gmail-connector",
+    "engine": "gmail",
     "title": "Connect Gmail",
     "subtitle": "Authorize Anton to read and send mail on your behalf.",
     "logo": "mail",
     "logo_color": "#EA4335",
     "methods": [
       {
+        "id": "browser_oauth_builtin",
+        "label": "In-Browser Connect",
+        "description": "Opens Google sign-in in your browser. No credentials required — just click Connect.",
+        "recommended": true,
+        "fields": []
+      },
+      {
         "id": "oauth",
         "label": "Sign in with Google",
         "description": "OAuth 2.0 — a browser pops open for you to grant Anton scoped access. No passwords stored, revocable from your Google Account at any time. Currently requires you to bring your own Google Cloud OAuth client (steps below); we'll switch to a hosted client in a future release.",
+        "recommended": false,
         "submit_action": "oauth_launch",
         "oauth": {
           "auth_url": "https://accounts.google.com/o/oauth2/v2/auth",
@@ -56,7 +65,7 @@
         "id": "app-password",
         "label": "App password",
         "description": "A Google-issued 16-character password. Works without setting up a Google Cloud OAuth client — just enable 2-Step Verification, generate the code, and paste it. Simplest path for personal Gmail accounts.",
-        "recommended": true,
+        "recommended": false,
         "how_to": "## Generate a Gmail app password\n\nApp passwords are 16-character codes Google issues for apps that don't run a full OAuth flow. They only work when **2-Step Verification is enabled** on the account.\n\n### Steps\n\n1. Open your [Google Account → Security page](https://myaccount.google.com/security).\n2. Confirm **2-Step Verification** is on. If it isn't, enable it first.\n3. Open the [App passwords](https://myaccount.google.com/apppasswords) panel.\n4. Type a name like `Anton` and click **Create**.\n5. Google shows a 16-character code in a yellow box. Copy it (spaces are optional — Anton strips them).\n6. Paste the code into the **App password** field below and use your full Gmail address as the **Email**.\n\n### Notes\n\n- App passwords work even with Advanced Protection on, but a Workspace admin can disable them per-org. If the panel is missing or greyed out, your account doesn't allow them — try **Sign in with Google** or **Service account** instead.\n- The code is shown once. If you lose it, just generate a new one — Anton can swap it without any other steps.\n- Read [Google's official guide](https://support.google.com/accounts/answer/185833) for the full background.\n",
         "help_url": "https://support.google.com/accounts/answer/185833",
         "fields": [
