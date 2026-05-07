@@ -9,6 +9,7 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
+import { checkPythonImports, getAntonToolPython, getPythonUtf8Env } from './server-deps';
 
 const DEFAULT_PORT = 26866; // ANTON on T9 keypad
 const SERVER_HOST = '127.0.0.1';
@@ -45,12 +46,7 @@ export function getServerOrigin(): string {
 }
 
 function getAntonPython(): string | null {
-  const dataHome = process.env.XDG_DATA_HOME ||
-    path.join(os.homedir(), process.platform === 'win32' ? 'AppData/Roaming' : '.local/share');
-  const candidate = path.join(
-    dataHome, 'uv', 'tools', 'anton',
-    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
-  );
+  const candidate = getAntonToolPython();
   return fs.existsSync(candidate) ? candidate : null;
 }
 
@@ -129,6 +125,20 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     };
   }
 
+  const baseEnv = {
+    ...process.env,
+    PATH: getEnvPath(),
+    ...getPythonUtf8Env(),
+  };
+  const depsReady = await checkPythonImports(pythonCmd, baseEnv);
+  if (!depsReady) {
+    lastStartError = 'Anton server dependencies are missing from the uv tool environment. Run the installer to repair the Anton tool venv.';
+    return {
+      ok: false,
+      reason: lastStartError,
+    };
+  }
+
   const serverDir = getServerDir();
   if (!fs.existsSync(path.join(serverDir, 'main.py'))) {
     lastStartError = `Server source not found at ${serverDir}/main.py`;
@@ -140,8 +150,7 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
 
   pendingStart = (async (): Promise<StartServerResult> => {
     const env = {
-      ...process.env,
-      PATH: getEnvPath(),
+      ...baseEnv,
       PYTHONUNBUFFERED: '1',
       ANTON_SERVER_PORT: String(serverPort),
       ANTON_SERVER_HOST: SERVER_HOST,
