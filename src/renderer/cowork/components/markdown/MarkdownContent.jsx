@@ -74,31 +74,40 @@ function _normalizeFormFences(text) {
 // comments whose body looks like one or more `key:value` pairs (e.g.
 // `topic:foo`, `ts:2026-02-27`, `source:consolidation`). Plain
 // authorship comments like `<!-- TODO -->` or `<!-- not sure -->`
-// pass through untouched and continue to be filtered by the parser.
-const _ENGRAM_COMMENT_RE = /<!--\s*((?:[a-z][a-z0-9_-]*:[^\s<>]+\s*)+)-->/gi;
+// are stripped by the second pass in `_renderEngramComments`.
+// Rewritten to avoid nested quantifiers that cause catastrophic backtracking (ReDoS).
+// Requires at least one key:value pair, with additional pairs separated by required
+// whitespace — no \s* inside the repeating group.
+const _ENGRAM_COMMENT_RE = /<!--\s*([a-z][a-z0-9_-]*:[^\s<>]+(?:\s+[a-z][a-z0-9_-]*:[^\s<>]+)*)\s*-->/gi;
 
 function _renderEngramComments(text) {
   if (!text || typeof text !== 'string') return text;
-  return text.replace(_ENGRAM_COMMENT_RE, (_full, body) => {
-    const pairs = body.trim().split(/\s+/);
-    const chips = pairs
-      .map((pair) => {
-        const idx = pair.indexOf(':');
-        if (idx <= 0) return '';
-        const key = pair.slice(0, idx);
-        const val = pair.slice(idx + 1);
-        // The link text is what the user sees; the href carries the
-        // engram scheme so the renderer can distinguish it from real
-        // links. Encode the value so spaces / special chars don't
-        // break the URL portion.
-        return `[${key}: ${val}](engram:${encodeURIComponent(val)}?k=${encodeURIComponent(key)})`;
+  return (
+    text
+      .replace(_ENGRAM_COMMENT_RE, (_full, body) => {
+        const pairs = body.trim().split(/\s+/);
+        const chips = pairs
+          .map((pair) => {
+            const idx = pair.indexOf(':');
+            if (idx <= 0) return '';
+            const key = pair.slice(0, idx);
+            const val = pair.slice(idx + 1);
+            // The link text is what the user sees; the href carries the
+            // engram scheme so the renderer can distinguish it from real
+            // links. Encode the value so spaces / special chars don't
+            // break the URL portion.
+            return `[${key}: ${val}](engram:${encodeURIComponent(val)}?k=${encodeURIComponent(key)})`;
+          })
+          .filter(Boolean)
+          .join(' ');
+        // Leading space keeps the chip from glomming onto the preceding
+        // word; if there are no usable pairs we drop the comment entirely.
+        return chips ? ` ${chips}` : '';
       })
-      .filter(Boolean)
-      .join(' ');
-    // Leading space keeps the chip from glomming onto the preceding
-    // word; if there are no usable pairs we drop the comment entirely.
-    return chips ? ` ${chips}` : '';
-  });
+      // Strip any remaining HTML comment sequences that were not converted
+      // to engram chips, to prevent HTML injection in downstream renderers.
+      .replace(/<!--[\s\S]*?-->/g, '')
+  );
 }
 
 // Density-scoped class strings. `dense` halves the rhythm and shaves
