@@ -367,13 +367,52 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
             {Ico.doc(18)}
           </span>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <div id="artifact-viewer-title" style={{
-              fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 15,
-              color: 'var(--ink)',
-              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-            }}>
-              {artifact.title || artifact.path?.split('/').pop()}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>
+              <div id="artifact-viewer-title" style={{
+                fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 15,
+                color: 'var(--ink)',
+                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                minWidth: 0, flex: '0 1 auto',
+              }}>
+                {artifact.title || artifact.path?.split('/').pop()}
+              </div>
+              {/* Type pill — small mono tag next to the title, drawn
+                  in the same style as the kind tags on collection
+                  cards. Only shown when the artifact carries a
+                  metadata-declared `type` (legacy artifacts skip). */}
+              {artifact.type && (
+                <span
+                  title={`Artifact type: ${artifact.type}`}
+                  style={{
+                    fontFamily: FONT_MONO, fontSize: 10,
+                    color: 'var(--ink-4)', letterSpacing: '0.08em',
+                    textTransform: 'uppercase',
+                    background: 'var(--surface-2)',
+                    border: '1px solid var(--line)',
+                    padding: '2px 7px', borderRadius: 999,
+                    flexShrink: 0,
+                  }}
+                >{artifact.type}</span>
+              )}
+              {typeof artifact.fileCount === 'number' && artifact.fileCount > 1 && (
+                <span style={{
+                  fontFamily: FONT_MONO, fontSize: 10.5, color: 'var(--ink-4)',
+                  flexShrink: 0,
+                }}>· {artifact.fileCount} files</span>
+              )}
             </div>
+            {/* Description — agent-supplied at create_artifact, single
+                line truncated. Adds context the title alone can't. */}
+            {artifact.description && (
+              <div
+                title={artifact.description}
+                style={{
+                  fontFamily: FONT_BODY, fontSize: 12.5, color: 'var(--ink-3)',
+                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  marginTop: 2, marginBottom: 2,
+                }}
+              >{artifact.description}</div>
+            )}
             <PathRow
               label="local"
               value={displayPath}
