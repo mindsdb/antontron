@@ -13,7 +13,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .artifacts import _resolve_artifact_path, _scan_output_dirs
+from .artifacts import _resolve_artifact_path, _scan_artifact_dirs
 from .cowork_state import backups_dir, load_state, save_state, utc_now_iso
 from .integrations import ensure_managed_integrations
 from .settings import _get_env, get_config_status
@@ -630,12 +630,22 @@ async def delete_datasource(engine: str, name: str):
 
 
 def _html_artifacts() -> list[dict[str, Any]]:
+    """List every HTML file under every project's `artifacts/` tree.
+
+    Recursive — multi-file artifacts (HTML + assets) get their main
+    file plus any sibling HTML pages all surfaced as publishable
+    candidates. Sorted by mtime desc, capped at 40 items.
+
+    Each entry surfaces the existing `.published.json` URL when the
+    file has been published before, so the UI can show "Re-publish"
+    instead of "Publish" on the next click.
+    """
     out = []
     seen = set()
-    for output_dir in _scan_output_dirs():
-        if not output_dir.exists():
+    for art_root in _scan_artifact_dirs():
+        if not art_root.exists():
             continue
-        for path in sorted(output_dir.rglob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for path in sorted(art_root.rglob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True):
             key = str(path.resolve())
             if key in seen:
                 continue
