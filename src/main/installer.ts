@@ -5,6 +5,13 @@ import * as fs from 'fs';
 import * as os from 'os';
 import { IPC } from '../shared/ipc-channels';
 import { sendEvent } from './analytics';
+import {
+  SERVER_PYTHON_DEPS,
+  checkPythonImports,
+  getAntonToolPython,
+  getPythonUtf8Env,
+  getServerDepsVerifyScript,
+} from './server-deps';
 
 interface InstallStep {
   id: string;
@@ -54,35 +61,6 @@ function getUvBinary(): string {
   return path.join(localBin, 'uv');
 }
 
-// Server runtime dependencies — version-pinned so the tool venv `uv`
-// resolves matches what `server/requirements.txt` was tested against.
-// Mirrors the requirements file: bumping one side without the other is
-// what causes "server starts on my machine, fails on user's box" reports.
-const SERVER_PYTHON_DEPS: Array<{ spec: string; importName: string }> = [
-  { spec: 'fastapi>=0.115.0',         importName: 'fastapi' },
-  { spec: 'uvicorn[standard]>=0.32.0', importName: 'uvicorn' },
-  // python-multipart is the package name, the import is `multipart`.
-  // FastAPI requires it for File()/Form()/UploadFile (attachments route).
-  { spec: 'python-multipart>=0.0.12', importName: 'multipart' },
-  // pydantic is a fastapi transitive dep, but the bundled server
-  // imports it directly (BaseModel + Field). Listing it explicitly
-  // future-proofs us against fastapi switching to pydantic-core only.
-  { spec: 'pydantic>=2.0.0',          importName: 'pydantic' },
-];
-
-// Path to the python interpreter inside the uv tool venv that
-// `uv tool install anton ...` populated. Mirrors the same lookup used
-// by server-process.ts so both files agree on which interpreter the
-// installer needs to write into.
-function getAntonToolPython(): string {
-  const dataHome = process.env.XDG_DATA_HOME ||
-    path.join(os.homedir(), process.platform === 'win32' ? 'AppData/Roaming' : '.local/share');
-  return path.join(
-    dataHome, 'uv', 'tools', 'anton',
-    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
-  );
-}
-
 function getEnvPath(): string {
   const localBin = getLocalBin();
   const cargoBin = path.join(os.homedir(), '.cargo', 'bin');
@@ -116,7 +94,14 @@ function runCommand(
   opts?: { shell?: boolean; shouldAbort?: () => boolean }
 ): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolve) => {
-    const env = { ...process.env, PATH: getEnvPath() };
+    const env = {
+      ...process.env,
+      PATH: getEnvPath(),
+      // Windows GUI launches can inherit a legacy code page. Keep Python
+      // subprocess output deterministic so installer verification never
+      // fails after successful imports because stdout cannot encode text.
+      ...getPythonUtf8Env(),
+    };
     const proc = spawn(command, args, {
       env,
       shell: opts?.shell ?? false,
@@ -280,31 +265,7 @@ export async function checkAntonInstalled(): Promise<boolean> {
 export async function checkServerDepsReady(): Promise<boolean> {
   const py = getAntonToolPython();
   if (!fileExists(py)) return false;
-  // One-liner: try every import. We don't care about per-package
-  // diagnostics here — that's runInstaller's verify step's job.
-  // Just answer "all good" or "needs setup."
-  const importExpr = SERVER_PYTHON_DEPS
-    .map((d) => `import ${d.importName}`)
-    .join('; ');
-  return new Promise<boolean>((resolve) => {
-    const env = { ...process.env, PATH: getEnvPath() };
-    const proc = spawn(py, ['-c', importExpr], { env, stdio: ['ignore', 'pipe', 'pipe'] });
-    let resolved = false;
-    const finish = (ok: boolean) => {
-      if (resolved) return;
-      resolved = true;
-      resolve(ok);
-    };
-    proc.on('close', (code) => finish(code === 0));
-    proc.on('error', () => finish(false));
-    // Defensive timeout — a hung interpreter shouldn't pin the boot
-    // flow on this check.
-    setTimeout(() => {
-      if (resolved) return;
-      try { proc.kill('SIGTERM'); } catch {}
-      finish(false);
-    }, 4000);
-  });
+  return checkPythonImports(py, { ...process.env, PATH: getEnvPath() });
 }
 
 // Convenience wrapper used by the boot flow IPC. Returns the full
@@ -462,7 +423,7 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     sendLog(win, '\n--- Installing Anton (with server extras) ---\n');
     sendLog(win, 'Server extras:\n');
     for (const dep of SERVER_PYTHON_DEPS) {
-      sendLog(win, `  • ${dep.spec}\n`);
+      sendLog(win, `  - ${dep.spec}\n`);
     }
 
     // Build the args list dynamically so the dep set lives in ONE place
@@ -475,7 +436,10 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     for (const dep of SERVER_PYTHON_DEPS) {
       installArgs.push('--with', dep.spec);
     }
-    installArgs.push('--force');
+    // --force allows replacing an existing tool entry; --reinstall makes uv
+    // rebuild the environment contents too. Both matter when a user already
+    // has an anton tool venv that predates the server dependency set.
+    installArgs.push('--force', '--reinstall', '--upgrade');
 
     const uvBin = fileExists(getUvBinary()) ? getUvBinary() : 'uv';
     const installResult = await runCommand(uvBin, installArgs, win, { shouldAbort });
@@ -520,14 +484,11 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
       sendInstallError(win, 'Tool venv missing');
       return false;
     }
-    sendLog(win, 'Verifying server dependencies…\n');
+    sendLog(win, 'Verifying server dependencies...\n');
     // Print version per dep so the install log is self-diagnosing
     // when a user reports a problem; missing imports produce a
     // single ImportError that surfaces the offending module.
-    const verifyScript = SERVER_PYTHON_DEPS.map((d) => (
-      `import ${d.importName} as _${d.importName}; ` +
-      `print(' ✓ ${d.importName}', getattr(_${d.importName}, '__version__', '?'))`
-    )).join(';\n');
+    const verifyScript = getServerDepsVerifyScript();
     const verifyDeps = await runCommand(toolPython, ['-c', verifyScript], win, { shouldAbort });
     if (abortIfRequested()) return false;
     if (verifyDeps.code !== 0) {
