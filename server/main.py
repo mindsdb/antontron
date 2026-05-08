@@ -25,6 +25,75 @@ if _env_path.exists():
             _k, _, _v = _line.partition("=")
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
+
+def _maybe_self_update_and_reexec() -> None:
+    """Run anton's self-update flow before the server boots.
+
+    Mirrors what `anton/cli.py` does at the top of its root command,
+    so antontron-launched servers stay current the same way the CLI
+    does. The Node side previously duplicated this logic in
+    TypeScript; the Python check is the single source of truth now.
+
+    Behaviour:
+      * `_ANTON_UPDATED=1` env var → already updated this process
+        tree, skip (matches `anton/updater.py` loop guard).
+      * `disable_autoupdates` setting → user opted out, skip.
+      * Otherwise call `anton.updater.check_and_update`. If it
+        installed a newer version, set the loop-guard env var and
+        `os.execv` the same python interpreter on the same script.
+        The kernel replaces the current process in-place — same PID,
+        same stdio pipes — so antontron's `server-process.ts`
+        doesn't need to know an update happened. The 15s /health
+        probe absorbs the extra cold-start time.
+
+    Errors here are non-fatal: any exception drops us through to
+    starting the server on the existing version. Better to be one
+    release behind than fail to boot because GitHub was down.
+    """
+    if os.environ.get("_ANTON_UPDATED") == "1":
+        return
+    try:
+        from anton.config.settings import AntonSettings
+        from anton.updater import check_and_update
+    except Exception:
+        # Anton not importable yet (first launch race, broken venv) —
+        # nothing for us to update against. Let the rest of main.py
+        # raise the proper diagnostic.
+        return
+    try:
+        settings = AntonSettings()
+    except Exception:
+        return
+    if getattr(settings, "disable_autoupdates", False):
+        return
+
+    class _NullConsole:
+        """Stand-in for rich.Console — `check_and_update` only calls
+        `console.print(msg)` to show status, which we capture via
+        stdout instead so antontron's log buffer picks it up."""
+        def print(self, *args, **kwargs):
+            try:
+                print(*args)
+            except Exception:
+                pass
+
+    try:
+        if check_and_update(_NullConsole(), settings):
+            os.environ["_ANTON_UPDATED"] = "1"
+            # Re-exec the same interpreter on the same script so the
+            # post-import state (anton, fastapi, etc.) reloads
+            # against the freshly installed version. PID/pipes are
+            # preserved across execv so the parent (antontron) sees
+            # this as a slightly slower cold start.
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception:
+        # Updater raised — keep going on the existing version.
+        return
+
+
+_maybe_self_update_and_reexec()
+
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 

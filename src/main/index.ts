@@ -530,7 +530,7 @@ function setupIPC() {
   // "Already starting" counts as up — stop it instead of double-spawning.
   ipcMain.handle('server:toggle', async () => {
     if (isServerRunning() || isServerStarting()) {
-      stopServer();
+      await stopServer();
       return { running: false, port: getServerPort() };
     }
     const result = await startServer();
@@ -543,7 +543,10 @@ function setupIPC() {
     return { running: !!result.ok, port: result.port ?? getServerPort(), error: result.reason };
   });
   ipcMain.handle('server:stop', async () => {
-    stopServer();
+    // Actually await the child's exit before resolving. The renderer
+    // typically follows this with a serverStart() — without the wait,
+    // the new python races the dying one for port 26866.
+    await stopServer();
     return { running: false, port: getServerPort() };
   });
   // Diagnostics — last start error + recent stdout/stderr tail. The
@@ -1051,6 +1054,11 @@ app.whenReady().then(() => {
   // Without the deps check, a returning user with a stand-alone
   // `anton` install would see the server fail to start with a Python
   // ImportError they can't act on.
+  // Auto-update is now handled inside server/main.py via
+  // `_maybe_self_update_and_reexec` — same `anton.updater.check_and_update`
+  // the CLI uses. The python child execs itself in-place when a new
+  // release lands, transparent to Node. Boot path stays minimal:
+  // verify install state, then start the server.
   checkInstallStatus().then(async ({ antonInstalled, serverDepsReady }) => {
     if (!antonInstalled || !serverDepsReady) return;
     const result = await startServer();
@@ -1077,13 +1085,48 @@ app.whenReady().then(() => {
   });
 });
 
-app.on('window-all-closed', () => {
+// Tracks whether we've already drained the python child during this
+// quit. before-quit can fire multiple times (Cmd+Q, dock quit, force
+// quit menu) — we only want to block on the first occurrence.
+let _quitDrained = false;
+
+async function drainServerForQuit(): Promise<void> {
+  if (_quitDrained) return;
+  _quitDrained = true;
+  // Hard ceiling so a wedged python can't pin the quit indefinitely.
+  // stopServer's own SIGTERM(3s) + SIGKILL(1.5s) chain stays inside
+  // this window, but a misbehaving OS-level process delay could push
+  // past it; if so we'd rather quit and reparent the child to launchd
+  // than leave the user waiting on the dock icon.
+  await Promise.race([
+    stopServer(),
+    new Promise<void>((resolve) => setTimeout(resolve, 6_000)),
+  ]);
+}
+
+app.on('window-all-closed', async () => {
   fs.unwatchFile(getAntonEnvPath());
   killAnton();
-  stopServer();
+  await drainServerForQuit();
   app.quit();
 });
 
-app.on('before-quit', () => {
-  stopServer();
+// Block the quit until the python child has actually exited. Earlier
+// this was `void stopServer()` — fire-and-forget — which meant
+// Electron exited (often within milliseconds of SIGTERM) before the
+// python had time to respond. The child got reparented to launchd
+// (PPID=1) and kept running, holding port 26866. The next launch's
+// new python couldn't bind, fell back to talking to the orphan, and
+// since the orphan's cwd was inside a now-deleted bundle directory,
+// every chat completion crashed in `os.getcwd()` with [Errno 2].
+//
+// `event.preventDefault()` defers the quit; we re-call `app.quit()`
+// after the drain finishes. Guarded by `_quitDrained` so the second
+// invocation skips the deferral and the app exits cleanly.
+app.on('before-quit', (event) => {
+  if (_quitDrained) return;
+  event.preventDefault();
+  drainServerForQuit().finally(() => {
+    app.quit();
+  });
 });

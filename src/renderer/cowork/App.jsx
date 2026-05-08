@@ -2354,28 +2354,32 @@ function AppCore() {
         serverOnline={serverOnline}
         serverBusy={serverBusy}
         serverBusyKind={serverBusyKind}
-        onRetry={async () => {
-          // The modal's Restart button is available in every server
-          // state. If the backend is currently online we do a clean
-          // stop → start cycle (which is the workaround for the
-          // "[Errno 2] No such file or directory" bug a stale cached
-          // session can trigger). Offline → just start.
+        onStart={async () => {
+          // Atomic start — used by both the offline "Start" button
+          // and the composed "Restart" path inside the modal.
+          setServerBusyKind('starting');
+          setServerBusy(true);
           try {
-            if (serverOnline) {
-              setServerBusyKind('stopping');
-              setServerBusy(true);
-              try {
-                const stopRes = await window.antontron?.serverStop?.();
-                if (stopRes) setServerOnline(!!stopRes.running);
-              } catch {}
-            }
-            setServerBusyKind('starting');
-            setServerBusy(true);
             const result = await window.antontron?.serverStart?.();
             if (result) {
               setServerOnline(!!result.running);
               if (result.running) setTimeout(refreshData, 400);
             }
+          } catch {} finally {
+            setServerBusy(false);
+          }
+        }}
+        onStop={async () => {
+          // Atomic stop — used by the new modal "Stop" button so the
+          // user can shut down the backend without it immediately
+          // re-starting. The previous single-button onRetry forced
+          // stop+start every click and made it impossible to leave
+          // the backend off.
+          setServerBusyKind('stopping');
+          setServerBusy(true);
+          try {
+            const result = await window.antontron?.serverStop?.();
+            if (result) setServerOnline(!!result.running);
           } catch {} finally {
             setServerBusy(false);
           }

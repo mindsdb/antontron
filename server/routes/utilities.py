@@ -365,14 +365,25 @@ def _resolve_modify_merge(
     everything off to anton-core so the merge logic stays in one
     place. See `anton.core.datasources.data_vault.resolve_modify_merge`
     for the full contract.
+
+    Falls back to a passthrough (no merge, no secure-key tracking)
+    when the installed anton-core predates `resolve_modify_merge`.
+    Logs a warning so the user knows to reinstall — the modify
+    flow's sentinel preservation only kicks in once anton is fresh.
     """
     try:
-        from anton.core.datasources.data_vault import (
-            LocalDataVault,
-            resolve_modify_merge,
-        )
+        from anton.core.datasources.data_vault import LocalDataVault
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Anton data vault is unavailable") from exc
+    try:
+        from anton.core.datasources.data_vault import resolve_modify_merge
+    except ImportError:
+        logger.warning(
+            "anton-core has no `resolve_modify_merge` — saving without "
+            "the modify-flow merge. Reinstall anton to enable sentinel-"
+            "based credential preservation."
+        )
+        return dict(incoming), []
 
     spec_secret_names = [
         getattr(f, "name", "") for f in spec_fields
@@ -487,7 +498,19 @@ async def read_datasource(engine: str, name: str):
         from anton.core.datasources.data_vault import LocalDataVault
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Anton data vault is unavailable") from exc
-    record = LocalDataVault().read_record(engine.strip(), name.strip())
+    vault = LocalDataVault()
+    # Older anton installs don't have `read_record` — fall back to
+    # synthesizing a minimal record from `load()`. The renderer's
+    # modify form still works (heuristic fills in for the missing
+    # secure-keys list); only created_at / updated_at are missing.
+    if hasattr(vault, "read_record"):
+        record = vault.read_record(engine.strip(), name.strip())
+    else:
+        fields = vault.load(engine.strip(), name.strip())
+        record = (
+            None if fields is None
+            else {"engine": engine.strip(), "name": name.strip(), "fields": fields}
+        )
     if record is None:
         raise HTTPException(status_code=404, detail="Datasource connection not found")
     return _datasource_record_payload(record)
@@ -571,10 +594,23 @@ async def save_datasource(req: DatasourceSaveRequest):
                 incoming=raw_credentials,
                 spec_fields=spec_fields_pre,
             )
-        slug = save_connection(
-            vault, engine_def, name, credentials,
-            secure_keys=merged_secure_keys,
-        )
+        try:
+            slug = save_connection(
+                vault, engine_def, name, credentials,
+                secure_keys=merged_secure_keys,
+            )
+        except TypeError:
+            # Older anton.utils.datasources.save_connection signature
+            # has no `secure_keys` kwarg. Save still lands; the
+            # secure-key set just isn't persisted on the record. The
+            # next read falls back to the heuristic, which is good
+            # enough until the user reinstalls anton.
+            logger.warning(
+                "anton-core save_connection has no `secure_keys` kwarg — "
+                "persisting without it. Reinstall anton to enable "
+                "secure-key tracking."
+            )
+            slug = save_connection(vault, engine_def, name, credentials)
     except Exception as exc:
         logger.exception("Datasource save failed")
         raise HTTPException(status_code=500, detail="Could not save datasource") from exc

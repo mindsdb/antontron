@@ -70,7 +70,27 @@ export default function App() {
   };
 
   const handleTermsAccepted = () => { advanceFromTerms(); };
-  const handleInstallComplete = () => setPage('onboarding');
+  // After install (or re-install), skip the Minds/LLM onboarding
+  // step if `~/.anton/.env` already provides one of the supported
+  // provider keys. This is the returning-user case — they already
+  // configured a provider on a previous run, the installer just
+  // refreshed the binary, and forcing them through onboarding again
+  // makes them re-pick what they already had. The same
+  // `checkConfigured()` gate the boot path uses determines this.
+  const handleInstallComplete = async () => {
+    try {
+      const { configured } = await window.antontron.checkConfigured();
+      if (configured) {
+        setPage('launching');
+        setTimeout(() => setPage('terminal'), 1200);
+        return;
+      }
+    } catch {
+      // Fail-open to onboarding — better to ask the user one
+      // unnecessary time than to land in the terminal with no key.
+    }
+    setPage('onboarding');
+  };
   const handleOnboardingComplete = () => {
     setPage('launching');
     setTimeout(() => setPage('terminal'), 1200);

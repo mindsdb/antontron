@@ -236,7 +236,12 @@ export function DataVaultFormPanel({ conversationId, onContinue, onSubmit, onNav
           try {
             const saved = await saveConnector(connectorId, {
               method: authMethod || activeMethodSpec.id || null,
-              name: '',
+              // Modify-flow stamps the existing connection name on
+              // the spec so the save lands on the same vault row
+              // (`(engine, name)` is the row key). Without this the
+              // server falls back to `uuid.uuid4().hex[:8]` and we
+              // end up with a sibling entry instead of an update.
+              name: spec._existing_name || '',
               values: oauthValues,
             });
             // Flip the form into its success branch so the user gets

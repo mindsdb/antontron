@@ -581,3 +581,4 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     return false;
   }
 }
+
