@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { host } from '../platform/host';
 
 type Provider = 'minds' | 'byok';
 type ByokProvider = 'anthropic' | 'openai' | 'gemini' | 'openai-compatible';
@@ -84,7 +85,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const saveFinal = async (lines: string[]) => {
     lines.push('ANTON_MEMORY_MODE=autopilot');
     lines.push('ANTON_EPISODIC_MEMORY=true');
-    await window.antontron.saveSettings(lines.join('\n'));
+    await host.saveSettings(lines.join('\n'));
     setPhase('success');
     setTimeout(onComplete, 800);
   };
@@ -96,7 +97,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     if (provider === 'minds') {
       // Step 1: Validate the Minds API key
       const mindsBase = mindsUrl.trim().replace(/\/+$/, '');
-      const result = await window.antontron.validateProvider('minds', apiKey.trim(), mindsBase);
+      const result = await host.validateProvider('minds', apiKey.trim(), mindsBase);
       if (!result.ok) {
         setPhase('error');
         setErrorMsg(result.error || 'Invalid API key');
@@ -112,7 +113,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
       ];
 
       // Step 3: Test if LLM credits are available
-      const llmResult = await window.antontron.validateProvider(
+      const llmResult = await host.validateProvider(
         'openai-compatible',
         apiKey.trim(),
         `${mindsBase}/api/v1`,
@@ -133,7 +134,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
         await saveFinal(lines);
       } else {
         // Minds key valid but no LLM — save Minds vars, ask for LLM provider
-        await window.antontron.saveSettings(mindsLines.join('\n'));
+        await host.saveSettings(mindsLines.join('\n'));
         setPhase('minds-no-llm');
       }
     } else {
@@ -148,7 +149,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               ? customBaseUrl.trim()
               : undefined;
 
-      const result = await window.antontron.validateProvider(
+      const result = await host.validateProvider(
         validationProvider,
         apiKey.trim(),
         validationBaseUrl || undefined,
@@ -203,7 +204,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
             : undefined;
     const key = llmApiKey.trim() || (byokProvider === 'openai-compatible' ? 'not-needed' : '');
 
-    const result = await window.antontron.validateProvider(
+    const result = await host.validateProvider(
       validationProvider,
       key,
       validationBaseUrl || undefined,
@@ -217,7 +218,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     }
 
     // Read existing settings (has Minds vars) and add LLM vars
-    const existing = await window.antontron.readSettings();
+    const existing = await host.readSettings();
     const merged = { ...existing };
 
     if (byokProvider === 'anthropic') {
@@ -246,7 +247,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     merged.ANTON_EPISODIC_MEMORY = merged.ANTON_EPISODIC_MEMORY || 'true';
 
     const lines = Object.entries(merged).map(([k, v]) => `${k}=${v}`);
-    await window.antontron.saveSettings(lines.join('\n'));
+    await host.saveSettings(lines.join('\n'));
     setPhase('success');
     setTimeout(onComplete, 800);
   };
@@ -392,7 +393,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
           </ul>
           <span
             className="provider-card-link"
-            onClick={(e) => { e.stopPropagation(); window.antontron.openExternal(MINDS_REGISTER_URL); }}
+            onClick={(e) => { e.stopPropagation(); host.openExternal(MINDS_REGISTER_URL); }}
           >
             Get your first month free &rarr;
           </span>
@@ -519,7 +520,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
               Don't have a key?{' '}
               <span
                 className="onboard-link"
-                onClick={() => window.antontron.openExternal(MINDS_REGISTER_URL)}
+                onClick={() => host.openExternal(MINDS_REGISTER_URL)}
               >
                 Sign up at mdb.ai for a free month
               </span>

@@ -7,13 +7,16 @@ the translation layer and the single place that handles legacy env fallbacks.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .cowork_state import update_state, load_state
@@ -1061,3 +1064,177 @@ async def validate_settings():
         "provider": status["provider"],
         "model": status["model"],
     }
+
+
+# ─── Onboarding-only surface (web SPA parity with Electron) ─────────
+# These endpoints back the host abstraction's readSettings/saveSettings/
+# checkInstall/checkConfigured/validateProvider methods on the web. The
+# Electron renderer goes through window.antontron instead — see
+# src/renderer/platform/host.ts. The contract here matches the IPC
+# shapes so the same React onboarding pages work in both shells.
+
+
+@router.get("/raw")
+async def read_raw_settings():
+    """Return ~/.anton/.env as a flat dict — same shape as the
+    Electron `readSettings` IPC. Onboarding uses this to load existing
+    values when the user revisits the LLM-provider screen.
+
+    Values are returned in the clear because the user is configuring
+    their own backend; there is no cross-tenant exposure on a single-
+    user FastAPI instance. If we ever multi-tenant the web host this
+    must move to a per-user store."""
+    return _read_dotenv(GLOBAL_ENV_PATH)
+
+
+class RawSettingsBody(BaseModel):
+    content: str
+
+
+@router.post("/raw")
+async def write_raw_settings(body: RawSettingsBody):
+    """Replace ~/.anton/.env with the supplied dotenv content. Mirrors
+    the Electron `saveSettings` IPC. Onboarding builds the lines
+    locally (provider, model, keys) and posts the joined string."""
+    try:
+        GLOBAL_ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            GLOBAL_ENV_PATH.parent.chmod(0o700)
+        except OSError:
+            pass
+        GLOBAL_ENV_PATH.write_text(body.content + "\n", encoding="utf-8")
+        try:
+            GLOBAL_ENV_PATH.chmod(0o600)
+        except OSError:
+            pass
+        # Reflect the writes in the running process so subsequent
+        # health checks pick them up without a server restart.
+        for line in body.content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            os.environ[key.strip()] = val.strip().strip('"').strip("'")
+    except Exception as e:
+        logger.warning("Failed to write raw settings: %s", e)
+        raise HTTPException(status_code=500, detail="Settings could not be saved.") from e
+    return {"ok": True}
+
+
+@router.get("/install-status")
+async def install_status():
+    """The hosted FastAPI server is its own install — if this endpoint
+    answers, anton + python deps are by definition ready. Returned for
+    parity with the Electron `checkInstall` IPC so App.tsx's setup gate
+    can short-circuit on web."""
+    return {"antonInstalled": True, "serverDepsReady": True}
+
+
+@router.get("/configured")
+async def check_configured():
+    """Cheap predicate used by App.tsx's onboarding gate. Mirrors the
+    Electron `checkConfigured` IPC: a key being present is enough — we
+    don't ping the provider here (validate-provider does that)."""
+    env = _read_dotenv(GLOBAL_ENV_PATH)
+    if env.get("ANTON_ANTHROPIC_API_KEY") or os.environ.get("ANTON_ANTHROPIC_API_KEY"):
+        return {"configured": True, "provider": "anthropic"}
+    if (env.get("ANTON_OPENAI_API_KEY") or os.environ.get("ANTON_OPENAI_API_KEY")) and (
+        env.get("ANTON_OPENAI_BASE_URL") or os.environ.get("ANTON_OPENAI_BASE_URL")
+    ):
+        return {"configured": True, "provider": "minds"}
+    return {"configured": False, "provider": ""}
+
+
+class ValidateProviderBody(BaseModel):
+    provider: str
+    apiKey: str
+    baseUrl: Optional[str] = None
+    model: Optional[str] = None
+
+
+def _http_json(url: str, method: str, headers: dict[str, str], body: Optional[bytes] = None) -> tuple[int, str]:
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status, resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", errors="replace") if e.fp else ""
+    except urllib.error.URLError as e:
+        raise RuntimeError(str(e.reason)) from e
+
+
+def _validate_anthropic(api_key: str, model: str) -> dict[str, Any]:
+    try:
+        body = json.dumps({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]}).encode()
+        status, text = _http_json(
+            "https://api.anthropic.com/v1/messages",
+            "POST",
+            {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            body,
+        )
+        if status in (200, 201):
+            return {"ok": True}
+        try:
+            msg = json.loads(text).get("error", {}).get("message") or f"HTTP {status}"
+        except Exception:
+            msg = f"HTTP {status}"
+        return {"ok": False, "error": msg}
+    except Exception as e:
+        return {"ok": False, "error": f"Cannot connect: {e}"}
+
+
+def _validate_minds(api_key: str, base_url: str) -> dict[str, Any]:
+    try:
+        base = base_url.rstrip("/")
+        status, _text = _http_json(
+            f"{base}/api/v1/minds/",
+            "GET",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        )
+        if status in (401, 403):
+            return {"ok": False, "error": "Invalid API key"}
+        if 200 <= status < 300:
+            return {"ok": True}
+        return {"ok": False, "error": f"Server returned HTTP {status}"}
+    except Exception as e:
+        return {"ok": False, "error": f"Cannot connect: {e}"}
+
+
+def _validate_openai_compatible(api_key: str, base_url: str, model: Optional[str]) -> dict[str, Any]:
+    try:
+        normalized = base_url.rstrip("/")
+        # Bases that already include a versioned path (e.g. Gemini's
+        # /v1beta/openai) skip the implicit /v1 prefix.
+        import re
+        chat_url = f"{normalized}/chat/completions" if re.search(r"/v\d", normalized) else f"{normalized}/v1/chat/completions"
+        body = json.dumps({"model": model or "gpt-4o", "messages": [{"role": "user", "content": "ping"}]}).encode()
+        status, text = _http_json(
+            chat_url,
+            "POST",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            body,
+        )
+        if status in (200, 201):
+            return {"ok": True}
+        if status in (401, 403):
+            return {"ok": False, "error": "Invalid API key"}
+        try:
+            msg = json.loads(text).get("error", {}).get("message") or f"HTTP {status}"
+        except Exception:
+            msg = f"HTTP {status}"
+        return {"ok": False, "error": msg}
+    except Exception as e:
+        return {"ok": False, "error": f"Cannot connect: {e}"}
+
+
+@router.post("/validate-provider")
+async def validate_provider(body: ValidateProviderBody):
+    """Server-side provider key check. Mirrors the Electron
+    `validateProvider` IPC; same shape, same provider names."""
+    if body.provider == "anthropic":
+        return _validate_anthropic(body.apiKey, body.model or "claude-sonnet-4-6")
+    if body.provider == "minds":
+        return _validate_minds(body.apiKey, body.baseUrl or "https://mdb.ai")
+    if body.provider == "openai-compatible":
+        return _validate_openai_compatible(body.apiKey, body.baseUrl or "https://api.openai.com/v1", body.model)
+    return {"ok": False, "error": "Unknown provider"}

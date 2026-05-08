@@ -754,7 +754,14 @@ function AppCore() {
   const [serverOnline, setServerOnline] = useState(host.isWeb);
   const [serverBusy, setServerBusy] = useState(false);
   const [serverBusyKind, setServerBusyKind] = useState('starting'); // 'starting' | 'stopping'
-  const [health, setHealth] = useState({ status: 'offline', anton_available: false, config_ready: false });
+  // `config_ready` deliberately omitted from the initial state — the
+  // boot-time settings redirect at line ~798 keys off `=== false` so
+  // that "not yet fetched" (undefined) and "server confirmed
+  // unconfigured" (false) are distinguishable. Seeding it as `false`
+  // here causes a spurious redirect to Settings on first paint when
+  // serverOnline starts true (the web shell), before fetchHealth has
+  // even returned.
+  const [health, setHealth] = useState({ status: 'offline', anton_available: false });
 
   // OTA UI update state
   const [updateStatus, setUpdateStatus] = useState(null); // { phase, version }
