@@ -70,17 +70,36 @@ function _normalizeFormFences(text) {
 // `a` component override below picks the scheme up and renders each
 // pair as a small chip.
 //
-// The matching pattern is intentionally narrow: we only rewrite
-// comments whose body looks like one or more `key:value` pairs (e.g.
-// `topic:foo`, `ts:2026-02-27`, `source:consolidation`). Plain
-// authorship comments like `<!-- TODO -->` or `<!-- not sure -->`
-// are stripped by the second pass in `_renderEngramComments`.
-// Rewritten to avoid nested quantifiers that cause catastrophic backtracking (ReDoS).
-// Requires at least one key:value pair, with additional pairs separated by required
-// whitespace — no \s* inside the repeating group.
-const _ENGRAM_COMMENT_RE = /<!--\s*([a-z][a-z0-9_-]*:[^\s<>]+(?:\s+[a-z][a-z0-9_-]*:[^\s<>]+)*)\s*-->/gi;
+// The scanner below is intentionally narrow: it only rewrites comment
+// bodies that look like one or more `key:value` pairs (e.g. `topic:foo`,
+// `ts:2026-02-27`, `source:consolidation`). Plain authorship comments
+// like `<!-- TODO -->` or `<!-- not sure -->` are stripped.
+const _ENGRAM_BODY_RE = /^\s*([a-z][a-z0-9_-]*:[^\s<>]+(?:\s+[a-z][a-z0-9_-]*:[^\s<>]+)*)\s*$/i;
 
-function _stripHtmlComments(text) {
+function _engramCommentChips(body) {
+  const match = _ENGRAM_BODY_RE.exec(body);
+  if (!match) return '';
+
+  const pairs = match[1].trim().split(/\s+/);
+  return pairs
+    .map((pair) => {
+      const idx = pair.indexOf(':');
+      if (idx <= 0) return '';
+      const key = pair.slice(0, idx);
+      const val = pair.slice(idx + 1);
+      // The link text is what the user sees; the href carries the
+      // engram scheme so the renderer can distinguish it from real
+      // links. Encode the value so spaces / special chars don't
+      // break the URL portion.
+      return `[${key}: ${val}](engram:${encodeURIComponent(val)}?k=${encodeURIComponent(key)})`;
+    })
+    .filter(Boolean)
+    .join(' ');
+}
+
+function _renderEngramComments(text) {
+  if (!text || typeof text !== 'string') return text;
+
   let out = '';
   let cursor = 0;
 
@@ -96,36 +115,16 @@ function _stripHtmlComments(text) {
     if (end === -1) {
       break;
     }
+
+    const chips = _engramCommentChips(text.slice(start + 4, end));
+    if (chips) {
+      // Leading space keeps the chip from glomming onto the preceding word.
+      out += ` ${chips}`;
+    }
     cursor = end + 3;
   }
 
   return out;
-}
-
-function _renderEngramComments(text) {
-  if (!text || typeof text !== 'string') return text;
-  return _stripHtmlComments(
-    text.replace(_ENGRAM_COMMENT_RE, (_full, body) => {
-      const pairs = body.trim().split(/\s+/);
-      const chips = pairs
-        .map((pair) => {
-          const idx = pair.indexOf(':');
-          if (idx <= 0) return '';
-          const key = pair.slice(0, idx);
-          const val = pair.slice(idx + 1);
-          // The link text is what the user sees; the href carries the
-          // engram scheme so the renderer can distinguish it from real
-          // links. Encode the value so spaces / special chars don't
-          // break the URL portion.
-          return `[${key}: ${val}](engram:${encodeURIComponent(val)}?k=${encodeURIComponent(key)})`;
-        })
-        .filter(Boolean)
-        .join(' ');
-      // Leading space keeps the chip from glomming onto the preceding
-      // word; if there are no usable pairs we drop the comment entirely.
-      return chips ? ` ${chips}` : '';
-    }),
-  );
 }
 
 // Density-scoped class strings. `dense` halves the rhythm and shaves
