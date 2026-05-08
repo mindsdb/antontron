@@ -111,11 +111,13 @@ async def create_response(req: ResponsesRequest):
                 ):
                     yield chunk
             except conversation_manager.AntonConfigurationError as exc:
+                logger.warning("Anton configuration error: %s", exc)
                 yield (
                     "event: response.failed\n"
                     f"data: {json.dumps({'type': 'response.failed', 'code': 'config_required', 'error': str(exc)})}\n\n"
                 )
             except conversation_manager.AntonRuntimeError as exc:
+                logger.error("Anton runtime error: %s", exc)
                 yield (
                     "event: response.failed\n"
                     f"data: {json.dumps({'type': 'response.failed', 'code': 'anton_error', 'error': str(exc)})}\n\n"
@@ -166,8 +168,10 @@ async def create_response(req: ResponsesRequest):
             if isinstance(event, StreamTextDelta):
                 collected.append(event.text)
     except conversation_manager.AntonConfigurationError as exc:
+        logger.warning("Anton configuration error: %s", exc)
         raise HTTPException(status_code=400, detail=str(exc))
     except conversation_manager.AntonRuntimeError as exc:
+        logger.error("Anton runtime error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
     return ResponseObject(
