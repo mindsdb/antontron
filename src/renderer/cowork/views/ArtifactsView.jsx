@@ -477,6 +477,23 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{artifact.title}</span>
         </div>
+        {/* Description — agent-supplied at create_artifact time. Two-
+            line clamp keeps the card height stable across artifacts
+            with short and long descriptions; the full text is in the
+            modal viewer. */}
+        {artifact.description && (
+          <span
+            title={artifact.description}
+            style={{
+              fontFamily: FONT_BODY, fontSize: 12, color: 'var(--ink-3)',
+              lineHeight: 1.4,
+              display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
+              overflow: 'hidden', textOverflow: 'ellipsis',
+            }}
+          >
+            {artifact.description}
+          </span>
+        )}
         {/* project: <name> — sits above the type line so the workspace
             origin reads first. Ellipsis-truncates so a long project
             name can't push the card out of grid alignment; full name
@@ -519,11 +536,26 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
             }}>{projectLabel}</span>
           )}
         </span>
+        {/* type line — prefer the artifact's declared `type` (e.g.
+            `html-app`, `fullstack-stateless-app`) since that's the
+            metadata's source of truth; fall back to the bare
+            extension for legacy artifacts that predate the rename.
+            file-count chip surfaces multi-file artifacts at a glance
+            without competing with the title for space. */}
         <span style={{
           fontFamily: FONT_MONO, fontSize: 11,
           color: 'var(--ink-4)', letterSpacing: '0.04em',
+          display: 'flex', alignItems: 'baseline', gap: 8,
+          minWidth: 0,
         }}>
-          type: <span style={{ color: 'var(--ink-3)' }}>{ext}</span>
+          <span>
+            type: <span style={{ color: 'var(--ink-3)' }}>{artifact.type || ext}</span>
+          </span>
+          {typeof artifact.fileCount === 'number' && artifact.fileCount > 1 && (
+            <span title={`${artifact.fileCount} files in this artifact`}>
+              · <span style={{ color: 'var(--ink-3)' }}>{artifact.fileCount} files</span>
+            </span>
+          )}
         </span>
       </div>
 
@@ -774,14 +806,18 @@ function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, o
           )}
         </div>
 
-        {/* Type — bare extension, monospace, slightly muted to read
-            as metadata. Sits before Kind so the eye picks up the
-            concrete file format first. */}
-        <div style={{
-          fontFamily: FONT_MONO, fontSize: 11,
-          color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{extensionOf(artifact)}</div>
+        {/* Type — prefer the metadata-declared `type` (html-app,
+            fullstack-stateless-app, …); fall back to the primary
+            file's extension for legacy artifacts. Mono + uppercase
+            so it reads as a tag rather than a label. */}
+        <div
+          title={artifact.type || extensionOf(artifact)}
+          style={{
+            fontFamily: FONT_MONO, fontSize: 11,
+            color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}
+        >{artifact.type || extensionOf(artifact)}</div>
 
         <div style={{
           fontFamily: FONT_MONO, fontSize: 11,

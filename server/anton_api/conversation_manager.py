@@ -762,6 +762,87 @@ def _update_meta_after_turn(
 
 
 # ---------------------------------------------------------------------------
+# Artifact reconciliation — pre/post-turn snapshot/diff so every turn
+# that touches an artifact folder gets stamped into its provenance.
+#
+# The snapshot is `{relative_path: (mtime_ns, size)}`; the diff
+# walks the after-snapshot and flags every entry that's new or
+# differs from the before-snapshot. Groups changed files by top-
+# level slug (the artifact folder name) and writes one provenance
+# entry per touched artifact.
+# ---------------------------------------------------------------------------
+
+
+# Files that are housekeeping, not user-content. The store writes
+# both on every save, so they'd otherwise show up in every diff
+# and pollute provenance.
+_ARTIFACT_HOUSEKEEPING = {"metadata.json", "README.md"}
+
+
+def _reconcile_artifacts_after_turn(
+    *,
+    artifacts_root: Path,
+    conversation_id: str,
+    project: Optional[str],
+    user_input: str,
+    turn_index: int,
+    snapshot_before: dict,
+) -> None:
+    """For each artifact folder modified during the turn, append a
+    provenance entry + rescan its file list.
+
+    No-op when the artifacts dir doesn't exist or no files changed.
+    Failures are logged at WARNING and swallowed — provenance is a
+    nice-to-have, not load-bearing for the conversation flow.
+    """
+    try:
+        from anton.core.artifacts import (
+            ArtifactStore,
+            diff_snapshots,
+            snapshot_dir,
+        )
+        from anton.core.artifacts.snapshot import _files_by_artifact
+    except Exception:
+        logger.debug("Anton artifact module unavailable; skipping reconcile", exc_info=True)
+        return
+    if not artifacts_root.exists():
+        return
+    after = snapshot_dir(artifacts_root)
+    changed = diff_snapshots(snapshot_before, after)
+    if not changed:
+        return
+    grouped = _files_by_artifact(changed)
+    if not grouped:
+        return
+    meta = _load_meta(project, conversation_id) or {}
+    title = meta.get("title") or None
+    store = ArtifactStore(artifacts_root)
+    summary = (user_input or "").strip()
+    for slug, files in grouped.items():
+        # Housekeeping files (metadata.json, README.md) get rewritten on
+        # every store save — drop them from the touched set so they
+        # don't pollute provenance with no-op turns.
+        user_files = sorted(f for f in files if f not in _ARTIFACT_HOUSEKEEPING)
+        if not user_files:
+            continue
+        try:
+            store.record_turn(
+                slug,
+                conversation_id=conversation_id,
+                conversation_title=title,
+                turn_index=turn_index,
+                summary=summary,
+                files_touched=user_files,
+            )
+            store.rescan_files(slug)
+        except Exception:
+            logger.warning(
+                "Failed to record artifact provenance for %s (slug=%s)",
+                conversation_id, slug, exc_info=True,
+            )
+
+
+# ---------------------------------------------------------------------------
 # ChatSession construction (lifted from cowork's anton_bridge._build_chat_session)
 # ---------------------------------------------------------------------------
 
@@ -816,11 +897,11 @@ async def _build_chat_session(
     workspace.apply_env_to_process()
 
     anton_dir = base / ".anton"
-    output_dir = Path(settings.output_dir)
+    artifacts_dir = Path(settings.artifacts_dir)
     context_dir = Path(settings.context_dir)
     episodes_dir = anton_dir / "episodes"
     project_memory_dir = anton_dir / "memory"
-    for directory in (output_dir, context_dir, episodes_dir, project_memory_dir):
+    for directory in (artifacts_dir, context_dir, episodes_dir, project_memory_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     llm_client = LLMClient.from_settings(settings)
@@ -848,16 +929,26 @@ async def _build_chat_session(
         "The only other files that you are allowed to access are any items that are attached to the conversation."
         "Access to any files not attached to the conversation or located outside the project is strictly forbidden."
         "ALWAYS use the scratchpad to interact with files."
+        f"Your scratchpad's working directory is {str(base)} — bare relative paths like `open('data.csv')` resolve from the project root."
     )
     output_context = (
-        # Anchor user-facing artifacts at .anton/output/ so the
-        # artifacts view picks them up and inline previews resolve.
-        # Files written elsewhere in the workspace still work, but
-        # this is the canonical location.
-        f"Save user-facing artifacts (HTML dashboards, CSVs, PDFs, charts, reports) under {str(base)}/.anton/output/<filename>. "
-        f"Use a bare filename — never nest into deeper subfolders. "
-        f"When you write a file from a scratchpad, use an absolute path so it always lands in the right place: "
-        f"e.g. open('{str(base)}/.anton/output/report.html', 'w')."
+        # Artifacts now live in their own visible folder at the
+        # project root (`<base>/artifacts/<slug>/...`), one folder
+        # per output. The agent never picks the folder name itself
+        # — it calls `create_artifact` to claim one, then writes
+        # files into the absolute path the tool returns. Provenance
+        # (which conversation, which turns) is tracked server-side
+        # and stamped into each folder's metadata.json + README.md
+        # automatically.
+        f"User-facing artifacts (HTML dashboards, CSVs, PDFs, datasets, fullstack apps, etc.) live under `{str(artifacts_dir)}/`. "
+        "Workflow:\n"
+        "  1. Call `create_artifact(name, description, type)` BEFORE writing any output. "
+        "It returns `{slug, path, ...}` — write your files into the returned `path`.\n"
+        "  2. To MODIFY an existing artifact, call `list_artifacts()` to find its slug, "
+        "then `open_artifact(slug)` to get the path again.\n"
+        "  3. Use absolute paths from a scratchpad cell so the file always lands in the right place: "
+        "`with open(f\"{path}/dashboard.html\", \"w\") as f: ...`\n"
+        "Never write to the legacy `.anton/output/` directory — it's no longer scanned by the artifacts view."
     )
 
     data_vault = LocalDataVault() if LocalDataVault is not None else None
@@ -1126,6 +1217,21 @@ async def chat_stream(
         async for event in active_session.turn_stream(prompt):
             yield event
 
+    # Pre-turn artifact snapshot. Pinned at the start of `_stream()`
+    # rather than at chat_stream entry so it captures the state right
+    # before the agent fires — covers retries cleanly (a retried turn
+    # still diffs against the same baseline). Turn index is the
+    # current count of user-role messages in history; the about-to-
+    # fire turn slots in at this position.
+    artifacts_root = _project_base(project) / "artifacts"
+    try:
+        from anton.core.artifacts import snapshot_dir as _snapshot_dir
+        artifact_snapshot_before = _snapshot_dir(artifacts_root)
+    except Exception:
+        logger.debug("Could not snapshot artifacts dir pre-turn", exc_info=True)
+        artifact_snapshot_before = {}
+    turn_index = sum(1 for m in (session.history or []) if m.get("role") == "user")
+
     async def _stream() -> AsyncGenerator:
         nonlocal session
         retried = False
@@ -1202,6 +1308,17 @@ async def chat_stream(
                 _update_meta_after_turn(project, cid, session.history)
             except Exception:
                 logger.debug("Could not update conversation meta", exc_info=True)
+            try:
+                _reconcile_artifacts_after_turn(
+                    artifacts_root=artifacts_root,
+                    conversation_id=cid,
+                    project=project,
+                    user_input=user_input,
+                    turn_index=turn_index,
+                    snapshot_before=artifact_snapshot_before,
+                )
+            except Exception:
+                logger.debug("Could not reconcile artifacts after turn", exc_info=True)
 
     return _stream(), cid
 
