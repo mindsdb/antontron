@@ -143,7 +143,7 @@ if ANTON_SERVE_SPA and (SPA_DIR is None or not SPA_DIR.exists()):
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    projects_store.ensure_default_project()
+    projects_store.ensure_general_project()
     start_scheduler()
     yield
     await conversation_manager.close_all()
