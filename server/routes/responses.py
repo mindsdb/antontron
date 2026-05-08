@@ -11,8 +11,6 @@ from __future__ import annotations
 import json
 import logging
 import time
-import traceback
-
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
@@ -122,11 +120,11 @@ async def create_response(req: ResponsesRequest):
                     "event: response.failed\n"
                     f"data: {json.dumps({'type': 'response.failed', 'code': 'anton_error', 'error': str(exc)})}\n\n"
                 )
-            except Exception as exc:
+            except Exception:
                 logger.exception("response stream failed")
                 yield (
                     "event: response.failed\n"
-                    f"data: {json.dumps({'type': 'response.failed', 'code': 'server_error', 'error': str(exc), 'traceback': traceback.format_exc()})}\n\n"
+                    f"data: {json.dumps({'type': 'response.failed', 'code': 'server_error', 'error': 'Internal server error'})}\n\n"
                 )
             finally:
                 # Persist whatever we captured so reopening the
