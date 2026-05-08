@@ -272,22 +272,54 @@ export default function Sidebar({
       >
         <div className="anton-sidebar__chrome-left">
           <div className="anton-sidebar__chrome-buttons">
-            {/* Collapse button is hidden when the host doesn't pass
-                `onToggleCollapsed` — that's how App.jsx pins the
-                sidebar open on non-chat routes (Projects, Artifacts,
-                Settings, …) where the user shouldn't be able to
-                hide the navigation rail. */}
-            {typeof onToggleCollapsed === 'function' && (
-              <button
-                className="icon-btn"
-                onClick={onToggleCollapsed}
-                title={`${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}  (${shortcut('B')})`}
-                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-                style={{ WebkitAppRegion: 'no-drag' }}
-              >
-                {collapsed ? Ico.sidebarExpandRight(15) : Ico.sidebarCollapseLeft(15)}
-              </button>
-            )}
+            {/* Collapse button — always mounted so the search icon
+                next to it never shifts when the host route changes
+                whether the toggle is allowed or not.
+                  • allowed   (chat task)  → fully visible, clickable
+                  • disallowed (other routes) → fades + scales out +
+                    soft blur, but the layout slot stays put so the
+                    search icon doesn't displace.
+                The transition is gentle and a touch over-eased so
+                the hide reads as deliberate without being theatrical. */}
+            {(() => {
+              const canToggle = typeof onToggleCollapsed === 'function';
+              return (
+                <button
+                  className="icon-btn"
+                  onClick={canToggle ? onToggleCollapsed : undefined}
+                  disabled={!canToggle}
+                  aria-hidden={canToggle ? undefined : 'true'}
+                  tabIndex={canToggle ? undefined : -1}
+                  title={
+                    canToggle
+                      ? `${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}  (${shortcut('B')})`
+                      : undefined
+                  }
+                  aria-label={canToggle ? (collapsed ? 'Expand sidebar' : 'Collapse sidebar') : undefined}
+                  style={{
+                    WebkitAppRegion: 'no-drag',
+                    opacity: canToggle ? 1 : 0,
+                    // Slight scale + tilt + blur on hide so the
+                    // motion is recognisable from the corner of the
+                    // eye but never noisy. Origin pinned to center
+                    // so the slot's geometry stays symmetric.
+                    transform: canToggle
+                      ? 'scale(1) rotate(0deg)'
+                      : 'scale(0.72) rotate(-8deg)',
+                    transformOrigin: 'center',
+                    filter: canToggle ? 'blur(0)' : 'blur(2px)',
+                    pointerEvents: canToggle ? 'auto' : 'none',
+                    cursor: canToggle ? 'pointer' : 'default',
+                    transition:
+                      'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+                      'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), ' +
+                      'filter 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+                  }}
+                >
+                  {collapsed ? Ico.sidebarExpandRight(15) : Ico.sidebarCollapseLeft(15)}
+                </button>
+              );
+            })()}
             <button
               className="icon-btn"
               onClick={onOpenSearch}
