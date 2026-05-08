@@ -235,12 +235,25 @@ export default function Sidebar({
         boxShadow: 'var(--sh-2)',
         width: collapsed ? 0 : 'clamp(240px, 24vw, 320px)',
         opacity: collapsed ? 0 : 1,
-        transform: collapsed ? 'translateX(-16px)' : 'translateX(0)',
+        // Combine a gentle leftward translate with a slight scale so
+        // the sidebar reads as "settling into place" rather than just
+        // sliding. Origin pinned to the left edge so the scale grows
+        // from the dock side; the eye picks up the easing curve
+        // along with the width interpolation for a single coherent
+        // motion. Scale + filter values are subtle on purpose —
+        // they're the difference between "this animated" and
+        // "this animated nicely."
+        transform: collapsed
+          ? 'translateX(-12px) scale(0.985)'
+          : 'translateX(0) scale(1)',
+        transformOrigin: 'left center',
+        filter: collapsed ? 'blur(6px)' : 'blur(0)',
         transition:
-          'width 360ms cubic-bezier(0.32, 0.72, 0, 1), ' +
-          'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1), ' +
-          'transform 360ms cubic-bezier(0.32, 0.72, 0, 1)',
-        willChange: 'width, opacity, transform',
+          'width 380ms cubic-bezier(0.22, 1, 0.36, 1), ' +
+          'opacity 260ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+          'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), ' +
+          'filter 240ms cubic-bezier(0.32, 0.72, 0, 1)',
+        willChange: 'width, opacity, transform, filter',
         pointerEvents: collapsed ? 'none' : 'auto',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
@@ -259,15 +272,22 @@ export default function Sidebar({
       >
         <div className="anton-sidebar__chrome-left">
           <div className="anton-sidebar__chrome-buttons">
-            <button
-              className="icon-btn"
-              onClick={onToggleCollapsed}
-              title={`${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}  (${shortcut('B')})`}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              style={{ WebkitAppRegion: 'no-drag' }}
-            >
-              {collapsed ? Ico.sidebarExpandRight(15) : Ico.sidebarCollapseLeft(15)}
-            </button>
+            {/* Collapse button is hidden when the host doesn't pass
+                `onToggleCollapsed` — that's how App.jsx pins the
+                sidebar open on non-chat routes (Projects, Artifacts,
+                Settings, …) where the user shouldn't be able to
+                hide the navigation rail. */}
+            {typeof onToggleCollapsed === 'function' && (
+              <button
+                className="icon-btn"
+                onClick={onToggleCollapsed}
+                title={`${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}  (${shortcut('B')})`}
+                aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
+                style={{ WebkitAppRegion: 'no-drag' }}
+              >
+                {collapsed ? Ico.sidebarExpandRight(15) : Ico.sidebarCollapseLeft(15)}
+              </button>
+            )}
             <button
               className="icon-btn"
               onClick={onOpenSearch}
@@ -282,14 +302,22 @@ export default function Sidebar({
         <div className="anton-sidebar__wordmark">Anton</div>
       </div>
 
-      {/* Body — fades + clips when collapsed */}
+      {/* Body — fades + slides in slightly behind the container so
+          the motion staggers. On appearance the body lags ~80ms so
+          the surrounding chrome lands first; on dismissal it leads
+          the container so the contents exit before the box does. */}
       <div
         style={{
           flex: 1, minHeight: 0,
           display: 'flex', flexDirection: 'column',
           opacity: collapsed ? 0 : 1,
+          transform: collapsed ? 'translateY(2px)' : 'translateY(0)',
           pointerEvents: collapsed ? 'none' : 'auto',
-          transition: 'opacity 240ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transition:
+            'opacity 240ms cubic-bezier(0.32, 0.72, 0, 1) ' +
+              `${collapsed ? '0ms' : '80ms'}, ` +
+            'transform 320ms cubic-bezier(0.22, 1, 0.36, 1) ' +
+              `${collapsed ? '0ms' : '80ms'}`,
         }}
       >
         {/* New task CTA — outlined neon button */}

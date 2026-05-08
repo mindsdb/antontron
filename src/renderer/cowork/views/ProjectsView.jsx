@@ -786,6 +786,10 @@ function ProjectDetail({
   onRenameCancel,
   onReveal,
   onDelete,
+  // Clicking a row inside the rail's Scheduled Tasks card routes to
+  // the schedule detail page. Wired by App.jsx — same handler the
+  // ScheduledView grid uses.
+  onOpenSchedule,
 }) {
   const projectTasks = (tasks || [])
     .filter((t) => t.projectName === project.name || t.projectPath === project.path)
@@ -1045,7 +1049,7 @@ function ProjectDetail({
         </div>
         <WorkingFolderBox project={project} />
         <ContextBox project={project} />
-        <ScheduledBox items={projectSchedules} />
+        <ScheduledBox items={projectSchedules} onSelect={onOpenSchedule} />
       </aside>
     </div>
   );
@@ -1071,6 +1075,9 @@ export default function ProjectsView({
   onAttachFiles,
   onAttachConnector,
   onRemoveAttachment,
+  // Forwarded to ProjectDetail's rail Scheduled Tasks card —
+  // clicking a row routes to the schedule detail page.
+  onOpenSchedule,
 }) {
   const { pinned, togglePin } = usePinnedProjects();
   const [view, setView] = useState(() =>
@@ -1210,6 +1217,7 @@ export default function ProjectsView({
           setDetailProject(null);
           onDeleteProject?.(proj);
         }}
+        onOpenSchedule={onOpenSchedule}
       />
     );
   }

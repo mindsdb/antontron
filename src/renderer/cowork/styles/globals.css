@@ -1936,6 +1936,45 @@ body:not([data-theme="dark"]) .btn-primary {
   cursor: not-allowed; opacity: 0.55; pointer-events: none;
 }
 
+/* Busy variant — used while the button is awaiting an async result
+   (e.g. a connection probe in the data-vault form). Reads as
+   "locked but still alive": no dim opacity, gentle accent pulse on
+   the surface + a soft halo that breathes. The base .btn-primary
+   :disabled rule above bottoms out at 0.55 opacity, which makes a
+   busy button read as broken; this rule wins on specificity (two
+   classes) and overrides both opacity and pointer-events. */
+@keyframes btn-busy-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 0%, transparent);
+    filter: brightness(1.00);
+  }
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 14%, transparent);
+    filter: brightness(1.08);
+  }
+}
+.btn-primary.is-busy,
+.btn.primary.is-busy {
+  cursor: progress;
+  pointer-events: none;
+  opacity: 1;
+  animation: btn-busy-pulse 1.4s ease-in-out infinite;
+  /* The keyframe paints a soft halo via box-shadow; ensure the
+     button has its own border-radius mask so the halo follows the
+     pill shape rather than overflowing as a square. */
+  will-change: filter, box-shadow;
+}
+@media (prefers-reduced-motion: reduce) {
+  .btn-primary.is-busy,
+  .btn.primary.is-busy {
+    animation: none;
+    /* Static visual cue when motion is reduced — slightly elevated
+       brightness so the disabled / busy distinction is still
+       readable without movement. */
+    filter: brightness(1.04);
+  }
+}
+
 /* Subtle — borderless until hovered. Quietest variant. Aliased from
    the older .btn-secondary / .btn-ghost classes. */
 .btn.subtle,

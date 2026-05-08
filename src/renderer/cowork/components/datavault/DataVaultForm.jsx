@@ -667,7 +667,15 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
                 dispatch(a);
               }}
               disabled={busy && a.kind !== 'cancel'}
-              className={a.kind === 'primary' ? 'btn-primary' : undefined}
+              // `is-busy` paints a gentle accent pulse while the
+              // probe is in flight (see globals.css `.btn-primary.is-busy`).
+              // Overrides the default disabled-dim so the button
+              // reads as "working" rather than "dead."
+              className={
+                a.kind === 'primary'
+                  ? `btn-primary${busy ? ' is-busy' : ''}`
+                  : undefined
+              }
               style={a.kind === 'primary' ? undefined : {
                 background: 'transparent',
                 border: '1px solid var(--line)',
@@ -787,6 +795,14 @@ function MethodPicker({ methods, onPick, busy }) {
               fontFamily: FONT_BODY,
               transition: 'transform 120ms ease, background 120ms ease, border-color 120ms ease',
               outline: 'none',
+              // Belt: when the card sits inside a constrained flex
+              // parent (the form panel column), `minWidth: 0` lets
+              // it shrink below its intrinsic content width so a
+              // long unbreakable token in the description (e.g.
+              // a sample connection URI) can't push the card past
+              // the panel's edge. Suspenders: `overflowWrap` on
+              // the description below handles the line-breaking.
+              minWidth: 0,
             }}
             onMouseOver={(e) => { if (!busy) e.currentTarget.style.transform = 'translateY(-1px)'; }}
             onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
@@ -801,10 +817,13 @@ function MethodPicker({ methods, onPick, busy }) {
           >
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+              minWidth: 0,
             }}>
               <span style={{
                 fontWeight: 600, fontSize: 13.5, color: 'var(--ink)',
                 letterSpacing: '-0.005em',
+                minWidth: 0, flex: '1 1 auto',
+                overflowWrap: 'anywhere', wordBreak: 'break-word',
               }}>{m.label || m.id}</span>
               {m.recommended && (
                 <span style={{
@@ -820,6 +839,16 @@ function MethodPicker({ methods, onPick, busy }) {
             {m.description && (
               <div style={{
                 fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.45,
+                // Spec authors sometimes embed a sample connection
+                // URI in the description (Postgres `connection_string`
+                // method, for example). Without word-break that long
+                // unbreakable token blows out the card's width.
+                // `overflowWrap: anywhere` lets the browser break
+                // mid-token where needed; `minWidth: 0` on the
+                // parent card unlocks shrink below intrinsic width.
+                overflowWrap: 'anywhere',
+                wordBreak: 'break-word',
+                minWidth: 0,
               }}>{m.description}</div>
             )}
             {hasHelp && (
