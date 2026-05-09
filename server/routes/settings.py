@@ -172,14 +172,55 @@ def get_config_status() -> dict[str, Any]:
     }
 
 
+# Minds Cloud uses sentinel model names (`_reason_`, `_code_`) that
+# only its OpenAI-compatible router resolves. If the user onboards via
+# Minds and later switches `ANTON_PLANNING_PROVIDER` to anthropic /
+# openai / gemini, these sentinels linger in cowork preferences and
+# the UI sends them on every request — every request then 404s
+# because the new provider doesn't know what `_reason_` is.
+def _is_minds_sentinel(model_id: str | None) -> bool:
+    return bool(model_id) and model_id.startswith("_") and model_id.endswith("_")
+
+
 def _ui_settings() -> dict[str, Any]:
     prefs = load_state().get("preferences", {})
     if not isinstance(prefs, dict):
         prefs = {}
     merged = dict(UI_DEFAULTS)
     merged.update({key: value for key, value in prefs.items() if key in UI_DEFAULTS})
-    if not merged.get("defaultModel"):
-        merged["defaultModel"] = _get_env("ANTON_PLANNING_MODEL", "claude-sonnet-4-6")
+
+    env_planning_model = _get_env("ANTON_PLANNING_MODEL", "claude-sonnet-4-6")
+    env_planning_provider = _get_env("ANTON_PLANNING_PROVIDER", "anthropic")
+
+    # Drop a stale Minds sentinel the moment the active provider can't
+    # resolve it. Falls through to the env's planning model, which is
+    # the source of truth for "what model will the request actually
+    # talk to." Without this guard the cowork UI keeps showing
+    # `_reason_` indefinitely after a provider switch.
+    saved_default = merged.get("defaultModel") or ""
+    if _is_minds_sentinel(saved_default) and env_planning_provider != "openai-compatible":
+        # Persist the cleanup so state.json reflects reality and we
+        # don't keep doing this masking work on every request. Best-
+        # effort — a write failure only means we'll re-mask next time.
+        try:
+            def _drop_default_model(state: dict) -> None:
+                prefs = state.get("preferences")
+                if isinstance(prefs, dict):
+                    prefs.pop("defaultModel", None)
+            update_state(_drop_default_model)
+            logger.info(
+                "Dropped stale Minds sentinel %r from cowork preferences "
+                "(active planning_provider=%r).",
+                saved_default, env_planning_provider,
+            )
+        except Exception as e:
+            logger.debug("Could not persist defaultModel cleanup: %s", e)
+        saved_default = ""
+
+    if not saved_default:
+        saved_default = env_planning_model
+    merged["defaultModel"] = saved_default
+
     return merged
 
 
