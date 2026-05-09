@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import datetime
 import mimetypes
 import re
 import shutil
+from typing import Union
 import uuid
 from pathlib import Path
 
@@ -12,6 +14,7 @@ from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from .cowork_state import load_state, save_state, uploads_dir, utc_now_iso
+from anton_api.projects_store import resolve_project
 
 
 router = APIRouter(prefix="/v1/attachments", tags=["attachments"])
@@ -31,6 +34,37 @@ class ProjectFileAttachmentRequest(BaseModel):
     project_path: str
     path: str
     session_id: str | None = None
+
+
+class FileAttachment(BaseModel):
+    id: str
+    name: str
+    mime: str
+    size: int
+    path: str
+    created_at: datetime.datetime
+    updated_at: datetime.datetime
+
+    @classmethod
+    def from_path(cls, file_id: str, file_path: Union[str, Path]):
+        # Path() will accept a string or an existing Path object
+        path_obj = Path(file_path)
+        
+        if not path_obj.exists():
+            raise FileNotFoundError(f"File not found at: {path_obj}")
+
+        stats = path_obj.stat()
+        mime_type, _ = mimetypes.guess_type(path_obj)
+        
+        return cls(
+            id=file_id,
+            name=path_obj.name,
+            mime=mime_type or "application/octet-stream",
+            size=stats.st_size,
+            path=str(path_obj.absolute()),
+            created_at=datetime.datetime.fromtimestamp(stats.st_ctime),
+            updated_at=datetime.datetime.fromtimestamp(stats.st_mtime)
+        )
 
 
 def _safe_name(name: str) -> str:
@@ -105,45 +139,32 @@ def _make_attachment(
     return _store_metadata(metadata)
 
 
-def get_attachments(ids: list[str] | None = None) -> list[dict]:
-    state = load_state()
-    attachments = state.get("attachments", {})
+def get_attachments(
+    project_name: str | None = None,
+    session_id: str | None = None,
+    ids: list[str] | None = None
+) -> list[FileAttachment]:
+    _, project_path = resolve_project(project_name)
+    project_uploads_dir = uploads_dir(project_path)
+    if session_id:
+        project_uploads_dir = project_uploads_dir / session_id
+
     if ids is None:
-        return sorted(attachments.values(), key=lambda item: item.get("createdAt", ""), reverse=True)
-    return [attachments[item_id] for item_id in ids if item_id in attachments]
+        files = sorted(project_uploads_dir.iterdir(), key=lambda item: item.stat().st_ctime, reverse=True)
+    files = [project_uploads_dir / item_id for item_id in ids if (project_uploads_dir / item_id).exists()]
+    return [FileAttachment.from_path(file.name, file) for file in files]
 
 
-def assign_attachments(ids: list[str] | None, session_id: str) -> list[dict]:
-    if not ids:
-        return []
-    state = load_state()
-    updated: list[dict] = []
-    for item_id in ids:
-        metadata = state.get("attachments", {}).get(item_id)
-        if not metadata:
-            continue
-        metadata["sessionId"] = session_id
-        metadata["updatedAt"] = utc_now_iso()
-        updated.append(metadata)
-    save_state(state)
-    return updated
-
-
-def attachment_context(ids: list[str] | None) -> str:
-    selected = get_attachments(ids or [])
+def attachment_context(project_name: str | None, session_id: str | None, ids: list[str] | None) -> str:
+    selected = get_attachments(project_name, session_id, ids)
     if not selected:
         return ""
 
     sections = ["Attached context supplied by the user:"]
     for item in selected:
-        header_bits = [item.get("kind") or "attachment", item.get("mime") or "unknown type"]
-        if item.get("sourceUrl"):
-            header_bits.append(item["sourceUrl"])
-        elif item.get("source"):
-            header_bits.append(item["source"])
-        header = f"### {item.get('name') or item['id']} ({'; '.join(header_bits)})"
+        header = f"### {item.name} ({item.mime})"
         sections.append(header)
-        path = f"File path: {item['path']}"
+        path = f"File path: {item.path}"
         sections.append(path)
 
     return "\n\n".join(sections)
@@ -151,23 +172,21 @@ def attachment_context(ids: list[str] | None) -> str:
 
 @router.get("")
 def list_attachments(
+    project_name: str | None = Query(default=None),
     session_id: str | None = Query(default=None),
     ids: list[str] | None = Query(default=None),
 ):
-    attachments = get_attachments(ids)
-    if session_id:
-        attachments = [item for item in attachments if item.get("sessionId") == session_id]
-    return {"attachments": attachments}
+    return get_attachments(project_name, session_id, ids)
 
 
 @router.post("/upload")
 async def upload_attachments(
-    files: list[UploadFile] = File(...),
+    project_name: str | None = Form(default=None),
     session_id: str | None = Form(default=None),
-    project_path: str | None = Form(default=None),
-):
+    files: list[UploadFile] = File(...),
+) -> list[FileAttachment]:
     # Store uploads in the project's /uploads directory.
-    project_path = Path(project_path)
+    _, project_path = resolve_project(project_name)
     project_uploads_dir = uploads_dir(project_path)
 
     created: list[dict] = []
@@ -179,22 +198,9 @@ async def upload_attachments(
         target = target_dir / filename
         data = await file.read()
         target.write_bytes(data)
-        mime = file.content_type or mimetypes.guess_type(filename)[0]
 
-        metadata = {
-            "id": attachment_id,
-            "kind": "file",
-            "name": filename,
-            "mime": mime or "application/octet-stream",
-            "size": len(data),
-            "path": str(target),
-            "sessionId": session_id,
-            "projectPath": project_path,
-            "createdAt": utc_now_iso(),
-            "updatedAt": utc_now_iso(),
-        }
-        _store_metadata(metadata)
-        created.append(metadata)
+        attachment = FileAttachment.from_path(attachment_id, target)
+        created.append(attachment)
     return {"attachments": created}
 
 
