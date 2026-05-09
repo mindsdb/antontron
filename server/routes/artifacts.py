@@ -356,6 +356,9 @@ def _resolve_artifact_path(raw_path: str) -> Path:
         with a leading `artifacts/`).
     Path-traversal guarded; non-existent files yield 404.
     """
+    # Reject null bytes, which are used in path injection attacks.
+    if "\x00" in raw_path:
+        raise HTTPException(status_code=400, detail="Invalid artifact path")
     try:
         target = Path(raw_path).expanduser()
     except Exception as exc:
