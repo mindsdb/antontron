@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { flushSync } from 'react-dom';
 import Ico from './components/Icons';
 import { pickConnectWelcome } from './lib/connectWelcomes';
@@ -11,6 +11,7 @@ import HomeView from './views/HomeView';
 import ChatView from './views/ChatView';
 import ProjectsView from './views/ProjectsView';
 import ScheduledView from './views/ScheduledView';
+import TasksView from './views/TasksView';
 import ScheduleDetailView from './views/ScheduleDetailView';
 import ArtifactsView from './views/ArtifactsView';
 import DispatchView from './views/DispatchView';
@@ -499,6 +500,11 @@ function AppCore() {
   const [projects, setProjects] = useState([]);
   const [artifacts, setArtifacts] = useState([]);
   const [scheduled, setScheduled] = useState([]);
+  // Flat session→schedule map sourced from `GET /v1/schedules`.
+  // Lets TasksView collapse all conversations belonging to one
+  // schedule into a single grouped row instead of listing each
+  // execution separately.
+  const [scheduleRunsIndex, setScheduleRunsIndex] = useState({});
   const [pins, setPins] = useState([]);
   const [connectors, setConnectors] = useState([]);
   const [composerAttachments, setComposerAttachments] = useState([]);
@@ -582,7 +588,16 @@ function AppCore() {
   // declared further down and reading it before initialization throws
   // a TDZ ReferenceError at first render.
   const [models] = useState(MOCK_DATA.models);
+  // The user's preferred collapsed state for the sidebar. Effective
+  // collapsed-ness is derived below — we only honor this value while
+  // viewing a chat task; every other surface (home, projects,
+  // artifacts, settings, scheduled, …) keeps the sidebar expanded so
+  // the user can navigate via it directly. Locking outside chat
+  // means the collapse affordance is hidden in those views too.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // Routes where the user can collapse the sidebar. Currently:
+  // chat task only.
+  const sidebarCollapsibleRoutes = useMemo(() => new Set(['task']), []);
   // Theme (light | dark) — persisted in localStorage so the choice
   // survives reloads. The animated background canvas (gravity-field)
   // and the body's bg colour both follow this value.
@@ -593,14 +608,22 @@ function AppCore() {
     } catch { return 'dark'; }
   });
 
-  // Global keyboard shortcuts. Cmd/Ctrl+B toggles the sidebar,
-  // Cmd/Ctrl+K opens search, Cmd/Ctrl+N starts a new task.
+  // Routes that allow the sidebar to be collapsed via Cmd+B. Read via
+  // a ref so the keydown listener (mounted once) sees the live route
+  // without needing to rebind on every navigation.
+  const routeRef = useRef('home');
+  // Global keyboard shortcuts. Cmd/Ctrl+B toggles the sidebar (chat
+  // only), Cmd/Ctrl+K opens search, Cmd/Ctrl+N starts a new task.
   useEffect(() => {
     const onKey = (e) => {
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.altKey || e.shiftKey) return;
       const key = e.key.toLowerCase();
       if (key === 'b') {
+        // Sidebar collapse is a chat-view affordance. Outside of
+        // task view we keep it expanded so the user can always see
+        // the navigation rail; swallow the shortcut quietly there.
+        if (!sidebarCollapsibleRoutes.has(routeRef.current)) return;
         e.preventDefault();
         setSidebarCollapsed((c) => !c);
       } else if (key === 'k') {
@@ -617,7 +640,7 @@ function AppCore() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, []);
+  }, [sidebarCollapsibleRoutes]);
 
   // After a *mouse* click on a button, drop its keyboard focus so a later
   // stray Space/Enter doesn't re-trigger that button (e.g. clicking
@@ -655,6 +678,14 @@ function AppCore() {
   }, [theme]);
 
   const [route, setRoute] = useState('home');         // home | task | projects | scheduled | schedule-detail | artifacts | dispatch | customize | settings
+  // Keep a ref of the live route so the keydown listener (bound
+  // once on mount) can read it without a re-bind on every nav.
+  routeRef.current = route;
+  // Effective collapse state: only honor the user's preference while
+  // the route allows it (chat task). Everywhere else the sidebar
+  // stays expanded — gives the user permanent access to the nav.
+  const sidebarCollapsedEffective =
+    sidebarCollapsibleRoutes.has(route) && sidebarCollapsed;
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [selectedScheduleId, setSelectedScheduleId] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -684,7 +715,10 @@ function AppCore() {
     fetchProjects().then((data) => { if (Array.isArray(data)) setProjects(data); });
     fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
     fetchPins().then((data) => setPins(data.pins || []));
-    fetchSchedules().then((data) => setScheduled(data.schedules || []));
+    fetchSchedules().then((data) => {
+      setScheduled(data.schedules || []);
+      setScheduleRunsIndex(data.runs_index || {});
+    });
     fetchDatasources()
       .then((data) => setConnectors(Array.isArray(data?.connections) ? data.connections : []))
       .catch(() => setConnectors([]));
@@ -841,18 +875,39 @@ function AppCore() {
   // Seed server state from main's truth on first paint so the toggle
   // button reflects reality (running OR starting) even before /health
   // has returned. While main is mid-start, show the spinner; poll
-  // every 600 ms until it resolves.
+  // every 600 ms until it resolves — OR until we've polled long
+  // enough that we'd expect main to have decided one way or the
+  // other.
+  //
+  // The earlier version stopped as soon as `info.starting === false`,
+  // which lost the race against main's boot path: the renderer
+  // mounts and runs its first tick before main has finished
+  // `checkInstallStatus()` + spawned the python (so `pendingStart`
+  // is still null and `info.starting === false` even though the
+  // boot path is about to start one). The renderer would settle on
+  // "offline" and never re-poll, leaving the user looking at a
+  // grey status pill while a perfectly healthy server was
+  // listening in the background.
+  //
+  // Fix: keep ticking until either `info.running` flips true OR a
+  // hard ceiling elapses (45s — same upper bound as `startServer`'s
+  // health-probe timeout). After the ceiling we stop and trust the
+  // status pill / sidebar toggle to recover by user action.
   useEffect(() => {
     if (host.isWeb) return; // No server lifecycle to poll in the hosted web shell.
     let cancelled = false;
     let timer = null;
+    const startedAt = Date.now();
+    const POLL_CEILING_MS = 45_000;
 
     const tick = async () => {
       try {
         const info = await host.serverInfo();
         if (cancelled || !info) return;
         if (typeof info.running === 'boolean') setServerOnline(info.running);
-        if (info.starting) {
+        const running = info.running === true;
+        const starting = info.starting === true;
+        if (starting) {
           setServerBusyKind('starting');
           setServerBusy(true);
           timer = setTimeout(tick, 600);
@@ -864,7 +919,21 @@ function AppCore() {
         } else {
           setServerBusy(false);
         }
-      } catch {}
+        // Keep polling until we see `running=true`, OR until the
+        // ceiling elapses. Polling while `running=false` covers the
+        // window where main is still resolving `checkInstallStatus`
+        // before kicking off `startServer`.
+        if (!running && Date.now() - startedAt < POLL_CEILING_MS) {
+          timer = setTimeout(tick, 600);
+        }
+      } catch {
+        // Polling errors (IPC blip, restart) shouldn't kill the
+        // loop — keep trying within the ceiling so a transient
+        // hiccup doesn't strand the renderer in offline state.
+        if (Date.now() - startedAt < POLL_CEILING_MS) {
+          timer = setTimeout(tick, 600);
+        }
+      }
     };
 
     tick();
@@ -1372,7 +1441,10 @@ function AppCore() {
       setSelectedProject(null);
     }
     if (key === 'scheduled') {
-      fetchSchedules().then((data) => setScheduled(data.schedules || []));
+      fetchSchedules().then((data) => {
+      setScheduled(data.schedules || []);
+      setScheduleRunsIndex(data.runs_index || {});
+    });
     }
     setRoute(key);
   };
@@ -2026,6 +2098,7 @@ function AppCore() {
   const refreshSchedules = async () => {
     const data = await fetchSchedules();
     setScheduled(data.schedules || []);
+    setScheduleRunsIndex(data.runs_index || {});
   };
 
   const handleCreateSchedule = async (payload) => {
@@ -2120,14 +2193,18 @@ function AppCore() {
           top: 18, left: 97,
           zIndex: 10,
           WebkitAppRegion: 'no-drag',
-          opacity: sidebarCollapsed ? 1 : 0,
-          transform: sidebarCollapsed ? 'translateX(0)' : 'translateX(-8px)',
-          pointerEvents: sidebarCollapsed ? 'auto' : 'none',
+          // Only visible when the sidebar is *effectively* collapsed,
+          // which by definition means we're on a route that allows
+          // collapsing (chat task). Outside that, the sidebar is
+          // pinned open and this affordance is unnecessary.
+          opacity: sidebarCollapsedEffective ? 1 : 0,
+          transform: sidebarCollapsedEffective ? 'translateX(0)' : 'translateX(-8px)',
+          pointerEvents: sidebarCollapsedEffective ? 'auto' : 'none',
           transition:
             'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1) ' +
-              `${sidebarCollapsed ? '120ms' : '0ms'}, ` +
+              `${sidebarCollapsedEffective ? '120ms' : '0ms'}, ` +
             'transform 360ms cubic-bezier(0.32, 0.72, 0, 1) ' +
-              `${sidebarCollapsed ? '80ms' : '0ms'}`,
+              `${sidebarCollapsedEffective ? '80ms' : '0ms'}`,
         }}
       >
         {Ico.sidebarExpandRight(15)}
@@ -2147,14 +2224,27 @@ function AppCore() {
         onSelectTask={selectTask}
         onNewTask={newTask}
         onOpenSearch={() => setSearchOpen(true)}
-        collapsed={sidebarCollapsed}
-        onToggleCollapsed={() => setSidebarCollapsed((c) => !c)}
+        collapsed={sidebarCollapsedEffective}
+        // Only expose the toggle on routes that allow collapse —
+        // Sidebar hides its own chrome collapse button when
+        // `onToggleCollapsed` is undefined.
+        onToggleCollapsed={
+          sidebarCollapsibleRoutes.has(route)
+            ? () => setSidebarCollapsed((c) => !c)
+            : undefined
+        }
         onPinTask={handlePinTask}
         onUnpinTask={handleUnpinTask}
         onRenameTask={handleRenameTask}
         onDeleteTask={handleDeleteTask}
         onMoveTaskToProject={handleMoveTaskToProject}
         projects={projects}
+        schedules={scheduled}
+        scheduleRunsIndex={scheduleRunsIndex}
+        onOpenSchedule={(scheduleId) => {
+          setSelectedScheduleId(scheduleId);
+          setRoute('schedule-detail');
+        }}
         serverBusy={serverBusy}
         serverBusyKind={serverBusyKind}
         updateAvailable={updateStatus?.phase === 'available' ? { version: updateStatus.version } : null}
@@ -2265,7 +2355,7 @@ function AppCore() {
               setRoute('projects');
             }}
             projects={projects}
-            sidebarCollapsed={sidebarCollapsed}
+            sidebarCollapsed={sidebarCollapsedEffective}
           />
         )}
 
@@ -2292,6 +2382,12 @@ function AppCore() {
             onAttachFiles={handleAttachFiles}
             onAttachConnector={handleAttachConnector}
             onRemoveAttachment={handleRemoveAttachment}
+            onOpenSchedule={(task) => {
+              // Same handler ScheduledView uses — routes to the
+              // schedule detail page for the clicked row.
+              setSelectedScheduleId(task.id);
+              setRoute('schedule-detail');
+            }}
           />
         )}
 
@@ -2358,6 +2454,25 @@ function AppCore() {
               if (p) setSelectedProject(p);
               setRoute('projects');
             }}
+          />
+        )}
+
+        {route === 'tasks' && (
+          <TasksView
+            tasks={tasks}
+            projects={projects}
+            schedules={scheduled}
+            scheduleRunsIndex={scheduleRunsIndex}
+            onOpenTask={(id) => selectTask(id)}
+            onOpenProject={(p) => {
+              if (p) setSelectedProject(p);
+              setRoute('projects');
+            }}
+            onOpenSchedule={(scheduleId) => {
+              setSelectedScheduleId(scheduleId);
+              setRoute('schedule-detail');
+            }}
+            onDeleteTask={handleDeleteTask}
           />
         )}
 

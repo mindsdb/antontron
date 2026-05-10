@@ -6,6 +6,7 @@ import base64
 import hashlib
 import html as html_lib
 import json
+import logging
 import os
 import secrets
 from datetime import datetime, timedelta, timezone
@@ -21,6 +22,8 @@ from fastapi.responses import HTMLResponse
 
 from .cowork_state import load_state, update_state
 from .settings import _get_env
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -44,6 +47,15 @@ GOOGLE_CALENDAR_OAUTH_SCOPES = (
     "https://www.googleapis.com/auth/calendar",
 )
 GOOGLE_CALENDAR_OAUTH_STATE_KEY = "google_calendar_oauth"
+
+GMAIL_ENGINE = "gmail"
+GMAIL_OAUTH_SCOPES = (
+    "openid",
+    "email",
+    "profile",
+    "https://www.googleapis.com/auth/gmail.modify",
+)
+GMAIL_OAUTH_STATE_KEY = "gmail_oauth"
 
 GOOGLE_AUTH_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
@@ -124,6 +136,31 @@ GOOGLE_CALENDAR_BLOCK = dedent(
 ).strip()
 
 
+GMAIL_BLOCK = dedent(
+    """
+    ## Gmail
+
+    ```yaml
+    engine: gmail
+    display_name: Gmail
+    pip: google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib
+    popular: true
+    fields:
+      - { name: access_token, required: false, secret: true, description: "OAuth access token (managed by Anton)" }
+    test_snippet: |
+      import os
+      from google.oauth2.credentials import Credentials
+      from googleapiclient.discovery import build
+
+      creds = Credentials(token=os.environ.get('DS_ACCESS_TOKEN', ''))
+      service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
+      result = service.users().getProfile(userId='me').execute()
+      print('ok — email:', result.get('emailAddress', ''))
+    ```
+    """
+).strip()
+
+
 def _replace_managed_block(existing: str, managed_body: str) -> str:
     managed_section = f"{MANAGED_BEGIN}\n\n{managed_body}\n\n{MANAGED_END}\n"
     if MANAGED_BEGIN in existing and MANAGED_END in existing:
@@ -165,6 +202,8 @@ def ensure_managed_integrations() -> Path:
         managed_blocks.append(GOOGLE_DRIVE_BLOCK)
     if "engine: google_calendar" not in base_without_managed:
         managed_blocks.append(GOOGLE_CALENDAR_BLOCK)
+    if "engine: gmail" not in base_without_managed:
+        managed_blocks.append(GMAIL_BLOCK)
 
     managed_body = "\n\n".join(block for block in managed_blocks if block).strip()
     updated = (
@@ -329,6 +368,130 @@ def _json_request(url: str, *, method: str = "GET", data: dict[str, str] | None 
         raise HTTPException(status_code=502, detail="Could not reach Google OAuth services") from exc
 
 
+GOOGLE_REVOKE_ENDPOINT = "https://oauth2.googleapis.com/revoke"
+GOOGLE_OAUTH_ENGINES = {GOOGLE_DRIVE_ENGINE, GOOGLE_CALENDAR_ENGINE, GMAIL_ENGINE}
+
+
+def revoke_google_token(engine: str, name: str) -> None:
+    """Revoke Google OAuth tokens for a connection, removing it from the user's Google permissions page.
+
+    Fire-and-forget — errors are logged but never raised so the caller's
+    delete flow is never blocked by a failed revocation.
+    """
+    import logging
+    log = logging.getLogger("integrations.revoke")
+
+    if engine not in GOOGLE_OAUTH_ENGINES:
+        return
+
+    try:
+        from anton.core.datasources.data_vault import LocalDataVault
+        fields = LocalDataVault().load(engine, name) or {}
+    except Exception:
+        return
+
+    if fields.get("auth_type") != "oauth":
+        return
+
+    token = fields.get("refresh_token", "").strip() or fields.get("access_token", "").strip()
+    if not token:
+        return
+
+    try:
+        from urllib.request import urlopen, Request
+        req = Request(
+            f"{GOOGLE_REVOKE_ENDPOINT}?token={token}",
+            method="POST",
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+        )
+        with urlopen(req, timeout=10):
+            pass
+        log.info("Revoked Google token for %s/%s", engine, name)
+    except Exception as exc:
+        log.warning("Could not revoke Google token for %s/%s: %s", engine, name, exc)
+
+
+def refresh_google_oauth_tokens() -> None:
+    """Proactively refresh Google OAuth tokens that are close to expiry.
+
+    Runs in a background thread every 30 minutes. Skips connections that
+    are still valid; logs warnings on failure so the app doesn't crash.
+    """
+    import logging
+    log = logging.getLogger("integrations.token-refresh")
+
+    oauth_config = _google_oauth_config()
+    if not oauth_config["ready"]:
+        return
+
+    try:
+        from anton.core.datasources.data_vault import LocalDataVault
+        vault = LocalDataVault()
+    except Exception:
+        return
+
+    engines = {GOOGLE_DRIVE_ENGINE, GOOGLE_CALENDAR_ENGINE, GMAIL_ENGINE}
+    now = datetime.now(timezone.utc)
+    refresh_threshold = now + timedelta(minutes=10)
+
+    for item in vault.list_connections():
+        engine = item.get("engine")
+        name = item.get("name")
+        if engine not in engines or not name:
+            continue
+
+        try:
+            fields = vault.load(engine, name) or {}
+        except Exception:
+            continue
+
+        if fields.get("auth_type") != "oauth":
+            continue
+
+        refresh_token = fields.get("refresh_token", "").strip()
+        if not refresh_token:
+            continue
+
+        expires_at_str = fields.get("expires_at", "").strip()
+        if expires_at_str:
+            try:
+                expires_dt = datetime.fromisoformat(expires_at_str)
+                if expires_dt > refresh_threshold:
+                    continue  # still valid for >10 minutes, skip
+            except ValueError:
+                pass  # unparseable — refresh to be safe
+
+        try:
+            token_data = _json_request(
+                GOOGLE_TOKEN_ENDPOINT,
+                method="POST",
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": str(oauth_config["client_id"]),
+                    "client_secret": str(oauth_config["client_secret"]),
+                },
+            )
+            new_access_token = str(token_data.get("access_token", "")).strip()
+            if not new_access_token:
+                continue
+
+            expires_in = int(token_data.get("expires_in", 0) or 0)
+            new_expires_at = (
+                datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+            ).isoformat() if expires_in else ""
+
+            updated = {**fields, "access_token": new_access_token, "expires_at": new_expires_at}
+            new_refresh_token = str(token_data.get("refresh_token", "")).strip()
+            if new_refresh_token:
+                updated["refresh_token"] = new_refresh_token
+
+            vault.save(engine, name, updated)
+            log.info("Refreshed %s/%s token (expires %s)", engine, name, new_expires_at)
+        except Exception as exc:
+            log.warning("Could not refresh %s/%s token: %s", engine, name, exc)
+
+
 def _google_drive_oauth_connections(vault) -> list[dict[str, Any]]:
     connections = []
     for item in vault.list_connections():
@@ -447,7 +610,7 @@ async def list_integrations():
         raise HTTPException(status_code=503, detail="Anton integration catalogue is unavailable") from exc
 
     vault = LocalDataVault()
-    return {"items": [_integration_item(vault), _calendar_integration_item(vault)]}
+    return {"items": [_integration_item(vault), _calendar_integration_item(vault), _gmail_integration_item(vault)]}
 
 
 @router.post("/google-drive/oauth/start")
@@ -676,8 +839,6 @@ async def google_drive_oauth_callback(
                 "token_type": str(token_data.get("token_type", "Bearer")).strip(),
                 "scope": str(token_data.get("scope", "")).strip(),
                 "expires_at": expires_at,
-                "client_id": str(oauth_config["client_id"]).strip(),
-                "client_secret": str(oauth_config["client_secret"]).strip(),
                 "account_email": account_email,
                 "account_name": account_name,
             },
@@ -860,8 +1021,6 @@ async def google_calendar_oauth_callback(
                 "token_type": str(token_data.get("token_type", "Bearer")).strip(),
                 "scope": str(token_data.get("scope", "")).strip(),
                 "expires_at": expires_at,
-                "client_id": str(oauth_config["client_id"]).strip(),
-                "client_secret": str(oauth_config["client_secret"]).strip(),
                 "account_email": account_email,
                 "account_name": account_name,
             },
@@ -874,16 +1033,289 @@ async def google_calendar_oauth_callback(
             success=False,
         )
     except Exception as exc:
+        logger.exception("Google Calendar OAuth callback failed")
         _clear_google_calendar_oauth_pending(lastError=str(exc), lastErrorAt=_iso_now())
         return _callback_page(
             "Google Calendar connection failed",
-            str(exc),
+            "Anton CoWork could not finish the Google sign-in flow.",
             success=False,
         )
 
     _clear_google_calendar_oauth_pending(lastError="", lastErrorAt="", lastSuccessAt=_iso_now())
     return _callback_page(
         "Google Calendar connected",
+        f"{account_name or account_email or 'Your Google account'} is now connected. You can close this tab and return to Anton CoWork.",
+        success=True,
+    )
+
+
+# ── Gmail OAuth ──────────────────────────────────────────────────────────────
+
+def _gmail_oauth_config() -> dict[str, str | bool]:
+    return _google_oauth_config()
+
+
+def _gmail_redirect_uri() -> str:
+    return f"{_server_origin()}/v1/integrations/gmail/oauth/callback"
+
+
+def _gmail_oauth_meta() -> dict[str, Any]:
+    state = load_state()
+    utility_state = state.get("utility_state") if isinstance(state, dict) else {}
+    meta = utility_state.get(GMAIL_OAUTH_STATE_KEY) if isinstance(utility_state, dict) else {}
+    if not isinstance(meta, dict):
+        meta = {}
+    if not isinstance(meta.get("pending"), dict):
+        meta["pending"] = {}
+    return meta
+
+
+def _write_gmail_oauth_meta(**updates: Any) -> dict[str, Any]:
+    def mutate(state: dict[str, Any]) -> dict[str, Any]:
+        utility_state = state.setdefault("utility_state", {})
+        meta = utility_state.get(GMAIL_OAUTH_STATE_KEY)
+        if not isinstance(meta, dict):
+            meta = {}
+        meta.update(updates)
+        if not isinstance(meta.get("pending"), dict):
+            meta["pending"] = {}
+        utility_state[GMAIL_OAUTH_STATE_KEY] = meta
+        return dict(meta)
+    return update_state(mutate)
+
+
+def _clear_gmail_oauth_pending(**updates: Any) -> dict[str, Any]:
+    return _write_gmail_oauth_meta(pending={}, **updates)
+
+
+def _gmail_oauth_connections(vault) -> list[dict[str, Any]]:
+    connections = []
+    for item in vault.list_connections():
+        if item.get("engine") != GMAIL_ENGINE or not item.get("name"):
+            continue
+        fields = vault.load(GMAIL_ENGINE, item["name"]) or {}
+        if fields.get("auth_type") != "oauth":
+            continue
+        display_name = fields.get("account_name", "").strip() or fields.get("account_email", "").strip() or item["name"]
+        subtitle = fields.get("account_email", "").strip() or item["name"]
+        connections.append(
+            {
+                "engine": GMAIL_ENGINE,
+                "name": item["name"],
+                "slug": f"{GMAIL_ENGINE}-{item['name']}",
+                "label": display_name,
+                "subtitle": subtitle,
+                "connectedVia": "browser_oauth",
+                "createdAt": item.get("created_at", ""),
+            }
+        )
+    return connections
+
+
+def _gmail_integration_item(vault) -> dict[str, Any]:
+    oauth_config = _gmail_oauth_config()
+    oauth_meta = _gmail_oauth_meta()
+    gmail_connections = _gmail_oauth_connections(vault)
+    return {
+        "id": GMAIL_ENGINE,
+        "title": "Gmail",
+        "engine": GMAIL_ENGINE,
+        "status": "connected" if gmail_connections else ("available" if oauth_config["ready"] else "needs_config"),
+        "description": "Connect your Gmail account so Anton can read, search, and send email on your behalf.",
+        "setupMode": "browser_oauth",
+        "connections": gmail_connections,
+        "connectionCount": len(gmail_connections),
+        "engineAvailable": True,
+        "oauth": {
+            "ready": oauth_config["ready"],
+            "configError": oauth_config["error"],
+            "pending": bool(oauth_meta.get("pending")),
+            "lastSuccessAt": oauth_meta.get("lastSuccessAt", ""),
+            "lastError": oauth_meta.get("lastError", ""),
+            "lastErrorAt": oauth_meta.get("lastErrorAt", ""),
+            "launchLabel": "Connect Gmail",
+            "redirectUri": _gmail_redirect_uri(),
+        },
+    }
+
+
+@router.post("/gmail/oauth/start")
+async def start_gmail_oauth():
+    oauth_config = _gmail_oauth_config()
+    if not oauth_config["ready"]:
+        raise HTTPException(status_code=400, detail=str(oauth_config["error"]))
+
+    verifier = _pkce_verifier()
+    challenge = _pkce_challenge(verifier)
+    started_at = _iso_now()
+    state = secrets.token_urlsafe(24)
+    redirect_uri = _gmail_redirect_uri()
+
+    _write_gmail_oauth_meta(
+        pending={
+            "state": state,
+            "verifier": verifier,
+            "redirectUri": redirect_uri,
+            "startedAt": started_at,
+        },
+        lastError="",
+        lastErrorAt="",
+    )
+
+    auth_url = (
+        f"{GOOGLE_AUTH_ENDPOINT}?"
+        + urlencode(
+            {
+                "client_id": oauth_config["client_id"],
+                "redirect_uri": redirect_uri,
+                "response_type": "code",
+                "access_type": "offline",
+                "include_granted_scopes": "true",
+                "prompt": "consent",
+                "scope": " ".join(GMAIL_OAUTH_SCOPES),
+                "state": state,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+            }
+        )
+    )
+    return {
+        "status": "ok",
+        "authUrl": auth_url,
+        "redirectUri": redirect_uri,
+        "startedAt": started_at,
+    }
+
+
+@router.get("/gmail/oauth/callback")
+async def gmail_oauth_callback(
+    code: str = Query(default=""),
+    state: str = Query(default=""),
+    error: str = Query(default=""),
+):
+    oauth_meta = _gmail_oauth_meta()
+    pending = oauth_meta.get("pending") or {}
+    if error:
+        _clear_gmail_oauth_pending(lastError=f"Google sign-in returned: {error}", lastErrorAt=_iso_now())
+        return _callback_page(
+            "Gmail connection was cancelled",
+            "You can return to Anton CoWork and try the connection again whenever you are ready.",
+            success=False,
+        )
+
+    if not pending:
+        return _callback_page(
+            "Gmail sign-in expired",
+            "Anton CoWork could not find a pending Gmail sign-in request. Start the connection again from Customize.",
+            success=False,
+        )
+
+    pending_state = str(pending.get("state", "")).strip()
+    if not state or state != pending_state:
+        _clear_gmail_oauth_pending(lastError="Google sign-in state did not match.", lastErrorAt=_iso_now())
+        return _callback_page(
+            "Gmail connection could not be verified",
+            "Anton CoWork rejected the callback because the Google sign-in state did not match.",
+            success=False,
+        )
+
+    if not code:
+        _clear_gmail_oauth_pending(lastError="Google sign-in did not return an authorization code.", lastErrorAt=_iso_now())
+        return _callback_page(
+            "Gmail connection could not be completed",
+            "Google did not return an authorization code to Anton CoWork.",
+            success=False,
+        )
+
+    oauth_config = _gmail_oauth_config()
+    if not oauth_config["ready"]:
+        _clear_gmail_oauth_pending(lastError=str(oauth_config["error"]), lastErrorAt=_iso_now())
+        return _callback_page(
+            "Gmail connection is not configured",
+            str(oauth_config["error"]),
+            success=False,
+        )
+
+    started_at = str(pending.get("startedAt", "")).strip()
+    if started_at:
+        try:
+            started_dt = datetime.fromisoformat(started_at)
+            if datetime.now(timezone.utc) - started_dt > timedelta(minutes=20):
+                _clear_gmail_oauth_pending(lastError="Google sign-in timed out.", lastErrorAt=_iso_now())
+                return _callback_page(
+                    "Gmail sign-in expired",
+                    "That Google sign-in request took too long. Start the connection again from Customize.",
+                    success=False,
+                )
+        except ValueError:
+            pass
+
+    try:
+        token_data = _json_request(
+            GOOGLE_TOKEN_ENDPOINT,
+            method="POST",
+            data={
+                "code": code,
+                "client_id": str(oauth_config["client_id"]),
+                "client_secret": str(oauth_config["client_secret"]),
+                "redirect_uri": str(pending.get("redirectUri") or _gmail_redirect_uri()),
+                "grant_type": "authorization_code",
+                "code_verifier": str(pending.get("verifier", "")),
+            },
+        )
+        access_token = str(token_data.get("access_token", "")).strip()
+        if not access_token:
+            raise HTTPException(status_code=502, detail="Google OAuth token exchange did not return an access token.")
+
+        userinfo = _json_request(
+            GOOGLE_USERINFO_ENDPOINT,
+            headers={"Authorization": f"Bearer {access_token}"},
+        )
+        account_email = str(userinfo.get("email", "")).strip()
+        account_name = str(userinfo.get("name", "")).strip()
+        connection_name = account_email or "gmail"
+        expires_in = int(token_data.get("expires_in", 0) or 0)
+        expires_at = (
+            datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        ).isoformat() if expires_in else ""
+
+        try:
+            from anton.core.datasources.data_vault import LocalDataVault
+        except Exception as exc:
+            raise HTTPException(status_code=503, detail="Anton data vault is unavailable") from exc
+
+        LocalDataVault().save(
+            GMAIL_ENGINE,
+            connection_name,
+            {
+                "auth_type": "oauth",
+                "access_token": access_token,
+                "refresh_token": str(token_data.get("refresh_token", "")).strip(),
+                "token_type": str(token_data.get("token_type", "Bearer")).strip(),
+                "scope": str(token_data.get("scope", "")).strip(),
+                "expires_at": expires_at,
+                "account_email": account_email,
+                "account_name": account_name,
+            },
+        )
+    except HTTPException as exc:
+        _clear_gmail_oauth_pending(lastError=str(exc.detail), lastErrorAt=_iso_now())
+        return _callback_page(
+            "Gmail connection failed",
+            str(exc.detail),
+            success=False,
+        )
+    except Exception as exc:
+        _clear_gmail_oauth_pending(lastError=str(exc), lastErrorAt=_iso_now())
+        return _callback_page(
+            "Gmail connection failed",
+            str(exc),
+            success=False,
+        )
+
+    _clear_gmail_oauth_pending(lastError="", lastErrorAt="", lastSuccessAt=_iso_now())
+    return _callback_page(
+        "Gmail connected",
         f"{account_name or account_email or 'Your Google account'} is now connected. You can close this tab and return to Anton CoWork.",
         success=True,
     )

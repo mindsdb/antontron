@@ -10,6 +10,7 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import sys
@@ -114,7 +115,7 @@ from routes.search import router as search_router
 from routes.pins import router as pins_router
 from routes.schedules import router as schedules_router, start_scheduler
 from routes.browse import router as browse_router
-from routes.integrations import router as integrations_router
+from routes.integrations import router as integrations_router, refresh_google_oauth_tokens
 from routes.datavault import router as datavault_router
 from routes.connectors import router as connectors_router
 
@@ -123,7 +124,6 @@ logging.basicConfig(
     format="%(levelname)s  %(name)s  %(message)s",
 )
 logger = logging.getLogger("anton-server")
-
 
 # When ANTON_SERVE_SPA=1, serve the cowork web SPA at / from ANTON_SPA_DIR.
 # Used by the Docker image (cowork:web) — the same FastAPI process answers
@@ -140,12 +140,28 @@ if ANTON_SERVE_SPA and (SPA_DIR is None or not SPA_DIR.exists()):
     ANTON_SERVE_SPA = False
     SPA_DIR = None
 
+    
+async def _google_token_refresh_loop() -> None:
+    await asyncio.sleep(60)  # let the vault settle after startup
+    while True:
+        try:
+            await asyncio.to_thread(refresh_google_oauth_tokens)
+        except Exception:
+            pass
+        await asyncio.sleep(30 * 60)  # every 30 minutes
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     projects_store.ensure_general_project()
     start_scheduler()
+    refresh_task = asyncio.create_task(_google_token_refresh_loop())
     yield
+    refresh_task.cancel()
+    try:
+        await refresh_task
+    except asyncio.CancelledError:
+        pass
     await conversation_manager.close_all()
     await scratchpad_runtime.close_all()
 

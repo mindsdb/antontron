@@ -544,13 +544,43 @@ function ArtifactCard({ artifact, onOpen }) {
     }
   };
   const previewText = artifact.preview?.[0]?.heading || artifact.preview?.[0]?.text || displayPath;
+  // Whole-card click → preview. The inner buttons (Show in Finder,
+  // Open, Title) all stopPropagation so their own handlers run
+  // instead of bubbling up to this. Disabled paths fall through to
+  // a status toast instead of opening, mirroring the prior button
+  // behaviour. Cursor + hover lift mark the entire surface as
+  // interactive at a glance.
   return (
-    <div style={{
-      display: 'grid', gridTemplateColumns: '64px 1fr auto', alignItems: 'center', gap: 16,
-      background: T.surface, border: `1px solid ${T.line}`,
-      borderRadius: 14, padding: '14px 16px',
-      boxShadow: '0 1px 0 rgba(15,16,17,0.02), 0 8px 20px rgba(15,16,17,0.04)',
-    }}>
+    <div
+      role="button"
+      tabIndex={canAct ? 0 : -1}
+      aria-label={canAct ? `Open preview: ${artifact.title}` : disabledReason || 'No file path'}
+      onClick={() => { if (canAct) handleOpen(); }}
+      onKeyDown={(e) => {
+        if (!canAct) return;
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); handleOpen(); }
+      }}
+      style={{
+        display: 'grid', gridTemplateColumns: '64px 1fr auto', alignItems: 'center', gap: 16,
+        background: T.surface, border: `1px solid ${T.line}`,
+        borderRadius: 14, padding: '14px 16px',
+        boxShadow: '0 1px 0 rgba(15,16,17,0.02), 0 8px 20px rgba(15,16,17,0.04)',
+        cursor: canAct ? 'pointer' : 'default',
+        transition: 'border-color 140ms ease, transform 140ms ease, box-shadow 140ms ease',
+        outline: 'none',
+      }}
+      onMouseOver={(e) => {
+        if (!canAct) return;
+        e.currentTarget.style.borderColor = T.accent;
+        e.currentTarget.style.transform = 'translateY(-1px)';
+        e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02), 0 12px 26px rgba(15,16,17,0.06)';
+      }}
+      onMouseOut={(e) => {
+        e.currentTarget.style.borderColor = T.line;
+        e.currentTarget.style.transform = 'translateY(0)';
+        e.currentTarget.style.boxShadow = '0 1px 0 rgba(15,16,17,0.02), 0 8px 20px rgba(15,16,17,0.04)';
+      }}
+    >
       <div style={{
         width: 64, height: 64, background: T.surface2, borderRadius: 8,
         display: 'grid', placeItems: 'center', color: T.accent,
