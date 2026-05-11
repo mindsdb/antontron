@@ -10,7 +10,7 @@ from typing import Union
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
 from .cowork_state import load_state, save_state, uploads_dir, utc_now_iso
@@ -197,21 +197,21 @@ def attachment_context(project_name: str | None, session_id: str | None, ids: li
     return "\n\n".join(sections)
 
 
-@router.get("")
+@router.get("/{project_name}/{session_id}")
 def list_attachments(
-    project_name: str | None = Query(default=None),
-    session_id: str | None = Query(default=None),
+    project_name: str,
+    session_id: str,
     ids: list[str] | None = Query(default=None),
 ):
     return get_attachments(project_name, session_id, ids)
 
 
-@router.post("/upload")
+@router.post("/{project_name}/{session_id}/upload")
 async def upload_attachments(
-    project_name: str | None = Form(default=None),
-    session_id: str | None = Form(default=None),
+    project_name: str,
+    session_id: str,
     files: list[UploadFile] = File(...),
-) -> dict[str, list[FileAttachment]]:
+) -> list[FileAttachment]:
     # Store uploads in the project's /uploads directory.
     _, project_path = resolve_project(project_name)
     project_uploads_dir = uploads_dir(project_path)
@@ -228,7 +228,7 @@ async def upload_attachments(
 
         attachment = FileAttachment.from_path(attachment_id, target)
         created.append(attachment)
-    return {"attachments": created}
+    return created
 
 
 @router.post("/snippet")
