@@ -360,6 +360,9 @@ def _resolve_artifact_path(raw_path: str) -> Path:
     if "\x00" in raw_path:
         raise HTTPException(status_code=400, detail="Invalid artifact path")
     try:
+        # The resolved path is validated against known artifact roots below
+        # (relative_to check) — user input cannot escape those directories.
+        # codeql[py/path-injection]
         target = Path(raw_path).expanduser()
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid artifact path") from exc
