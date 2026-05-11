@@ -178,12 +178,12 @@ async def upload_attachments(
     project_name: str | None = Form(default=None),
     session_id: str | None = Form(default=None),
     files: list[UploadFile] = File(...),
-) -> list[FileAttachment]:
+) -> dict[str, list[FileAttachment]]:
     # Store uploads in the project's /uploads directory.
     _, project_path = resolve_project(project_name)
     project_uploads_dir = uploads_dir(project_path)
 
-    created: list[dict] = []
+    created: list[FileAttachment] = []
     for file in files:
         attachment_id = _new_id()
         filename = _safe_name(file.filename or "attachment")
