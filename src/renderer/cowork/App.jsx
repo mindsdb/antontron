@@ -24,6 +24,17 @@ import ServerOfflineHelpModal from './components/ServerOfflineHelpModal';
 import { setForm as setDataVaultForm, getFormState as getDataVaultFormState } from './components/datavault/formStore';
 import { host } from '../platform/host';
 import { useBreakpoint } from './hooks/useBreakpoint';
+import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
+         createProject, updateSettings, streamNewSession, streamMessage,
+         streamDataVaultSubmission,
+         allocateConversationId, uploadAttachments, createSnippetAttachment,
+         deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
+         recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
+         pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
+         renameConversation, deleteConversation, deleteConversationTurn, moveConversation,
+         deleteProject, cancelScratchpad, fetchConnector,
+         fetchSavedConnection, deleteDatasource } from './api';
+import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
 
 // One-of-ten encouraging follow-ups picked when a connect task is
 // created. Reads as a friendly nudge after the connect-intro card —
@@ -70,17 +81,31 @@ function describeConnectFormState(state) {
     ...lines,
   ].join('\n');
 }
-import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
-         createProject, updateSettings, streamNewSession, streamMessage,
-         streamDataVaultSubmission,
-         uploadAttachments, createSnippetAttachment,
-         deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
-         recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
-         pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
-         renameConversation, deleteConversation, deleteConversationTurn, moveConversation,
-         deleteProject, cancelScratchpad, fetchConnector,
-         fetchSavedConnection, deleteDatasource } from './api';
-import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
+
+function isPendingFileAttachment(a) {
+  return !!(a && a.pendingFile instanceof File);
+}
+
+async function resolveComposerAttachmentsForSend(projectName, sessionId, attachments) {
+  const list = Array.isArray(attachments) ? attachments : [];
+  const pending = list.filter(isPendingFileAttachment);
+  const rest = list.filter((a) => !isPendingFileAttachment(a));
+  if (pending.length) {
+    if (!projectName || !sessionId) {
+      throw new Error('Pick a project and use a saved conversation before sending file attachments.');
+    }
+    if (String(sessionId).startsWith('tmp-')) {
+      throw new Error('Wait until this conversation has started before sending file attachments.');
+    }
+  }
+  let uploaded = [];
+  if (pending.length) {
+    const files = pending.map((p) => p.pendingFile);
+    uploaded = await uploadAttachments(files, { projectName, sessionId });
+  }
+  const merged = [...rest, ...uploaded];
+  return { merged, attachmentIds: merged.map((x) => x.id) };
+}
 
 const ACCENT_VARS = {
   aqua:  {},
@@ -1457,11 +1482,19 @@ function AppCore() {
   };
 
   const attachmentProjectPath = currentTask?.projectPath || selectedProject?.path || null;
+  const attachmentProjectName = currentTask?.projectName || selectedProject?.name || null;
   const attachmentSessionId = route === 'task' && currentTask && !String(currentTask.id).startsWith('tmp-') ? currentTask.id : null;
 
-  const handleAttachFiles = async (files) => {
-    const data = await uploadAttachments(files, { projectPath: attachmentProjectPath, sessionId: attachmentSessionId });
-    setComposerAttachments((prev) => [...prev, ...(data.attachments || [])]);
+  const handleAttachFiles = (files) => {
+    const list = Array.from(files || []).map((file) => ({
+      id: `local-${Date.now()}-${Math.random().toString(36).slice(2, 11)}`,
+      source: 'file',
+      pendingFile: file,
+      name: file.name,
+      mime: file.type || undefined,
+      size: file.size,
+    }));
+    setComposerAttachments((prev) => [...prev, ...list]);
   };
 
   const handleAttachConnector = async (connector) => {
@@ -1474,12 +1507,14 @@ function AppCore() {
       project_path: attachmentProjectPath,
       session_id: attachmentSessionId,
     });
-    const attachment = data?.attachment ? { ...data.attachment, kind: 'connector', name: connector.name } : null;
+    const attachment = data?.attachment ? { ...data.attachment, source: 'connector', name: connector.name } : null;
     if (attachment) setComposerAttachments((prev) => [...prev, attachment]);
   };
 
   const handleRemoveAttachment = async (id) => {
+    const target = composerAttachments.find((a) => a.id === id);
     setComposerAttachments((prev) => prev.filter((attachment) => attachment.id !== id));
+    if (target?.pendingFile) return;
     try {
       await deleteAttachment(id);
     } catch {
@@ -1489,9 +1524,6 @@ function AppCore() {
 
   // Send from the home screen — creates a new session
   const handleSendFromHome = async (text) => {
-    const tempId = 'tmp-' + Date.now();
-    const sendingAttachments = composerAttachments;
-    const attachmentIds = sendingAttachments.map((attachment) => attachment.id);
     // Orphan fallback: if the user hasn't picked a project, route the
     // task into "general" (server provisions it on startup). If for
     // any reason it isn't in the projects list yet (e.g. an upgrade
@@ -1511,6 +1543,17 @@ function AppCore() {
     const effectiveProjectName = selectedProject?.name || 'general';
     const effectiveProjectPath = selectedProject?.path || generalProject?.path || null;
 
+    const rawComposer = composerAttachments;
+    const hasPendingFiles = rawComposer.some(isPendingFileAttachment);
+    const taskId = hasPendingFiles ? allocateConversationId() : `tmp-${Date.now()}`;
+
+    const { merged: sendingAttachments, attachmentIds } = await resolveComposerAttachmentsForSend(
+      effectiveProjectName,
+      hasPendingFiles ? taskId : null,
+      rawComposer,
+    );
+    setComposerAttachments([]);
+
     // Two-phase send so the new-task experience matches the in-chat
     // send. Previously we shipped the user message + placeholder in the
     // very same frame as the route change, which meant the activity
@@ -1524,7 +1567,7 @@ function AppCore() {
     //      stream. From that point the flow is identical to
     //      handleSendInTask.
     const newT = {
-      id: tempId,
+      id: taskId,
       title: text.length > 60 ? text.slice(0, 57) + '…' : text,
       subtitle: 'just now',
       status: 'active',
@@ -1535,19 +1578,18 @@ function AppCore() {
       attachments: sendingAttachments,
     };
     setTasks((prev) => [newT, ...prev]);
-    setActiveTaskId(tempId);
+    setActiveTaskId(taskId);
     setRoute('task');
-    setComposerAttachments([]);
 
     let assistantContent = '';
-    let resolvedId = tempId;
+    let resolvedId = taskId;
     // Adapter state — folded by every raw SSE event so the streaming
     // message can carry structured ThinkingStep[] for the UI.
     let streamState = initialStreamState();
 
     const flushStreamingMessage = () => {
       setTasks((prev) => prev.map((t) => {
-        if (t.id !== resolvedId && t.id !== tempId) return t;
+        if (t.id !== resolvedId && t.id !== taskId) return t;
         const msgs = removeThinkingPlaceholder(stripStreaming(t.messages));
         return { ...t, messages: [...msgs, {
           role: '_streaming',
@@ -1565,7 +1607,7 @@ function AppCore() {
     // (one to commit the route+task, one to commit the empty mount).
     const startConversation = () => {
       setTasks((prev) => prev.map((t) =>
-        t.id === tempId
+        t.id === taskId
           ? {
               ...t,
               messages: withThinkingPlaceholder([
@@ -1577,9 +1619,10 @@ function AppCore() {
       activeStreamCtrlRef.current = streamNewSessionFn();
       // Tag which task is mid-flight so reconcileTaskMessages can
       // tell legitimate running indicators from zombies on reload.
-      activeStreamingTaskIdRef.current = tempId;
+      activeStreamingTaskIdRef.current = taskId;
     };
     const streamNewSessionFn = () => streamNewSession(text, {
+      conversationId: hasPendingFiles ? taskId : undefined,
       projectName: effectiveProjectName,
       projectPath: effectiveProjectPath,
       model: selectedModel?.id,
@@ -1597,7 +1640,7 @@ function AppCore() {
           const previousId = resolvedId;
           resolvedId = sid;
           setTasks((prev) => prev.map((t) =>
-            t.id === previousId || t.id === tempId
+            t.id === previousId || t.id === taskId
               ? { ...t, id: sid }
               : t,
           ));
@@ -1613,7 +1656,7 @@ function AppCore() {
         if (sid && sid !== resolvedId) {
           const previousId = resolvedId;
           resolvedId = sid;
-          setTasks((prev) => prev.map((t) => t.id === previousId || t.id === tempId ? { ...t, id: sid } : t));
+          setTasks((prev) => prev.map((t) => t.id === previousId || t.id === taskId ? { ...t, id: sid } : t));
           setActiveTaskId(sid);
         }
         // Intentionally a no-op for messages: every `response.in_progress`
@@ -1629,7 +1672,7 @@ function AppCore() {
         if (sid && sid !== resolvedId) {
           const previousId = resolvedId;
           resolvedId = sid;
-          setTasks((prev) => prev.map((t) => t.id === previousId || t.id === tempId ? { ...t, id: sid } : t));
+          setTasks((prev) => prev.map((t) => t.id === previousId || t.id === taskId ? { ...t, id: sid } : t));
           setActiveTaskId(sid);
         }
         // See onProgress comment — same reasoning. The adapter (via
@@ -1645,7 +1688,7 @@ function AppCore() {
         const finalStartedAt = streamState.startedAt;
         let assistantTurnIndex = 0;
         setTasks((prev) => prev.map((t) => {
-          if (t.id !== finalId && t.id !== resolvedId && t.id !== tempId) return t;
+          if (t.id !== finalId && t.id !== resolvedId && t.id !== taskId) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
           // Count prior assistant turns BEFORE adding the new one so
           // the persisted index lines up with what mergeConvTurns
@@ -1677,7 +1720,7 @@ function AppCore() {
         activeScratchpadRef.current = null;
         activeStreamingTaskIdRef.current = null;
         setTasks((prev) => prev.map((t) => {
-          if (t.id !== resolvedId && t.id !== tempId) return t;
+          if (t.id !== resolvedId && t.id !== taskId) return t;
           const msgs = markActivityDone(removeThinkingPlaceholder(stripStreaming(t.messages)));
           return { ...t, status: 'error', messages: [...msgs, { role: 'error', content: message || 'Anton could not complete this task.', code: event?.code }] };
         }));
@@ -1695,11 +1738,23 @@ function AppCore() {
   };
 
   // Send inside an existing task
-  const handleSendInTask = (text) => {
+  const handleSendInTask = async (text) => {
     if (!currentTask) return;
     const id = currentTask.id;
-    const sendingAttachments = composerAttachments;
-    const attachmentIds = sendingAttachments.map((attachment) => attachment.id);
+
+    const taskProjectName = currentTask.projectName
+      || (currentTaskProject?.name)
+      || null;
+    const taskProjectPath = currentTask.projectPath
+      || currentTaskProject?.path
+      || null;
+    const taskModel = currentTask.model || selectedModel?.id || null;
+
+    const { merged: sendingAttachments, attachmentIds } = await resolveComposerAttachmentsForSend(
+      taskProjectName,
+      id,
+      composerAttachments,
+    );
 
     setTasks((prev) => prev.map((t) =>
       t.id === id
@@ -1715,18 +1770,6 @@ function AppCore() {
 
     let assistantContent = '';
     let streamState = initialStreamState();
-
-    // The task's project is fixed at creation; never let the user's
-    // current selectedProject override it on later turns. Resolve from
-    // the task itself (projectName is the canonical id, projectPath is
-    // the resolved filesystem path used for things like attachments).
-    const taskProjectName = currentTask.projectName
-      || (currentTaskProject?.name)
-      || null;
-    const taskProjectPath = currentTask.projectPath
-      || currentTaskProject?.path
-      || null;
-    const taskModel = currentTask.model || selectedModel?.id || null;
 
     const flushStreaming = () => {
       setTasks((prev) => prev.map((t) => {

@@ -2,22 +2,25 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Ico from './Icons';
 
 function AttachmentChip({ attachment, onRemove }) {
-  const label = attachment.kind === 'connector'
+  const src = attachment.source || attachment.kind || 'file';
+  const label = src === 'connector'
     ? 'Connector'
-    : attachment.kind === 'url'
+    : src === 'url'
       ? 'URL'
-      : attachment.kind === 'snippet'
+      : src === 'snippet'
         ? 'Snippet'
         : 'File';
-  const status = attachment.extractionStatus && attachment.extractionStatus !== 'ready'
-    ? attachment.extractionStatus.replace('_', ' ')
-    : null;
+  const status = attachment.pendingFile
+    ? 'Queued'
+    : (attachment.extractionStatus && attachment.extractionStatus !== 'ready'
+      ? attachment.extractionStatus.replace('_', ' ')
+      : null);
   return (
     <div className="attachment-chip" title={attachment.note || attachment.textPreview || attachment.name}>
       <span className="attachment-chip-icon">
-        {attachment.kind === 'connector' ? Ico.link(13)
-          : attachment.kind === 'url' ? Ico.globe(13)
-            : attachment.kind === 'snippet' ? Ico.code(13)
+        {src === 'connector' ? Ico.link(13)
+          : src === 'url' ? Ico.globe(13)
+            : src === 'snippet' ? Ico.code(13)
               : Ico.doc(13)}
       </span>
       <span className="attachment-chip-body">
@@ -149,14 +152,12 @@ export default function Composer({
   async function handleAttachFiles(files) {
     if (!files?.length || !onAttachFiles) return;
     setError('');
-    setBusy(true);
     try {
-      await onAttachFiles(files);
+      await Promise.resolve(onAttachFiles(files));
       setOpenMenu(null);
     } catch (err) {
       setError(err.message || 'Could not attach files.');
     } finally {
-      setBusy(false);
       if (fileRef.current) fileRef.current.value = '';
     }
   }
@@ -180,11 +181,19 @@ export default function Composer({
     }
   }
 
-  const handleSend = () => {
+  const handleSend = async () => {
     if (disabled || !value.trim()) return;
-    onSend(value.trim());
-    setValue('');
-    if (taRef.current) taRef.current.style.height = 'auto';
+    setError('');
+    setBusy(true);
+    try {
+      await Promise.resolve(onSend(value.trim()));
+      setValue('');
+      if (taRef.current) taRef.current.style.height = 'auto';
+    } catch (err) {
+      setError(err?.message || 'Could not send.');
+    } finally {
+      setBusy(false);
+    }
   };
 
   useEffect(() => () => {

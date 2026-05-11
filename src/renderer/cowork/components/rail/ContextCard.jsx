@@ -61,10 +61,10 @@ function MemoryRow({ entry, onOpen }) {
 // Row for a project context file (anton.md or any uploaded file).
 // Same visual rhythm as MemoryRow but distinguishes the always-
 // present anton.md with a subtle "Project instructions" label.
-function attachmentKindIcon(kind) {
-  if (kind === 'url') return Ico.globe(13);
-  if (kind === 'snippet') return Ico.code(13);
-  if (kind === 'connector') return Ico.link(13);
+function attachmentSourceIcon(source) {
+  if (source === 'url') return Ico.globe(13);
+  if (source === 'snippet') return Ico.code(13);
+  if (source === 'connector') return Ico.link(13);
   return Ico.doc(13);
 }
 
@@ -73,7 +73,7 @@ function SessionAttachmentRow({ item }) {
   const sub = item.textPreview
     || (item.mime ? String(item.mime).split('/').pop() : '')
     || (item.size ? `${Math.ceil(item.size / 1024)} KB` : '');
-  const when = item.updatedAt || item.createdAt;
+  const when = item.updated_at || item.created_at || item.updatedAt || item.createdAt;
   return (
     <div
       className={clsx(
@@ -83,7 +83,7 @@ function SessionAttachmentRow({ item }) {
       style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
       title={item.note || item.textPreview || label}
     >
-      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{attachmentKindIcon(item.kind)}</span>
+      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{attachmentSourceIcon(item.source || item.kind)}</span>
       <span className="min-w-0">
         <span className="block truncate text-[12.5px] text-ink">{label}</span>
         {sub ? (
@@ -185,7 +185,9 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
     reloadFiles();
   }, [project?.name, reloadFiles]);
 
-  const sessionRelevant = conversationId && !String(conversationId).startsWith('tmp-');
+  const sessionRelevant = conversationId
+    && !String(conversationId).startsWith('tmp-')
+    && !!project?.name;
 
   // `useEffect` runs after paint — switching tasks would briefly show the
   // previous task's rows with "Loading attachments…". This runs first
@@ -209,13 +211,13 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
     }
     let cancelled = false;
     setAttachmentsError(null);
-    fetchAttachments(conversationId)
+    fetchAttachments(project.name, conversationId)
       .then((data) => {
         if (cancelled) return;
         const raw = Array.isArray(data?.attachments) ? data.attachments : [];
         const sorted = [...raw].sort((a, b) => {
-          const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
-          const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          const ta = new Date(a.updated_at || a.created_at || a.updatedAt || a.createdAt || 0).getTime();
+          const tb = new Date(b.updated_at || b.created_at || b.updatedAt || b.createdAt || 0).getTime();
           return tb - ta;
         });
         setSessionAttachments(sorted);
@@ -230,7 +232,7 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
         if (!cancelled) setAttachmentsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [sessionRelevant, conversationId, refreshKey]);
+  }, [sessionRelevant, conversationId, refreshKey, project?.name]);
 
   // Order: Project section first, Global second.
   const ordered = useMemo(() => {
