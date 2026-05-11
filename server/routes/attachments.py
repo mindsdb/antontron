@@ -13,7 +13,7 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 
-from .cowork_state import load_state, save_state, uploads_dir, utc_now_iso
+from .cowork_state import load_state, save_state, utc_now_iso
 from anton_api.projects_store import resolve_project
 
 
@@ -59,6 +59,16 @@ class FileAttachment(BaseModel):
             created_at=datetime.datetime.fromtimestamp(stats.st_ctime),
             updated_at=datetime.datetime.fromtimestamp(stats.st_mtime)
         )
+
+
+def uploads_dir(project_path: Path) -> Path:
+    path = project_path / ".anton" / "uploads"
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        path.chmod(0o700)
+    except OSError:
+        pass
+    return path
 
 
 def _safe_name(name: str) -> str:
