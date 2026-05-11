@@ -1,7 +1,8 @@
 // Context card body — surfaces memories (Project + Global) AND
-// files under `.context/` (anton.md + uploads). Listed via the same
-// GET /projects/{name}/files as Working folder, but only `.context/`
-// rows appear here; everything else lives in Working folder only.
+// project instructions (`.anton/anton.md`) plus any legacy `.context/`
+// files. Listed via GET /projects/{name}/files; Working folder hides
+// `.anton/` and `.context/` trees except this rail shows instructions
+// (and legacy context paths).
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
@@ -10,6 +11,7 @@ import {
   deleteMemory,
   fetchAttachments,
   fetchMemory,
+  isProjectInstructionsPath,
   isUnderContextDir,
   listProjectFiles,
   saveMemory,
@@ -169,7 +171,7 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
       .then((data) => {
         if (ticket !== loadVersion.current) return;
         const raw = Array.isArray(data?.files) ? data.files : [];
-        setProjectFiles(raw.filter((f) => isUnderContextDir(f.path)));
+        setProjectFiles(raw.filter((f) => isProjectInstructionsPath(f.path) || isUnderContextDir(f.path)));
       })
       .catch(() => { if (ticket === loadVersion.current) setProjectFiles([]); });
   }, [project?.name]);
@@ -265,7 +267,7 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
 
   return (
     <div className="flex flex-col gap-3 pt-2">
-      {/* `.context/` only — Working folder lists the rest of the project tree. */}
+      {/* Instructions (`.anton/anton.md`) + legacy `.context/` only. */}
       {project?.name && hasProjectFiles && (
         <div className="flex flex-col gap-0.5">
           <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">

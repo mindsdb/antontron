@@ -428,15 +428,21 @@ export async function deleteProject(name) {
 // ── Project files ────────────────────────────────────────────────
 //
 // Most paths are relative to the project root. Project instructions
-// live at ANTON_PROJECT_INSTRUCTIONS_PATH (on disk: `.context/anton.md`).
+// live at ANTON_PROJECT_INSTRUCTIONS_PATH (on disk: `.anton/anton.md`).
 // These helpers wrap routes/projects.py.
 
 const enc = encodeURIComponent;
 
-/** Relative path from project root for LLM instructions (projects file API). */
-export const ANTON_PROJECT_INSTRUCTIONS_PATH = '.context/anton.md';
+/** Relative path from project root for project instructions (projects file API). */
+export const ANTON_PROJECT_INSTRUCTIONS_PATH = '.anton/anton.md';
 
-/** True if `relPath` is under the project `.context/` tree (listing paths from GET …/files). */
+/** True if `relPath` is the canonical instructions file (`.anton/anton.md`). */
+export function isProjectInstructionsPath(relPath) {
+  const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return r === ANTON_PROJECT_INSTRUCTIONS_PATH;
+}
+
+/** Legacy installs: true if `relPath` is under `.context/` (pre-migration tree). */
 export function isUnderContextDir(relPath) {
   const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
   return r === '.context' || r.startsWith('.context/');
