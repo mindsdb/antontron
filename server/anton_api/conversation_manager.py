@@ -808,23 +808,53 @@ async def _build_chat_session(
     base = _project_base(project)
     settings = AntonSettings()
     settings.resolve_workspace(str(base))
+
+    # The cowork UI's `defaultModel` and the env's `ANTON_PLANNING_MODEL`
+    # can fall out of sync with the active provider after a switch.
+    # Two symmetric failure modes:
+    #   - sentinel `_reason_` left over after Minds → BYOK (404 on
+    #     api.anthropic.com),
+    #   - `claude-sonnet-4-6` left over after BYOK → Minds (500 on
+    #     mdb.ai/api/v1/chat/completions because the Minds router
+    #     doesn't know that name).
+    def _is_minds_sentinel(m: str) -> bool:
+        return bool(m) and m.startswith("_") and m.endswith("_")
+
+    on_minds_router = (
+        settings.planning_provider == "openai-compatible"
+        and "mdb.ai" in (settings.openai_base_url or "")
+    )
+
     if model:
-        # Minds Cloud sentinels (`_reason_`, `_code_`) only resolve at
-        # the openai-compatible router. If the active provider is
-        # something else (e.g. anthropic, after the user switched off
-        # Minds), an old cowork preference can keep sending these on
-        # every request. Drop the override and stay with the env's
-        # `ANTON_PLANNING_MODEL` instead of forwarding `_reason_` to
-        # api.anthropic.com (which 404s).
-        is_minds_sentinel = model.startswith("_") and model.endswith("_")
-        if is_minds_sentinel and settings.planning_provider != "openai-compatible":
+        is_sentinel = _is_minds_sentinel(model)
+        if is_sentinel and settings.planning_provider != "openai-compatible":
+            # Drop the override — env's `ANTON_PLANNING_MODEL` is the
+            # right source of truth after a Minds → BYOK switch.
             logging.getLogger(__name__).warning(
                 "Ignoring Minds sentinel model %r — active planning_provider is %r. "
                 "Falling back to env ANTON_PLANNING_MODEL=%r.",
                 model, settings.planning_provider, settings.planning_model,
             )
+        elif on_minds_router and not is_sentinel:
+            # Drop the override and force the sentinel — mdb.ai's
+            # router only resolves `_reason_` / `_code_`.
+            logging.getLogger(__name__).warning(
+                "Ignoring non-sentinel model %r — active router is mdb.ai. "
+                "Forcing planning_model=_reason_.",
+                model,
+            )
+            settings.planning_model = "_reason_"
         else:
             settings.planning_model = model
+
+    # Env-side safety net: even with no UI override, the env can hold a
+    # stale `ANTON_PLANNING_MODEL` that doesn't match the active router.
+    if on_minds_router and not _is_minds_sentinel(settings.planning_model):
+        logging.getLogger(__name__).warning(
+            "Forcing planning_model=_reason_ (was %r) — active router is mdb.ai.",
+            settings.planning_model,
+        )
+        settings.planning_model = "_reason_"
 
     workspace = Workspace(base)
     workspace.initialize()

@@ -173,13 +173,26 @@ def get_config_status() -> dict[str, Any]:
 
 
 # Minds Cloud uses sentinel model names (`_reason_`, `_code_`) that
-# only its OpenAI-compatible router resolves. If the user onboards via
-# Minds and later switches `ANTON_PLANNING_PROVIDER` to anthropic /
-# openai / gemini, these sentinels linger in cowork preferences and
-# the UI sends them on every request — every request then 404s
-# because the new provider doesn't know what `_reason_` is.
+# only its OpenAI-compatible router resolves. The cowork preferences
+# file (`state.json`) and the env (`ANTON_PLANNING_MODEL`) can fall
+# out of sync with the active provider in two symmetric ways:
+#
+#   Minds → BYOK: sentinel `_reason_` lingers in prefs/env, gets sent
+#                 to api.anthropic.com → 404.
+#   BYOK → Minds: `claude-sonnet-4-6` (or similar) lingers in prefs/env,
+#                 gets sent to mdb.ai/api/v1/chat/completions → 500
+#                 because the Minds router doesn't know that name.
+#
+# Both directions are handled below.
 def _is_minds_sentinel(model_id: str | None) -> bool:
     return bool(model_id) and model_id.startswith("_") and model_id.endswith("_")
+
+
+def _is_on_minds_router(provider: str | None, base_url: str | None) -> bool:
+    """True when active config talks to the Minds Cloud router (mdb.ai)."""
+    if provider != "openai-compatible":
+        return False
+    return bool(base_url) and "mdb.ai" in base_url
 
 
 def _ui_settings() -> dict[str, Any]:
@@ -191,34 +204,55 @@ def _ui_settings() -> dict[str, Any]:
 
     env_planning_model = _get_env("ANTON_PLANNING_MODEL", "claude-sonnet-4-6")
     env_planning_provider = _get_env("ANTON_PLANNING_PROVIDER", "anthropic")
+    env_openai_base_url = _get_env("ANTON_OPENAI_BASE_URL", "")
+    on_minds_router = _is_on_minds_router(env_planning_provider, env_openai_base_url)
 
-    # Drop a stale Minds sentinel the moment the active provider can't
-    # resolve it. Falls through to the env's planning model, which is
-    # the source of truth for "what model will the request actually
-    # talk to." Without this guard the cowork UI keeps showing
-    # `_reason_` indefinitely after a provider switch.
     saved_default = merged.get("defaultModel") or ""
-    if _is_minds_sentinel(saved_default) and env_planning_provider != "openai-compatible":
+
+    # Direction 1 (Minds → BYOK): drop a stale sentinel when the active
+    # provider can't resolve it.
+    drop_minds_to_byok = (
+        _is_minds_sentinel(saved_default)
+        and env_planning_provider != "openai-compatible"
+    )
+    # Direction 2 (BYOK → Minds): drop a stale Anthropic/OpenAI-shaped
+    # model when we're routing through mdb.ai. Falling back to the
+    # Minds sentinel is the only thing the router will actually
+    # resolve.
+    drop_byok_to_minds = (
+        on_minds_router
+        and bool(saved_default)
+        and not _is_minds_sentinel(saved_default)
+    )
+
+    if drop_minds_to_byok or drop_byok_to_minds:
         # Persist the cleanup so state.json reflects reality and we
         # don't keep doing this masking work on every request. Best-
         # effort — a write failure only means we'll re-mask next time.
         try:
             def _drop_default_model(state: dict) -> None:
-                prefs = state.get("preferences")
-                if isinstance(prefs, dict):
-                    prefs.pop("defaultModel", None)
+                state_prefs = state.get("preferences")
+                if isinstance(state_prefs, dict):
+                    state_prefs.pop("defaultModel", None)
             update_state(_drop_default_model)
             logger.info(
-                "Dropped stale Minds sentinel %r from cowork preferences "
-                "(active planning_provider=%r).",
-                saved_default, env_planning_provider,
+                "Dropped stale defaultModel %r from cowork preferences "
+                "(planning_provider=%r, on_minds_router=%s).",
+                saved_default, env_planning_provider, on_minds_router,
             )
         except Exception as e:
             logger.debug("Could not persist defaultModel cleanup: %s", e)
         saved_default = ""
 
     if not saved_default:
-        saved_default = env_planning_model
+        # When on the Minds router but the env model is also stale
+        # (e.g. user changed only the provider field, not the model),
+        # surface the Minds sentinel so the UI shows what mdb.ai will
+        # actually answer to.
+        if on_minds_router and not _is_minds_sentinel(env_planning_model):
+            saved_default = "_reason_"
+        else:
+            saved_default = env_planning_model
     merged["defaultModel"] = saved_default
 
     return merged

@@ -32,6 +32,19 @@ function inferProviderPreset(s) {
   return 'anthropic';
 }
 
+// Per-preset model defaults. Switching providers without resetting the
+// model name leaves the previous provider's model (e.g. `claude-sonnet-4-6`)
+// pointed at the new provider's endpoint, which 404/500s on every
+// request. The backend has a guard for the mdb.ai case, but resetting
+// here keeps the UI in sync with what the request will actually use.
+const PRESET_MODEL_DEFAULTS = {
+  'anthropic':         { planning: 'claude-sonnet-4-6',   coding: 'claude-haiku-4-5-20251001' },
+  'minds-cloud':       { planning: '_reason_',            coding: '_code_' },
+  // For 'openai', 'gemini', and 'openai-compatible' we don't ship
+  // opinionated defaults — the user typically picks the model. The
+  // model field stays untouched.
+};
+
 function applyProviderPreset(preset, settings, setSetting) {
   if (preset === 'anthropic') {
     setSetting('planningProvider', 'anthropic');
@@ -59,6 +72,13 @@ function applyProviderPreset(preset, settings, setSetting) {
     if (settings.mindsApiKey && !settings.openaiApiKey) {
       setSetting('openaiApiKey', settings.mindsApiKey);
     }
+  }
+
+  const defaults = PRESET_MODEL_DEFAULTS[preset];
+  if (defaults) {
+    setSetting('planningModel', defaults.planning);
+    setSetting('codingModel', defaults.coding);
+    setSetting('defaultModel', defaults.planning);
   }
 }
 
