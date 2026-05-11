@@ -219,6 +219,20 @@ export async function fetchSession(id) {
   }
 }
 
+/** 
+ * Matches server `conversation_manager._new_conversation_id` (UTC) so client can upload before the first stream. 
+ * This is required especially when the user uploads files before the first stream, so the server can assign the files to the correct conversation.
+*/
+export function allocateConversationId() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}_${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
+  const hex = typeof crypto !== 'undefined' && crypto.getRandomValues
+    ? Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) => b.toString(16).padStart(2, '0')).join('')
+    : Math.random().toString(16).slice(2, 8);
+  return `${stamp}_${hex}`;
+}
+
 // Streams a /v1/responses request. Maps OpenAI-style typed events to the
 // callback shape the rest of the app already speaks. `conversationId` is
 // optional — omit it to start a new conversation; the caller learns the
