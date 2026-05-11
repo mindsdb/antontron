@@ -854,29 +854,41 @@ export async function fetchBrowseStatus() {
 }
 
 // ─── Attachments And Context ───────────────────────────────────────────────
-export async function uploadAttachments(files, { projectPath, sessionId } = {}) {
+
+/** POST /v1/attachments/{project_name}/{session_id}/upload — response body is a JSON array of file attachments. */
+export async function uploadAttachments(files, { projectName, sessionId } = {}) {
+  if (!projectName || !sessionId) {
+    throw new Error('Open a saved task before attaching files (project and conversation id are required).');
+  }
+  const enc = encodeURIComponent;
   const form = new FormData();
   Array.from(files).forEach((file) => form.append('files', file));
-  if (projectPath) form.append('project_path', projectPath);
-  if (sessionId) form.append('session_id', sessionId);
-  const res = await fetch(`${BASE}/attachments/upload`, { method: 'POST', body: form });
+  const res = await fetch(
+    `${BASE}/attachments/${enc(projectName)}/${enc(sessionId)}/upload`,
+    { method: 'POST', body: form },
+  );
   if (!res.ok) throw await responseError(res, `Attachment upload failed (${res.status})`);
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
-export async function fetchAttachments(sessionId, ids) {
-  if (!sessionId && (!ids || !ids.length)) {
+/** GET /v1/attachments/{project_name}/{session_id} — response body is a JSON array. */
+export async function fetchAttachments(projectName, sessionId, { ids } = {}) {
+  if (!projectName || !sessionId) {
     return { attachments: [] };
   }
+  const enc = encodeURIComponent;
   const qs = new URLSearchParams();
-  if (sessionId) qs.set('session_id', sessionId);
   if (Array.isArray(ids) && ids.length) {
     for (const id of ids) {
       if (id) qs.append('ids', id);
     }
   }
   const q = qs.toString();
-  return req(`/attachments${q ? `?${q}` : ''}`);
+  const path = `/attachments/${enc(projectName)}/${enc(sessionId)}${q ? `?${q}` : ''}`;
+  const data = await req(path);
+  const raw = Array.isArray(data) ? data : [];
+  return { attachments: raw };
 }
 
 export async function createSnippetAttachment(payload) {
