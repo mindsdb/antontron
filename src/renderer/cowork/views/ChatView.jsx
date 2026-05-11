@@ -8,7 +8,7 @@
    plus _streaming) and our real Composer + project/model state. Tokens come
    from CSS vars so the panel reads correctly in both light and dark themes. */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Ico from '../components/Icons';
 import Composer from '../components/Composer';
 import { OrbitMorph } from '../components/ui';
@@ -26,6 +26,7 @@ import { FormErrorBoundary } from '../components/datavault/FormErrorBoundary';
 import { revealArtifact } from '../api';
 import { normalizeArtifactRecord } from '../lib/artifactPaths';
 import { host } from '../../platform/host';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 
 // Token shorthand mapped to our globals.css custom properties so the same
 // inline-styled JSX picks up the active theme.
@@ -475,7 +476,7 @@ function StepArtifacts({ steps, onOpen, projectPath }) {
 function ArtifactCard({ artifact, onOpen }) {
   const [status, setStatus] = useState(null);
   const statusTimerRef = useRef(null);
-  useEffect(() => () => {
+  useLayoutEffect(() => () => {
     if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
   }, []);
 
@@ -777,7 +778,14 @@ export default function ChatView({
   sidebarCollapsed = false,
 }) {
   const scrollRef = useRef(null);
+  const { isNarrow } = useBreakpoint();
+  // Wide: inline grid column. Narrow: fixed overlay from the right.
   const [railOpen, setRailOpen] = useState(true);
+  const [railNarrowOpen, setRailNarrowOpen] = useState(false);
+  // Inline rail only active on wide screens.
+  const effectiveRailOpen = !isNarrow && railOpen;
+  // Narrow-screen overlay rail.
+  const railOverlayOpen = isNarrow && railNarrowOpen;
   // Step id whose scratchpad cells are visible in the modal. null = closed.
   const [openScratchpadStepId, setOpenScratchpadStepId] = useState(null);
   // Inline ArtifactCard → viewer. HTML artifacts open in the in-app
@@ -793,17 +801,19 @@ export default function ChatView({
   const settingsBtnRef = useRef(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsAnchor, setSettingsAnchor] = useState(null);
-  // Whether a data-vault form is currently active for this
-  // conversation. While it is, we hide Working folder + Context in
-  // the right rail so the form has the user's full attention. The
-  // panel itself reads from the same store; we mirror its state
-  // here just to drive the rail's visibility.
-  const [formActive, setFormActive] = useState(() => !!getDataVaultForm(task?.id || ''));
-  useEffect(() => {
-    const cid = task?.id || '';
-    setFormActive(!!getDataVaultForm(cid));
-    return subscribeDataVaultForm(cid, (next) => setFormActive(!!next));
-  }, [task?.id]);
+  // Whether a data-vault form is currently active for this conversation.
+  // useSyncExternalStore keeps this in sync without useEffect: React
+  // re-reads the snapshot whenever the formStore notifies subscribers.
+  const taskId = task?.id || '';
+  const subscribeFormStore = useMemo(
+    () => (onChange) => subscribeDataVaultForm(taskId, onChange),
+    [taskId],
+  );
+  const formActive = useSyncExternalStore(
+    subscribeFormStore,
+    () => !!getDataVaultForm(taskId),
+    () => false,
+  );
 
   // Hovering the connect-intro chat bubble highlights the form
   // panel on the right rail. Plain local state so we don't need
@@ -817,7 +827,7 @@ export default function ChatView({
   const [titleEditing, setTitleEditing] = useState(false);
   const titleInputRef = useRef(null);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!titleEditing) return;
     const id = requestAnimationFrame(() => {
       const el = titleInputRef.current;
@@ -899,7 +909,7 @@ export default function ChatView({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleMessages, streamingMsg]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
   }, [task.messages.length, isStreaming]);
 
@@ -930,7 +940,9 @@ export default function ChatView({
       // rail off-screen and causes content to bleed visually behind
       // the rail. minmax(0, …) tells grid the column can shrink to 0,
       // so the conv col stays inside its track and content clips.
-      gridTemplateColumns: railOpen ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr) 0px',
+      // On narrow screens the rail is always a fixed overlay, so the
+      // grid is always single-column.
+      gridTemplateColumns: effectiveRailOpen ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr) 0px',
       // Without an explicit row, the implicit row is sized to content,
       // so the scroll region's inner content height grows the row past
       // the container — the scroll bar never appears. 1fr forces the
@@ -968,7 +980,7 @@ export default function ChatView({
             sidebar's hamburger pattern. */}
         <button
           type="button"
-          onClick={() => setRailOpen(true)}
+          onClick={() => isNarrow ? setRailNarrowOpen(true) : setRailOpen(true)}
           title="Expand panel"
           aria-label="Expand panel"
           style={{
@@ -982,12 +994,12 @@ export default function ChatView({
             background: 'transparent',
             border: 0,
             color: T.ink3,
-            opacity: railOpen ? 0 : 1,
-            transform: railOpen ? 'translateX(8px)' : 'translateX(0)',
-            pointerEvents: railOpen ? 'none' : 'auto',
+            opacity: (effectiveRailOpen || railOverlayOpen) ? 0 : 1,
+            transform: (effectiveRailOpen || railOverlayOpen) ? 'translateX(8px)' : 'translateX(0)',
+            pointerEvents: (effectiveRailOpen || railOverlayOpen) ? 'none' : 'auto',
             transition:
-              `opacity 280ms cubic-bezier(0.32,0.72,0,1) ${railOpen ? '0ms' : '120ms'}, ` +
-              `transform 360ms cubic-bezier(0.32,0.72,0,1) ${railOpen ? '0ms' : '80ms'}`,
+              `opacity 280ms cubic-bezier(0.32,0.72,0,1) ${(effectiveRailOpen || railOverlayOpen) ? '0ms' : '120ms'}, ` +
+              `transform 360ms cubic-bezier(0.32,0.72,0,1) ${(effectiveRailOpen || railOverlayOpen) ? '0ms' : '80ms'}`,
             WebkitAppRegion: 'no-drag',
           }}
           onMouseOver={(e) => { e.currentTarget.style.color = 'var(--ink)'; e.currentTarget.style.background = 'var(--surface-2)'; }}
@@ -996,12 +1008,16 @@ export default function ChatView({
           {Ico.panelExpandLeft(15)}
         </button>
 
-        {/* Header — when the sidebar is collapsed, the floating hamburger
-            sits at x:97 in the window, so push the header content right
-            so the back button + title don't slide under it. */}
+        {/* Header — when the sidebar is overlay/collapsed, the floating
+            hamburger button occupies some left space; push the header
+            content right to avoid overlap. On web, the hamburger is at
+            left: 18 (no traffic lights), so 60px clears it. On Electron,
+            left: 97, so 130px clears the traffic lights + hamburger. */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          padding: sidebarCollapsed ? '14px 28px 14px 130px' : '14px 28px',
+          padding: sidebarCollapsed
+            ? `14px 28px 14px ${host.isWeb ? 60 : 130}px`
+            : '14px 28px',
           borderBottom: `1px solid ${T.line}`,
           background: 'transparent',
           flexShrink: 0,
@@ -1423,30 +1439,58 @@ export default function ChatView({
       </div>
 
       {/* ─── Right rail ─── */}
-      <aside style={{
+      {/* On narrow screens: translucent backdrop behind the overlay rail */}
+      {isNarrow && (
+        <div
+          onClick={() => setRailNarrowOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 50,
+            background: 'rgba(0,0,0,0.35)',
+            backdropFilter: 'blur(2px)',
+            opacity: railOverlayOpen ? 1 : 0,
+            pointerEvents: railOverlayOpen ? 'auto' : 'none',
+            transition: 'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1)',
+            WebkitAppRegion: 'no-drag',
+          }}
+        />
+      )}
+      <aside style={isNarrow ? {
+        // Narrow: fixed overlay that slides in from the right
+        position: 'fixed',
+        top: 9, bottom: 9, right: 9,
+        width: 'min(85vw, 320px)',
+        zIndex: 51,
+        background: 'var(--surface)',
+        border: '1px solid var(--line)',
+        borderRadius: 14,
+        boxShadow: 'var(--sh-2)',
+        transform: railOverlayOpen ? 'translateX(0)' : 'translateX(calc(100% + 18px))',
+        transition: 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+        padding: '14px 14px 22px',
+        display: 'flex', flexDirection: 'column', gap: 10,
+        overflowX: 'hidden', overflowY: 'auto',
+        WebkitAppRegion: 'no-drag',
+      } : {
+        // Wide: inline grid column
         background: 'transparent',
         padding: '14px 14px 22px',
-        visibility: railOpen ? 'visible' : 'hidden',
-        opacity: railOpen ? 1 : 0,
+        visibility: effectiveRailOpen ? 'visible' : 'hidden',
+        opacity: effectiveRailOpen ? 1 : 0,
         transition: 'opacity 180ms ease',
         display: 'flex', flexDirection: 'column', gap: 10,
-        // overflowX hidden is defensive: when the grid column shrinks
-        // to 0 (collapsed), card content shouldn't visually spill
-        // back into the conversation column.
         overflowX: 'hidden',
         overflowY: 'auto',
         minWidth: 0,
         WebkitAppRegion: 'no-drag',
       }}>
-        {/* Rail header bar — dedicated collapse-to-right button at the
-            top-right corner. Mirrors the sidebar's collapse pattern. */}
+        {/* Rail header bar — collapse button */}
         <div style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           flexShrink: 0,
         }}>
           <button
             type="button"
-            onClick={() => setRailOpen(false)}
+            onClick={() => isNarrow ? setRailNarrowOpen(false) : setRailOpen(false)}
             title="Collapse panel"
             aria-label="Collapse panel"
             style={{

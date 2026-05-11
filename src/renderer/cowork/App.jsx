@@ -23,6 +23,7 @@ import ConnectorPicker from './components/connector/ConnectorPicker';
 import ServerOfflineHelpModal from './components/ServerOfflineHelpModal';
 import { setForm as setDataVaultForm, getFormState as getDataVaultFormState } from './components/datavault/formStore';
 import { host } from '../platform/host';
+import { useBreakpoint } from './hooks/useBreakpoint';
 
 // One-of-ten encouraging follow-ups picked when a connect task is
 // created. Reads as a friendly nudge after the connect-intro card —
@@ -595,6 +596,9 @@ function AppCore() {
   // the user can navigate via it directly. Locking outside chat
   // means the collapse affordance is hidden in those views too.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const { isNarrow } = useBreakpoint();
+  // On narrow screens (< 900px), sidebar is a slide-over overlay — track open state separately.
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   // Routes where the user can collapse the sidebar. Currently:
   // chat task only.
   const sidebarCollapsibleRoutes = useMemo(() => new Set(['task']), []);
@@ -685,7 +689,7 @@ function AppCore() {
   // the route allows it (chat task). Everywhere else the sidebar
   // stays expanded — gives the user permanent access to the nav.
   const sidebarCollapsedEffective =
-    sidebarCollapsibleRoutes.has(route) && sidebarCollapsed;
+    !isNarrow && sidebarCollapsibleRoutes.has(route) && sidebarCollapsed;
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [selectedScheduleId, setSelectedScheduleId] = useState(null);
   const [selectedProject, setSelectedProject] = useState(null);
@@ -990,6 +994,7 @@ function AppCore() {
     : selectedModel;
 
   const selectTask = (id) => {
+    if (isNarrow) setMobileSidebarOpen(false);
     const task = tasks.find((t) => t.id === id);
     if (task) {
       // Record the visit for recents ordering, but never auto-pin.
@@ -1047,6 +1052,7 @@ function AppCore() {
   };
 
   const newTask = () => {
+    if (isNarrow) setMobileSidebarOpen(false);
     setActiveTaskId(null);
     setComposerAttachments([]);
     setRoute('home');
@@ -1428,6 +1434,7 @@ function AppCore() {
   }, []);
 
   const navigate = (key) => {
+    if (isNarrow) setMobileSidebarOpen(false);
     if (key === 'artifacts') {
       fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
     }
@@ -2173,114 +2180,141 @@ function AppCore() {
       // intercept drag on their own surface.
       WebkitAppRegion: 'drag',
     }}>
+      {/* Mobile backdrop — dims content behind the open drawer */}
+      {isNarrow && (
+        <div
+          onClick={() => setMobileSidebarOpen(false)}
+          style={{
+            position: 'fixed', inset: 0, zIndex: 100,
+            background: 'rgba(0,0,0,0.35)',
+            backdropFilter: 'blur(2px)',
+            WebkitAppRegion: 'no-drag',
+            opacity: mobileSidebarOpen ? 1 : 0,
+            pointerEvents: mobileSidebarOpen ? 'auto' : 'none',
+            transition: 'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}
+        />
+      )}
+
       {/*
-        Floating hamburger — visible when the sidebar is collapsed. Sits
-        right of the macOS traffic lights (window-x=14, so left=88 clears
-        them). Always mounted so it can fade in/out instead of popping —
-        opacity + a small translate matched to the sidebar's spring easing
-        produces a single coordinated transition across both elements.
+        Floating hamburger — on desktop: visible when sidebar is collapsed
+        (chat route only). On mobile: always visible when the drawer is closed.
+        Always mounted so it can fade in/out instead of popping.
       */}
       <button
-        onClick={() => setSidebarCollapsed(false)}
+        onClick={() => isNarrow ? setMobileSidebarOpen(true) : setSidebarCollapsed(false)}
         title="Open sidebar"
         className="icon-btn"
         style={{
           position: 'absolute',
-          // Mirror the sidebar's collapse-icon position exactly so when
-          // the sidebar slides out, this hamburger appears in the same
-          // spot. Sidebar lives inside the 9px cowork shell padding,
-          // and its chrome row has padding-left: 88 → button at x:97.
-          top: 18, left: 97,
+          // On Electron, left: 97 clears the macOS traffic lights (which end ~x:80).
+          // On web there are no traffic lights so left: 18 sits flush with the app edge.
+          top: 18, left: host.isWeb ? 18 : 97,
           zIndex: 10,
           WebkitAppRegion: 'no-drag',
-          // Only visible when the sidebar is *effectively* collapsed,
-          // which by definition means we're on a route that allows
-          // collapsing (chat task). Outside that, the sidebar is
-          // pinned open and this affordance is unnecessary.
-          opacity: sidebarCollapsedEffective ? 1 : 0,
-          transform: sidebarCollapsedEffective ? 'translateX(0)' : 'translateX(-8px)',
-          pointerEvents: sidebarCollapsedEffective ? 'auto' : 'none',
+          opacity: isNarrow
+            ? (mobileSidebarOpen ? 0 : 1)
+            : (sidebarCollapsedEffective ? 1 : 0),
+          transform: (isNarrow ? !mobileSidebarOpen : sidebarCollapsedEffective)
+            ? 'translateX(0)' : 'translateX(-8px)',
+          pointerEvents: (isNarrow ? !mobileSidebarOpen : sidebarCollapsedEffective)
+            ? 'auto' : 'none',
           transition:
-            'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1) ' +
-              `${sidebarCollapsedEffective ? '120ms' : '0ms'}, ` +
-            'transform 360ms cubic-bezier(0.32, 0.72, 0, 1) ' +
-              `${sidebarCollapsedEffective ? '80ms' : '0ms'}`,
+            'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1) 120ms, ' +
+            'transform 360ms cubic-bezier(0.32, 0.72, 0, 1) 80ms',
         }}
       >
         {Ico.sidebarExpandRight(15)}
       </button>
 
-      <Sidebar
-        tasks={tasks}
-        pins={pins}
-        scheduledCount={scheduled.length}
-        projectsCount={projects.length}
-        artifactsCount={artifacts.length}
-        connectorsCount={connectors.length}
-        activeRoute={route === 'task' ? null : (route === 'schedule-detail' ? 'scheduled' : route)}
-        activeTaskId={activeTaskId}
-        serverOnline={serverOnline}
-        onNavigate={navigate}
-        onSelectTask={selectTask}
-        onNewTask={newTask}
-        onOpenSearch={() => setSearchOpen(true)}
-        collapsed={sidebarCollapsedEffective}
-        // Only expose the toggle on routes that allow collapse —
-        // Sidebar hides its own chrome collapse button when
-        // `onToggleCollapsed` is undefined.
-        onToggleCollapsed={
-          sidebarCollapsibleRoutes.has(route)
-            ? () => setSidebarCollapsed((c) => !c)
-            : undefined
-        }
-        onPinTask={handlePinTask}
-        onUnpinTask={handleUnpinTask}
-        onRenameTask={handleRenameTask}
-        onDeleteTask={handleDeleteTask}
-        onMoveTaskToProject={handleMoveTaskToProject}
-        projects={projects}
-        schedules={scheduled}
-        scheduleRunsIndex={scheduleRunsIndex}
-        onOpenSchedule={(scheduleId) => {
-          setSelectedScheduleId(scheduleId);
-          setRoute('schedule-detail');
-        }}
-        serverBusy={serverBusy}
-        serverBusyKind={serverBusyKind}
-        updateAvailable={updateStatus?.phase === 'available' ? { version: updateStatus.version } : null}
-        onApplyUpdate={handleApplyUpdate}
-        onShowServerHelp={() => setServerHelpOpen(true)}
-        onToggleServer={async () => {
-          if (serverBusy) return;
-          // Decide intent from main's actual state, not renderer state.
-          // Treat "running OR mid-start" as up so a click during boot
-          // stops the in-flight start instead of double-spawning python.
-          let actuallyRunning = serverOnline;
-          let actuallyStarting = false;
-          try {
-            const info = await host.serverInfo();
-            if (info) {
-              if (typeof info.running === 'boolean') actuallyRunning = info.running;
-              if (typeof info.starting === 'boolean') actuallyStarting = info.starting;
-            }
-          } catch {}
-          const isUp = actuallyRunning || actuallyStarting;
-          const goingUp = !isUp;
-          setServerBusyKind(goingUp ? 'starting' : 'stopping');
-          setServerBusy(true);
-          try {
-            const result = goingUp
-              ? await host.serverStart()
-              : await host.serverStop();
-            if (result) {
-              setServerOnline(!!result.running);
-              if (result.running) setTimeout(refreshData, 400);
-            }
-          } catch {} finally {
-            setServerBusy(false);
+      {/*
+        Sidebar — on mobile it's a fixed overlay drawer; on desktop it's
+        a normal flex item. `display: contents` makes the wrapper transparent
+        to the flex layout so Sidebar participates as a direct flex child.
+      */}
+      <div
+        className={isNarrow ? 'sidebar-overlay-wrap' : undefined}
+        style={isNarrow ? {
+          position: 'fixed',
+          top: 9, bottom: 9, left: 9,
+          zIndex: 101,
+          transform: mobileSidebarOpen ? 'translateX(0)' : 'translateX(calc(-100% - 18px))',
+          transition: 'transform 380ms cubic-bezier(0.22, 1, 0.36, 1)',
+          WebkitAppRegion: 'no-drag',
+        } : { display: 'contents' }}
+      >
+        <Sidebar
+          tasks={tasks}
+          pins={pins}
+          scheduledCount={scheduled.length}
+          projectsCount={projects.length}
+          artifactsCount={artifacts.length}
+          connectorsCount={connectors.length}
+          activeRoute={route === 'task' ? null : (route === 'schedule-detail' ? 'scheduled' : route)}
+          activeTaskId={activeTaskId}
+          serverOnline={serverOnline}
+          onNavigate={navigate}
+          onSelectTask={selectTask}
+          onNewTask={newTask}
+          onOpenSearch={() => setSearchOpen(true)}
+          collapsed={sidebarCollapsedEffective}
+          onToggleCollapsed={
+            isNarrow
+              ? () => setMobileSidebarOpen(false)
+              : (sidebarCollapsibleRoutes.has(route)
+                  ? () => setSidebarCollapsed((c) => !c)
+                  : undefined)
           }
-        }}
-      />
+          onPinTask={handlePinTask}
+          onUnpinTask={handleUnpinTask}
+          onRenameTask={handleRenameTask}
+          onDeleteTask={handleDeleteTask}
+          onMoveTaskToProject={handleMoveTaskToProject}
+          projects={projects}
+          schedules={scheduled}
+          scheduleRunsIndex={scheduleRunsIndex}
+          onOpenSchedule={(scheduleId) => {
+            if (isNarrow) setMobileSidebarOpen(false);
+            setSelectedScheduleId(scheduleId);
+            setRoute('schedule-detail');
+          }}
+          serverBusy={serverBusy}
+          serverBusyKind={serverBusyKind}
+          updateAvailable={updateStatus?.phase === 'available' ? { version: updateStatus.version } : null}
+          onApplyUpdate={handleApplyUpdate}
+          onShowServerHelp={() => setServerHelpOpen(true)}
+          onToggleServer={async () => {
+            if (serverBusy) return;
+            // Decide intent from main's actual state, not renderer state.
+            // Treat "running OR mid-start" as up so a click during boot
+            // stops the in-flight start instead of double-spawning python.
+            let actuallyRunning = serverOnline;
+            let actuallyStarting = false;
+            try {
+              const info = await host.serverInfo();
+              if (info) {
+                if (typeof info.running === 'boolean') actuallyRunning = info.running;
+                if (typeof info.starting === 'boolean') actuallyStarting = info.starting;
+              }
+            } catch {}
+            const isUp = actuallyRunning || actuallyStarting;
+            const goingUp = !isUp;
+            setServerBusyKind(goingUp ? 'starting' : 'stopping');
+            setServerBusy(true);
+            try {
+              const result = goingUp
+                ? await host.serverStart()
+                : await host.serverStop();
+              if (result) {
+                setServerOnline(!!result.running);
+                if (result.running) setTimeout(refreshData, 400);
+              }
+            } catch {} finally {
+              setServerBusy(false);
+            }
+          }}
+        />
+      </div>
 
       <main style={{
         flex: 1, minWidth: 0, minHeight: 0,
@@ -2355,7 +2389,7 @@ function AppCore() {
               setRoute('projects');
             }}
             projects={projects}
-            sidebarCollapsed={sidebarCollapsedEffective}
+            sidebarCollapsed={isNarrow || sidebarCollapsedEffective}
           />
         )}
 

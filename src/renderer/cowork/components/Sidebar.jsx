@@ -359,7 +359,9 @@ export default function Sidebar({
       <div
         className="anton-sidebar__chrome drag-region"
         style={{
-          padding: '9px 14px 8px 88px',
+          // 88px left clears the macOS traffic lights in Electron.
+          // On web there are no traffic lights so 14px suffices.
+          padding: `9px 14px 8px ${host.isWeb ? 14 : 88}px`,
           flexShrink: 0,
         }}
       >

@@ -2673,6 +2673,24 @@ body[data-theme="dark"] .orbit-morph[data-state="done"] {
   }
 }
 
+/* Sidebar in overlay/drawer mode — always shows full content regardless of
+   viewport width, overriding the compact @media rules above. */
+.sidebar-overlay-wrap .app-sidebar {
+  width: clamp(240px, 80vw, 320px) !important;
+}
+.sidebar-overlay-wrap .app-sidebar .section-label,
+.sidebar-overlay-wrap .app-sidebar .recent-item span:last-child,
+.sidebar-overlay-wrap .app-sidebar .nav-item span:nth-child(2),
+.sidebar-overlay-wrap .app-sidebar .nav-item span:nth-child(3),
+.sidebar-overlay-wrap .app-sidebar .nav-item span:nth-child(4) {
+  display: revert !important;
+}
+.sidebar-overlay-wrap .app-sidebar .nav-item,
+.sidebar-overlay-wrap .app-sidebar .recent-item {
+  justify-content: revert !important;
+  padding: revert !important;
+}
+
 /* ─── Segmented control ──────────────────────────────────────────────────── */
 .segmented {
   display: inline-flex;
