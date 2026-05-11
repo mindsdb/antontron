@@ -20,6 +20,7 @@ import * as path from 'node:path';
 
 const DEFAULT_PORT = 26866; // ANTON on T9 keypad
 const SERVER_HOST = '127.0.0.1';
+const REQUIRED_PROTOCOL_VERSION = 1;
 
 let serverProcess = null;
 let serverStarted = false;
@@ -49,18 +50,41 @@ function getEnvPath() {
 async function probeHealth(port, timeoutMs) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const ok = await new Promise((resolve) => {
+    const health = await new Promise((resolve) => {
       const req = http.get(
         { hostname: SERVER_HOST, port, path: '/health', timeout: 1000 },
         (res) => {
-          res.resume();
-          resolve(res.statusCode === 200);
+          const chunks = [];
+          res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+          res.on('end', () => {
+            if (res.statusCode !== 200) {
+              resolve(null);
+              return;
+            }
+            try {
+              resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+            } catch {
+              resolve({ status: 'ok' });
+            }
+          });
         },
       );
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => { req.destroy(); resolve(false); });
+      req.on('error', () => resolve(null));
+      req.on('timeout', () => { req.destroy(); resolve(null); });
     });
-    if (ok) return true;
+    if (
+      health?.status === 'ok' &&
+      typeof health.cowork_server_protocol_version === 'number' &&
+      health.cowork_server_protocol_version >= REQUIRED_PROTOCOL_VERSION
+    ) {
+      return true;
+    }
+    if (health?.status === 'ok') {
+      throw new Error(
+        `Server protocol ${health.cowork_server_protocol_version ?? 'unknown'} is incompatible; ` +
+        `required >= ${REQUIRED_PROTOCOL_VERSION}.`,
+      );
+    }
     await new Promise((r) => setTimeout(r, 250));
   }
   return false;
@@ -81,13 +105,8 @@ export async function start({ readyTimeoutMs = 15000 } = {}) {
     );
     process.stderr.write('\n');
     console.error(`✗ Anton Python interpreter not found at ${expected}.`);
-    console.error('  Run `uv tool install anton` first, then re-run `npm run dev:web`.');
+    console.error('  Run `uv tool install -e "../anton[cowork-server]"` from cowork/, then re-run `npm run dev:web`.');
     process.exit(1);
-  }
-
-  const serverDir = path.resolve('./server');
-  if (!fs.existsSync(path.join(serverDir, 'main.py'))) {
-    throw new Error(`Server source not found at ${serverDir}/main.py (expected to run from cowork repo root).`);
   }
 
   // We deliberately don't set ANTON_PROJECTS_DIR. The server uses
@@ -115,8 +134,8 @@ export async function start({ readyTimeoutMs = 15000 } = {}) {
   // controls shutdown order explicitly: vite quiesces first, THEN we
   // SIGTERM python — avoids ECONNREFUSED noise from vite proxying
   // /v1/* during shutdown.
-  const child = spawn(pythonCmd, ['main.py'], {
-    cwd: serverDir,
+  const child = spawn(pythonCmd, ['-m', 'anton.cowork.server'], {
+    cwd: os.homedir(),
     env,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,

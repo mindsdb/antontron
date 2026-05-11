@@ -1,7 +1,9 @@
-// Spawns the bundled Python FastAPI server (server/main.py) and waits for
+// Spawns the Anton-packaged Cowork FastAPI server and waits for
 // /health to come up. Uses the python interpreter that the antontron
 // installer puts at ~/.local/share/uv/tools/anton/bin/python — same env
-// `uv tool install --with fastapi --with uvicorn` populated.
+// `uv tool install anton[cowork-server]` populated. During the migration
+// window, falls back to the bundled server/main.py if the packaged module
+// fails to start.
 
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
@@ -9,7 +11,12 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
-import { checkPythonImports, getAntonToolPython, getPythonUtf8Env } from './server-deps';
+import {
+  ANTON_COWORK_SERVER_PROTOCOL_VERSION,
+  checkPythonImports,
+  getAntonToolPython,
+  getPythonUtf8Env,
+} from './server-deps';
 
 const DEFAULT_PORT = 26866; // ANTON on T9 keypad
 const SERVER_HOST = '127.0.0.1';
@@ -93,24 +100,62 @@ function getServerDir(): string {
   return path.join(__dirname, '..', '..', '..', 'server');
 }
 
-async function probeHealth(timeoutMs: number): Promise<boolean> {
+interface ServerHealth {
+  status?: string;
+  cowork_server_protocol_version?: number;
+}
+
+function isCompatibleHealth(health: ServerHealth | null): boolean {
+  return Boolean(
+    health &&
+    health.status === 'ok' &&
+    typeof health.cowork_server_protocol_version === 'number' &&
+    health.cowork_server_protocol_version >= ANTON_COWORK_SERVER_PROTOCOL_VERSION,
+  );
+}
+
+function protocolError(health: ServerHealth | null): string {
+  const actual = health?.cowork_server_protocol_version;
+  return `Anton Cowork server protocol ${actual ?? 'unknown'} is incompatible; required >= ${ANTON_COWORK_SERVER_PROTOCOL_VERSION}.`;
+}
+
+async function readHealthOnce(timeoutMs: number = 1000): Promise<ServerHealth | null> {
+  return new Promise<ServerHealth | null>((resolve) => {
+    const req = http.get(
+      { hostname: SERVER_HOST, port: serverPort, path: '/health', timeout: timeoutMs },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (chunk) => chunks.push(Buffer.from(chunk)));
+        res.on('end', () => {
+          if (res.statusCode !== 200) {
+            resolve(null);
+            return;
+          }
+          try {
+            resolve(JSON.parse(Buffer.concat(chunks).toString('utf-8')));
+          } catch {
+            resolve({ status: 'ok' });
+          }
+        });
+      },
+    );
+    req.on('error', () => resolve(null));
+    req.on('timeout', () => { req.destroy(); resolve(null); });
+  });
+}
+
+async function waitForCompatibleHealth(timeoutMs: number, shouldAbort?: () => boolean): Promise<{ ok: boolean; health: ServerHealth | null; reason?: string }> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
-    const ok = await new Promise<boolean>((resolve) => {
-      const req = http.get(
-        { hostname: SERVER_HOST, port: serverPort, path: '/health', timeout: 1000 },
-        (res) => {
-          res.resume();
-          resolve(res.statusCode === 200);
-        },
-      );
-      req.on('error', () => resolve(false));
-      req.on('timeout', () => { req.destroy(); resolve(false); });
-    });
-    if (ok) return true;
+    if (shouldAbort?.()) {
+      return { ok: false, health: null, reason: 'Server process exited before /health became ready.' };
+    }
+    const health = await readHealthOnce();
+    if (isCompatibleHealth(health)) return { ok: true, health };
+    if (health?.status === 'ok') return { ok: false, health, reason: protocolError(health) };
     await new Promise((r) => setTimeout(r, 250));
   }
-  return false;
+  return { ok: false, health: null, reason: `Server did not respond on /health within ${timeoutMs}ms.` };
 }
 
 export interface StartServerResult {
@@ -134,12 +179,16 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
   // that would fail to bind. Renderer-initiated re-starts after a
   // user "Stop" hit this same path; the brief 500ms probe is cheap
   // enough to be unconditional.
-  const alreadyHealthy = await probeHealth(500);
-  if (alreadyHealthy) {
+  const alreadyHealthy = await waitForCompatibleHealth(500);
+  if (alreadyHealthy.ok) {
     serverStarted = true;
     lastStartError = null;
     console.log(`[server] adopted existing instance on port ${serverPort}`);
     return { ok: true, port: serverPort };
+  }
+  if (alreadyHealthy.health?.status === 'ok') {
+    lastStartError = alreadyHealthy.reason || protocolError(alreadyHealthy.health);
+    return { ok: false, reason: lastStartError, port: serverPort };
   }
 
   // 45s ceiling so the python's in-process `_maybe_self_update_and_reexec`
@@ -163,28 +212,24 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
       reason: lastStartError,
     };
   }
+  const pythonExecutable = pythonCmd;
 
   const baseEnv = {
     ...process.env,
     PATH: getEnvPath(),
     ...getPythonUtf8Env(),
   };
+  const bundledServerPath = path.join(getServerDir(), 'main.py');
   const depsReady = await checkPythonImports(pythonCmd, baseEnv);
-  if (!depsReady) {
+  if (!depsReady && !fs.existsSync(bundledServerPath)) {
     lastStartError = 'Anton server dependencies are missing from the uv tool environment. Run the installer to repair the Anton tool venv.';
     return {
       ok: false,
       reason: lastStartError,
     };
   }
-
-  const serverDir = getServerDir();
-  if (!fs.existsSync(path.join(serverDir, 'main.py'))) {
-    lastStartError = `Server source not found at ${serverDir}/main.py`;
-    return {
-      ok: false,
-      reason: lastStartError,
-    };
+  if (!depsReady) {
+    console.warn('[server] packaged Cowork server import check failed; bundled fallback will be attempted.');
   }
 
   pendingStart = (async (): Promise<StartServerResult> => {
@@ -196,8 +241,8 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
       ANTON_PROJECTS_DIR: path.join(app.getPath('userData'), 'projects'),
     };
 
-    // Spawn the python with a STABLE cwd (`~`) and pass `main.py` as
-    // an absolute path. Earlier we used `cwd: serverDir`, which sat
+    // Spawn the python with a STABLE cwd (`~`). Earlier we used
+    // `cwd: serverDir`, which sat
     // inside the .app bundle — fine until the bundle was replaced
     // under a running server (`npm run pack` in dev wipes
     // `release/mac-arm64/`; in-place app updates do the same in
@@ -211,13 +256,16 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     // only load-bearing for anton-core's optional `cwd/.env` lookup
     // which we deliberately skip here (the server's `.env` chain
     // resolves through `~/.anton/.env`).
-    const child = spawn(pythonCmd, [path.join(serverDir, 'main.py')], {
-      cwd: os.homedir(),
-      env,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    async function spawnAttempt(label: string, args: string[]): Promise<StartServerResult> {
+      console.log(`[server] starting ${label}: ${pythonExecutable} ${args.join(' ')}`);
+      let exited = false;
+      const child: ChildProcess = spawn(pythonExecutable, args, {
+        cwd: os.homedir(),
+        env,
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
 
-    child.stdout.on('data', (d) => {
+    child.stdout?.on('data', (d: Buffer) => {
       const text = d.toString();
       // Server logs go to stdout via uvicorn — the python crash trace
       // we want to surface lives on stderr, but errors propagated
@@ -226,12 +274,13 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
       appendStderr(text);
       process.stdout.write(`[anton-server] ${text}`);
     });
-    child.stderr.on('data', (d) => {
+    child.stderr?.on('data', (d: Buffer) => {
       const text = d.toString();
       appendStderr(text);
       process.stderr.write(`[anton-server] ${text}`);
     });
-    child.on('exit', (code) => {
+    child.on('exit', (code: number | null) => {
+      exited = true;
       serverStarted = false;
       serverProcess = null;
       lastExitCode = code;
@@ -249,9 +298,9 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
 
     serverProcess = child;
 
-    const ready = await probeHealth(readyTimeoutMs);
-    if (!ready) {
-      lastStartError = `Server did not respond on /health within ${readyTimeoutMs}ms.`;
+      const ready = await waitForCompatibleHealth(readyTimeoutMs, () => exited);
+      if (!ready.ok) {
+        lastStartError = ready.reason || `Server did not respond on /health within ${readyTimeoutMs}ms.`;
       // Reap the spawned child instead of leaving it as a zombie
       // pinning the port. If we don't, every failed restart leaks a
       // python that still owns 26866, so subsequent restart attempts
@@ -259,18 +308,18 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
       // start" cycle look broken from the user's side. SIGTERM with
       // a SIGKILL fallback so a hung uvicorn boot can't outlive us.
       try { child.kill('SIGTERM'); } catch {}
-      const exited = new Promise<void>((resolve) => {
+      const childExited = new Promise<void>((resolve) => {
         child.once('exit', () => resolve());
       });
-      await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 2_000))]);
+      await Promise.race([childExited, new Promise<void>((r) => setTimeout(r, 2_000))]);
       if (child.exitCode === null && !child.killed) {
         try { child.kill('SIGKILL'); } catch {}
-        await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 1_000))]);
+        await Promise.race([childExited, new Promise<void>((r) => setTimeout(r, 1_000))]);
       }
       if (serverProcess === child) serverProcess = null;
       return {
         ok: false,
-        reason: lastStartError,
+          reason: `${label} failed: ${lastStartError}`,
         port: serverPort,
       };
     }
@@ -279,6 +328,18 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     // the rolling stderr in case downstream code wants to inspect.
     lastStartError = null;
     return { ok: true, port: serverPort };
+    }
+
+    const packaged = await spawnAttempt('packaged Anton Cowork server', ['-m', 'anton.cowork.server']);
+    if (packaged.ok) return packaged;
+
+    if (!fs.existsSync(bundledServerPath)) {
+      return packaged;
+    }
+
+    console.warn(`[server] packaged server failed, trying bundled fallback: ${packaged.reason}`);
+    appendStderr(`\n[server] packaged server failed, trying bundled fallback: ${packaged.reason}\n`);
+    return spawnAttempt('bundled fallback Cowork server', [bundledServerPath]);
   })();
 
   try {

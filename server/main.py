@@ -79,14 +79,11 @@ def _maybe_self_update_and_reexec() -> None:
                 pass
 
     try:
-        if check_and_update(_NullConsole(), settings):
+        if check_and_update(_NullConsole(), settings, extras=["cowork-server"]):
             os.environ["_ANTON_UPDATED"] = "1"
-            # Re-exec the same interpreter on the same script so the
-            # post-import state (anton, fastapi, etc.) reloads
-            # against the freshly installed version. PID/pipes are
-            # preserved across execv so the parent (antontron) sees
-            # this as a slightly slower cold start.
-            os.execv(sys.executable, [sys.executable] + sys.argv)
+            # Prefer the packaged Cowork server after an update. This
+            # fallback file remains bundled only during the migration window.
+            os.execv(sys.executable, [sys.executable, "-m", "anton.cowork.server"])
     except Exception:
         # Updater raised — keep going on the existing version.
         return
@@ -118,6 +115,13 @@ from routes.browse import router as browse_router
 from routes.integrations import router as integrations_router, refresh_google_oauth_tokens
 from routes.datavault import router as datavault_router
 from routes.connectors import router as connectors_router
+
+try:
+    from anton import __version__ as COWORK_SERVER_VERSION
+except Exception:  # pragma: no cover - startup diagnostics cover this path
+    COWORK_SERVER_VERSION = "unknown"
+
+COWORK_SERVER_PROTOCOL_VERSION = 1
 
 logging.basicConfig(
     level=logging.INFO,
@@ -209,6 +213,9 @@ async def health():
     anton_available = conversation_manager.is_anton_available()
     return {
         "status": "ok",
+        "anton_version": COWORK_SERVER_VERSION,
+        "cowork_server_version": COWORK_SERVER_VERSION,
+        "cowork_server_protocol_version": COWORK_SERVER_PROTOCOL_VERSION,
         "anton_available": anton_available,
         "mode": "anton" if anton_available else "demo",
         "config_ready": config["config_ready"],

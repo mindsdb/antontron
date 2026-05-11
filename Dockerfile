@@ -134,11 +134,9 @@ ENV PATH="/opt/venv/bin:$PATH"
 
 WORKDIR /app
 
-# App payload — SPA bundle from the builder + server source. Use
-# --chown so we don't need a `chown -R` layer afterward (which would
-# duplicate every file's metadata in a fresh layer).
+# App payload — SPA bundle. The FastAPI server now ships inside the
+# installed anton[cowork-server] package.
 COPY --chown=anton:anton --from=spa-builder /build/dist/renderer-web/ /app/dist/renderer-web/
-COPY --chown=anton:anton cowork/server/ /app/server/
 
 # Persistent state lives under /home/anton/.anton — operators bind-mount
 # this to keep vault/settings across container restarts.
@@ -163,5 +161,5 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
 sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:26866/health',timeout=3).status==200 else 1)" \
     || exit 1
 
-WORKDIR /app/server
-CMD ["python", "main.py"]
+WORKDIR /app
+CMD ["python", "-m", "anton.cowork.server"]

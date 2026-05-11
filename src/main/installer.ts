@@ -6,8 +6,10 @@ import * as os from 'os';
 import { IPC } from '../shared/ipc-channels';
 import { sendEvent } from './analytics';
 import {
+  ANTON_COWORK_SERVER_EXTRA,
   SERVER_PYTHON_DEPS,
   checkPythonImports,
+  getAntonGitSpec,
   getAntonToolPython,
   getPythonUtf8Env,
   getServerDepsVerifyScript,
@@ -265,7 +267,14 @@ export async function checkAntonInstalled(): Promise<boolean> {
 export async function checkServerDepsReady(): Promise<boolean> {
   const py = getAntonToolPython();
   if (!fileExists(py)) return false;
-  return checkPythonImports(py, { ...process.env, PATH: getEnvPath() });
+  if (await checkPythonImports(py, { ...process.env, PATH: getEnvPath() })) {
+    return true;
+  }
+  // Migration fallback: an existing install may have the legacy bundled
+  // server dependencies but not yet include anton.cowork.server. Let the
+  // app boot so server-process can try the bundled fallback and surface
+  // repair diagnostics from there.
+  return checkPythonImports(py, { ...process.env, PATH: getEnvPath() }, 8000, false);
 }
 
 // Convenience wrapper used by the boot flow IPC. Returns the full
@@ -416,12 +425,13 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     }
     setStep('uv', 'done');
 
-    // Step 3: Install Anton (with fastapi + uvicorn + multipart + pydantic
-    // so the bundled FastAPI server in server/main.py can actually start).
+    // Step 3: Install Anton with the Cowork server extra so the packaged
+    // FastAPI server (`python -m anton.cowork.server`) can start.
     if (abortIfRequested()) return false;
     setStep('anton', 'running');
-    sendLog(win, '\n--- Installing Anton (with server extras) ---\n');
-    sendLog(win, 'Server extras:\n');
+    sendLog(win, '\n--- Installing Anton (with Cowork server extra) ---\n');
+    sendLog(win, `Anton extra: ${ANTON_COWORK_SERVER_EXTRA}\n`);
+    sendLog(win, 'Server runtime packages:\n');
     for (const dep of SERVER_PYTHON_DEPS) {
       sendLog(win, `  - ${dep.spec}\n`);
     }
@@ -431,11 +441,8 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     // arg — `uv tool install` requires a flag per package.
     const installArgs = [
       'tool', 'install',
-      'git+https://github.com/mindsdb/anton.git',
+      getAntonGitSpec(),
     ];
-    for (const dep of SERVER_PYTHON_DEPS) {
-      installArgs.push('--with', dep.spec);
-    }
     // --force allows replacing an existing tool entry; --reinstall makes uv
     // rebuild the environment contents too. Both matter when a user already
     // has an anton tool venv that predates the server dependency set.
@@ -498,9 +505,7 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
         'This usually means the previous install step finished with a ' +
         'partial venv. Try re-running the installer; if it persists, ' +
         'manually run:\n' +
-        `  uv tool install --force git+https://github.com/mindsdb/anton.git ${
-          SERVER_PYTHON_DEPS.map((d) => `--with '${d.spec}'`).join(' ')
-        }\n`
+        `  uv tool install --force ${JSON.stringify(getAntonGitSpec())}\n`
       );
       sendInstallError(win, 'Server dependencies missing');
       return false;
@@ -542,4 +547,3 @@ export async function runInstaller(win: BrowserWindow, opts?: InstallerOptions):
     return false;
   }
 }
-
