@@ -70,6 +70,21 @@ def _new_id(prefix: str = "att") -> str:
     return f"{prefix}_{uuid.uuid4().hex[:16]}"
 
 
+def _file_inside_attachment_dir(attachment_dir: Path) -> Path | None:
+    """Return the on-disk file stored under ``…/<attachment_id>/`` (upload writes one file per folder)."""
+    if not attachment_dir.is_dir():
+        return None
+    candidates = [
+        p for p in attachment_dir.iterdir()
+        if p.is_file() and not p.name.startswith(".")
+    ]
+    if not candidates:
+        return None
+    if len(candidates) == 1:
+        return candidates[0]
+    return max(candidates, key=lambda p: p.stat().st_mtime)
+
+
 def _text_preview(text: str | None) -> str:
     if not text:
         return ""
@@ -143,10 +158,28 @@ def get_attachments(
     if session_id:
         project_uploads_dir = project_uploads_dir / session_id
 
-    if ids is None:
-        files = sorted(project_uploads_dir.iterdir(), key=lambda item: item.stat().st_ctime, reverse=True)
-    files = [project_uploads_dir / item_id for item_id in ids if (project_uploads_dir / item_id).exists()]
-    return [FileAttachment.from_path(file.name, file) for file in files]
+    if not project_uploads_dir.is_dir():
+        return []
+
+    files: list[FileAttachment] = []
+    try:
+        for item in project_uploads_dir.iterdir():
+            if not item.is_dir():
+                continue
+            leaf = _file_inside_attachment_dir(item)
+            if leaf is None:
+                continue
+            try:
+                files.append(FileAttachment.from_path(item.name, leaf))
+            except (FileNotFoundError, OSError):
+                continue
+    except OSError:
+        return []
+
+    if ids:
+        id_set = set(ids)
+        files = [f for f in files if f.id in id_set]
+    return sorted(files, key=lambda x: x.updated_at, reverse=True)
 
 
 def attachment_context(project_name: str | None, session_id: str | None, ids: list[str] | None) -> str:
