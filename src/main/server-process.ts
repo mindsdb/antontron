@@ -256,12 +256,12 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     // only load-bearing for anton-core's optional `cwd/.env` lookup
     // which we deliberately skip here (the server's `.env` chain
     // resolves through `~/.anton/.env`).
-    async function spawnAttempt(label: string, args: string[]): Promise<StartServerResult> {
+    async function spawnAttempt(label: string, args: string[], extraEnv?: Record<string, string>): Promise<StartServerResult> {
       console.log(`[server] starting ${label}: ${pythonExecutable} ${args.join(' ')}`);
       let exited = false;
       const child: ChildProcess = spawn(pythonExecutable, args, {
         cwd: os.homedir(),
-        env,
+        env: { ...env, ...extraEnv },
         stdio: ['ignore', 'pipe', 'pipe'],
       });
 
@@ -339,7 +339,13 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
 
     console.warn(`[server] packaged server failed, trying bundled fallback: ${packaged.reason}`);
     appendStderr(`\n[server] packaged server failed, trying bundled fallback: ${packaged.reason}\n`);
-    return spawnAttempt('bundled fallback Cowork server', [bundledServerPath]);
+    // The bundled server/main.py uses bare imports (from anton_api ...,
+    // from routes ...) that need the server directory on sys.path. We
+    // inject PYTHONPATH rather than changing cwd so the server process
+    // isn't anchored to a directory inside the .app bundle (which can
+    // disappear during in-place updates).
+    const serverDir = getServerDir();
+    return spawnAttempt('bundled fallback Cowork server', [bundledServerPath], { PYTHONPATH: serverDir });
   })();
 
   try {
