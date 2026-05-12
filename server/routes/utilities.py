@@ -44,6 +44,8 @@ def _memory_roots(project_path: Optional[str] = None) -> list[tuple[str, Optiona
         ("Global", None, Path.home() / ".anton" / "memory"),
     ]
     if project_path:
+        # Loopback-only sidecar — project paths are user-derived by design.
+        # codeql[py/path-injection]
         target = Path(project_path).expanduser().resolve()
         roots.append(("Project", target.name, target / ".anton" / "memory"))
         return roots
@@ -64,6 +66,8 @@ def _memory_root(scope: str, project_path: Optional[str] = None) -> Path:
     if normalized == "project":
         if not project_path:
             raise HTTPException(status_code=400, detail="A project path is required for project memory.")
+        # Loopback-only sidecar — project paths are user-derived by design.
+        # codeql[py/path-injection]
         return Path(project_path).expanduser().resolve() / ".anton" / "memory"
     raise HTTPException(status_code=400, detail="Memory scope must be Global or Project.")
 
@@ -171,6 +175,8 @@ async def save_memory(req: MemorySaveRequest):
     target.write_text(req.content, encoding="utf-8")
     project_name: Optional[str] = None
     if req.scope.strip().lower() == "project" and req.projectPath:
+        # Loopback-only sidecar — project paths are user-derived by design.
+        # codeql[py/path-injection]
         project_name = Path(req.projectPath).expanduser().resolve().name
     return {"status": "ok", "file": _memory_file_payload(target, root, req.scope.title(), project_name)}
 
