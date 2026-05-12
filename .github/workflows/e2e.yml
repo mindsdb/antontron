@@ -28,7 +28,12 @@ jobs:
         uses: astral-sh/setup-uv@v6
 
       - name: Install Anton via uv tool
-        run: uv tool install anton@git+https://github.com/mindsdb/anton.git
+        run: |
+          uv tool install anton@git+https://github.com/mindsdb/anton.git
+          # Install server deps into the same venv that start-server.mjs uses.
+          # uv tool install creates the venv but server/main.py imports these
+          # at the top level, so they must be available on that Python.
+          ~/.local/share/uv/tools/anton/bin/python -m pip install -r server/requirements.txt
 
       - name: Install Node dependencies
         run: npm ci
