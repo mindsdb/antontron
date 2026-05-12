@@ -34,7 +34,7 @@
       {
         "id": "oauth-azure-ad",
         "label": "Sign in with Microsoft (OAuth 2.0)",
-        "description": "OAuth 2.0 via Microsoft Graph \u2014 a browser opens for you to grant Anton scoped access to your Outlook mailbox. Requires registering an Azure AD app and supplying your Client ID and Client Secret (steps below).",
+        "description": "OAuth 2.0 via Microsoft Graph — a browser opens for you to grant Anton scoped access to your Outlook mailbox. Requires registering an Azure AD app and supplying your Client ID and Client Secret (steps below).",
         "recommended": true,
         "submit_action": "oauth_launch",
         "oauth": {
@@ -51,7 +51,7 @@
             "prompt": "select_account"
           }
         },
-        "how_to": "## Sign in with Microsoft (OAuth 2.0)\n\nAnton uses your own Azure AD app registration (BYOK) to authenticate. You'll need a free Azure account to complete these steps.\n\n## 1. Register an Azure AD app\n\n1. Go to [Azure Portal \u2192 Azure Active Directory \u2192 App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) and click **New registration**.\n2. Give it a name like `Anton Outlook`.\n3. Under **Supported account types**, choose **Accounts in any organizational directory and personal Microsoft accounts** (the `common` endpoint).\n4. Under **Redirect URI**, select **Public client/native (mobile & desktop)** and enter `http://localhost` as the URI. Click **Register**.\n\n## 2. Copy credentials\n\n5. On the app **Overview** page, copy the **Application (client) ID** \u2014 paste it into **Client ID** below.\n6. Go to **Certificates & secrets \u2192 Client secrets \u2192 New client secret**. Set an expiry, click **Add**, and immediately copy the **Value** \u2014 paste it into **Client secret** below. (It won't be shown again.)\n\n## 3. Add API permissions\n\n7. Go to **API permissions \u2192 Add a permission \u2192 Microsoft Graph \u2192 Delegated permissions**.\n8. Add: `Mail.ReadWrite`, `Mail.Send`, `User.Read`, `offline_access`.\n9. Click **Grant admin consent** if your tenant requires it (optional for personal accounts).\n\n## 4. Connect\n\n10. Fill in the **Client ID** and **Client secret** fields below, then click **Submit**. A browser window will open for you to sign in with your Microsoft account and grant the requested permissions.\n\n### Notes\n\n- Client secrets expire. When yours does, generate a new one in Azure Portal and update it in Anton.\n- To revoke access, visit [My Apps](https://myapps.microsoft.com/) \u2192 find the app \u2192 **Revoke permissions**.\n- For single-tenant deployments, replace `common` in the auth/token URLs with your **Directory (tenant) ID**.",
+        "how_to": "## Sign in with Microsoft (OAuth 2.0)\n\nAnton uses your own Azure AD app registration (BYOK) to authenticate. You'll need a free Azure account to complete these steps.\n\n## 1. Register an Azure AD app\n\n1. Go to [Azure Portal → Azure Active Directory → App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) and click **New registration**.\n2. Give it a name like `Anton Outlook`.\n3. Under **Supported account types**, choose **Accounts in any organizational directory and personal Microsoft accounts** (the `common` endpoint).\n4. Under **Redirect URI**, select **Public client/native (mobile & desktop)** and enter `http://localhost` as the URI. Click **Register**.\n\n## 2. Copy credentials\n\n5. On the app **Overview** page, copy the **Application (client) ID** — paste it into **Client ID** below.\n6. Go to **Certificates & secrets → Client secrets → New client secret**. Set an expiry, click **Add**, and immediately copy the **Value** — paste it into **Client secret** below. (It won't be shown again.)\n\n## 3. Add API permissions\n\n7. Go to **API permissions → Add a permission → Microsoft Graph → Delegated permissions**.\n8. Add: `Mail.ReadWrite`, `Mail.Send`, `User.Read`, `offline_access`.\n9. Click **Grant admin consent** if your tenant requires it (optional for personal accounts).\n\n## 4. Connect\n\n10. Fill in the **Client ID** and **Client secret** fields below, then click **Submit**. A browser window will open for you to sign in with your Microsoft account and grant the requested permissions.\n\n### Notes\n\n- Client secrets expire. When yours does, generate a new one in Azure Portal and update it in Anton.\n- To revoke access, visit [My Apps](https://myapps.microsoft.com/) → find the app → **Revoke permissions**.\n- For single-tenant deployments, replace `common` in the auth/token URLs with your **Directory (tenant) ID**.",
         "help_url": "https://learn.microsoft.com/en-us/graph/auth-register-app-v2",
         "fields": [
           {
@@ -68,7 +68,7 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "description": "The secret Value from Azure AD \u2192 Certificates & secrets. Shown only once at creation time."
+            "description": "The secret Value from Azure AD → Certificates & secrets. Shown only once at creation time."
           },
           {
             "name": "tenant_id",
@@ -86,7 +86,7 @@
         "label": "IMAP / App password",
         "description": "Connect via IMAP using your email address and a Microsoft app password. Works for personal Outlook.com and Hotmail accounts with two-step verification enabled.",
         "recommended": false,
-        "how_to": "## Connect via IMAP with an app password\n\nThis path works for **personal Outlook.com / Hotmail accounts**. Microsoft 365 (work/school) tenants typically require OAuth \u2014 check with your admin first.\n\n## Prerequisites\n\n- Two-step verification must be enabled on your Microsoft account.\n- IMAP access must be allowed (it is by default for Outlook.com personal accounts).\n\n## Steps\n\n1. Sign in at [account.microsoft.com/security](https://account.microsoft.com/security).\n2. Under **Advanced security options**, find **App passwords** and click **Create a new app password**.\n3. Microsoft generates a 16-character password. Copy it immediately \u2014 it won't be shown again.\n4. Enter your full Outlook email address in **Email** below.\n5. Paste the app password into **App password** below.\n\n## IMAP server details (for reference)\n\n- **Server**: `outlook.office365.com`\n- **Port**: 993 (SSL/TLS)\n\n### Notes\n\n- If you don't see the App passwords option, your account may have it disabled by an administrator. Use **Sign in with Microsoft** instead.\n- App passwords bypass two-factor prompts \u2014 treat them like passwords and revoke any you no longer need.",
+        "how_to": "## Connect via IMAP with an app password\n\nThis path works for **personal Outlook.com / Hotmail accounts**. Microsoft 365 (work/school) tenants typically require OAuth — check with your admin first.\n\n## Prerequisites\n\n- Two-step verification must be enabled on your Microsoft account.\n- IMAP access must be allowed (it is by default for Outlook.com personal accounts).\n\n## Steps\n\n1. Sign in at [account.microsoft.com/security](https://account.microsoft.com/security).\n2. Under **Advanced security options**, find **App passwords** and click **Create a new app password**.\n3. Microsoft generates a 16-character password. Copy it immediately — it won't be shown again.\n4. Enter your full Outlook email address in **Email** below.\n5. Paste the app password into **App password** below.\n\n## IMAP server details (for reference)\n\n- **Server**: `outlook.office365.com`\n- **Port**: 993 (SSL/TLS)\n\n### Notes\n\n- If you don't see the App passwords option, your account may have it disabled by an administrator. Use **Sign in with Microsoft** instead.\n- App passwords bypass two-factor prompts — treat them like passwords and revoke any you no longer need.",
         "help_url": "https://support.microsoft.com/en-us/account-billing/using-app-passwords-with-apps-that-don-t-support-two-step-verification-5896ed9b-4263-e681-128a-a6f2979a7944",
         "fields": [
           {
@@ -134,6 +134,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/outlook.svg"
+  },
+  "logo_url": "logos/outlook.svg"
 }

@@ -1,8 +1,21 @@
 {
   "id": "salesforce",
   "label": "Salesforce",
-  "aliases": ["sfdc", "sales force", "sf"],
-  "keywords": ["crm", "sales", "leads", "opportunities", "accounts", "contacts", "cases", "soql"],
+  "aliases": [
+    "sfdc",
+    "sales force",
+    "sf"
+  ],
+  "keywords": [
+    "crm",
+    "sales",
+    "leads",
+    "opportunities",
+    "accounts",
+    "contacts",
+    "cases",
+    "soql"
+  ],
   "description": "Read and write objects in your Salesforce org — Leads, Accounts, Contacts, Opportunities, custom objects.",
   "category": "crm",
   "logo": "globe",
@@ -23,7 +36,11 @@
         "oauth": {
           "auth_url": "https://login.salesforce.com/services/oauth2/authorize",
           "token_url": "https://login.salesforce.com/services/oauth2/token",
-          "scopes": ["api", "refresh_token", "offline_access"],
+          "scopes": [
+            "api",
+            "refresh_token",
+            "offline_access"
+          ],
           "extra_auth_params": {
             "prompt": "login consent"
           }
@@ -97,6 +114,9 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/salesforce.svg"
+  },
+  "logo_url": "logos/salesforce.svg",
+  "featured": true
 }

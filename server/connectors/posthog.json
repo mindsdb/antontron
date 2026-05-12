@@ -1,8 +1,18 @@
 {
   "id": "posthog",
   "label": "PostHog",
-  "aliases": ["post hog"],
-  "keywords": ["analytics", "product", "events", "funnels", "feature flags", "session replay", "dashboards"],
+  "aliases": [
+    "post hog"
+  ],
+  "keywords": [
+    "analytics",
+    "product",
+    "events",
+    "funnels",
+    "feature flags",
+    "session replay",
+    "dashboards"
+  ],
   "description": "Query events, persons, cohorts, and feature flags from your PostHog project.",
   "category": "analytics",
   "logo": "sparkle",
@@ -38,9 +48,18 @@
             "required": true,
             "default": "https://us.posthog.com",
             "options": [
-              { "value": "https://us.posthog.com", "label": "US Cloud (us.posthog.com)" },
-              { "value": "https://eu.posthog.com", "label": "EU Cloud (eu.posthog.com)" },
-              { "value": "custom", "label": "Self-hosted (enter URL)" }
+              {
+                "value": "https://us.posthog.com",
+                "label": "US Cloud (us.posthog.com)"
+              },
+              {
+                "value": "https://eu.posthog.com",
+                "label": "EU Cloud (eu.posthog.com)"
+              },
+              {
+                "value": "custom",
+                "label": "Self-hosted (enter URL)"
+              }
             ],
             "description": "Match the region you signed in to."
           },
@@ -62,6 +81,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/posthog.svg"
+  },
+  "logo_url": "logos/posthog.svg"
 }

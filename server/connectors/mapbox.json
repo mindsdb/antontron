@@ -31,9 +31,9 @@
       {
         "id": "access-token",
         "label": "Access Token",
-        "description": "Paste a public or secret access token from your Mapbox account. The quickest way to connect \u2014 no OAuth setup required.",
+        "description": "Paste a public or secret access token from your Mapbox account. The quickest way to connect — no OAuth setup required.",
         "recommended": true,
-        "how_to": "## Find your Mapbox access token\n\n1. Log in at [account.mapbox.com](https://account.mapbox.com).\n2. Click **Access Tokens** in the left sidebar (or go directly to [account.mapbox.com/access-tokens](https://account.mapbox.com/access-tokens)).\n3. You'll see a **Default public token** starting with `pk.eyJ` \u2014 this is sufficient for most map, geocoding, routing, and static image requests.\n4. To create a scoped secret token (starts with `sk.eyJ`) with specific permissions, click **+ Create a token**, name it (e.g. `Anton`), select the required scopes, and click **Create token**.\n5. Copy the token \u2014 secret tokens (`sk.`) are shown only once, so save it somewhere safe before closing the page.\n6. Paste the token into the **Access Token** field below.\n\n## Notes\n\n- Public tokens (`pk.`) are safe for read-only map and geocoding calls but are visible in client-side code. Secret tokens (`sk.`) are needed for some server-side APIs (e.g. Uploads, Datasets).\n- You can restrict a token to specific URLs or API endpoints under **Allowed URLs** on the token detail page.\n- Rotate a compromised token by deleting it in the Mapbox dashboard and creating a new one \u2014 then update the value below.",
+        "how_to": "## Find your Mapbox access token\n\n1. Log in at [account.mapbox.com](https://account.mapbox.com).\n2. Click **Access Tokens** in the left sidebar (or go directly to [account.mapbox.com/access-tokens](https://account.mapbox.com/access-tokens)).\n3. You'll see a **Default public token** starting with `pk.eyJ` — this is sufficient for most map, geocoding, routing, and static image requests.\n4. To create a scoped secret token (starts with `sk.eyJ`) with specific permissions, click **+ Create a token**, name it (e.g. `Anton`), select the required scopes, and click **Create token**.\n5. Copy the token — secret tokens (`sk.`) are shown only once, so save it somewhere safe before closing the page.\n6. Paste the token into the **Access Token** field below.\n\n## Notes\n\n- Public tokens (`pk.`) are safe for read-only map and geocoding calls but are visible in client-side code. Secret tokens (`sk.`) are needed for some server-side APIs (e.g. Uploads, Datasets).\n- You can restrict a token to specific URLs or API endpoints under **Allowed URLs** on the token detail page.\n- Rotate a compromised token by deleting it in the Mapbox dashboard and creating a new one — then update the value below.",
         "help_url": "https://docs.mapbox.com/api/overview/#access-tokens-and-token-scopes",
         "fields": [
           {
@@ -42,8 +42,8 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "placeholder": "pk.eyJ1IjoiZXhhbXBsZSIsImEiOiJja\u2026",
-            "description": "Your Mapbox access token. Starts with pk.eyJ (public) or sk.eyJ (secret). Found at account.mapbox.com \u2192 Access Tokens."
+            "placeholder": "pk.eyJ1IjoiZXhhbXBsZSIsImEiOiJja…",
+            "description": "Your Mapbox access token. Starts with pk.eyJ (public) or sk.eyJ (secret). Found at account.mapbox.com → Access Tokens."
           },
           {
             "name": "username",
@@ -55,6 +55,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/mapbox.svg"
+  },
+  "logo_url": "logos/mapbox.svg"
 }
