@@ -224,6 +224,25 @@ def _ui_settings() -> dict[str, Any]:
     return merged
 
 
+# Slug → env var for the reveal endpoint. Loopback-only server + .env file
+# is chmod 600 owned by the user, so exposing the stored value to the
+# user's own renderer doesn't broaden the trust boundary — anyone who can
+# hit the API can already read ~/.anton/.env directly.
+REVEALABLE_KEYS = {
+    "anthropic": "ANTON_ANTHROPIC_API_KEY",
+    "openai":    "ANTON_OPENAI_API_KEY",
+    "minds":     "ANTON_MINDS_API_KEY",
+}
+
+
+@router.get("/reveal-key/{name}")
+async def reveal_key(name: str):
+    env_key = REVEALABLE_KEYS.get(name.lower())
+    if env_key is None:
+        raise HTTPException(status_code=404, detail="Unknown key name")
+    return {"value": _get_env(env_key)}
+
+
 @router.get("")
 async def get_settings():
     status = get_config_status()
