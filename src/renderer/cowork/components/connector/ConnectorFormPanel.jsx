@@ -86,6 +86,7 @@ export default function ConnectorFormPanel({
     ...connector.form,
     form_error: errorMsg || undefined,
     logo: connector.form.logo || connector.logo,
+    logo_url: connector.form.logo_url || connector.logo_url,
     logo_color: connector.form.logo_color || connector.logo_color,
   };
 

@@ -41,7 +41,7 @@
         "label": "Service Principal (Client Credentials)",
         "description": "Paste your Azure tenant ID, client ID, client secret, and subscription ID. This is the standard non-interactive auth path for Azure and works with any Azure AD-registered app that has the Monitoring Reader role.",
         "recommended": true,
-        "how_to": "## Service Principal \u2014 Client Credentials\n\nThis is the recommended path for connecting Azure Monitor to Anton. You register an app in Azure Active Directory, assign it the **Monitoring Reader** role on your subscription, and paste the credentials below.\n\n## Steps\n\n1. Open the [Azure Portal](https://portal.azure.com) and navigate to **Azure Active Directory \u2192 App registrations \u2192 New registration**.\n2. Give the app a name (e.g. `anton-monitor`), leave the redirect URI blank, and click **Register**.\n3. On the app's overview page, copy the **Application (client) ID** and the **Directory (tenant) ID** \u2014 paste them into the fields below.\n4. Go to **Certificates & secrets \u2192 Client secrets \u2192 New client secret**. Set an expiry (12\u201324 months recommended), click **Add**, and immediately copy the **Value** shown \u2014 it is displayed only once.\n5. Navigate to **Subscriptions**, open the subscription you want Anton to monitor, and copy the **Subscription ID**.\n6. In that same subscription, go to **Access control (IAM) \u2192 Add role assignment**. Select the **Monitoring Reader** built-in role, assign it to the app you just registered, and save.\n7. If you also need Application Insights query access, add the **Reader** role at the resource group or Application Insights resource level as well.\n8. Paste all four values into the fields below and click **Submit**.\n\n## Notes\n\n- The client secret is shown only once \u2014 if you lose it, generate a new one in **Certificates & secrets** and update the field in Anton.\n- For Log Analytics workspace queries, ensure the workspace's **Access control mode** allows workspace-level permissions, or grant the service principal the **Log Analytics Reader** role on the workspace.\n- Anton queries the Azure Monitor REST API (`management.azure.com`) and the Log Analytics API (`api.loganalytics.io`) \u2014 ensure no network policy blocks outbound access to these endpoints.\n",
+        "how_to": "## Service Principal — Client Credentials\n\nThis is the recommended path for connecting Azure Monitor to Anton. You register an app in Azure Active Directory, assign it the **Monitoring Reader** role on your subscription, and paste the credentials below.\n\n## Steps\n\n1. Open the [Azure Portal](https://portal.azure.com) and navigate to **Azure Active Directory → App registrations → New registration**.\n2. Give the app a name (e.g. `anton-monitor`), leave the redirect URI blank, and click **Register**.\n3. On the app's overview page, copy the **Application (client) ID** and the **Directory (tenant) ID** — paste them into the fields below.\n4. Go to **Certificates & secrets → Client secrets → New client secret**. Set an expiry (12–24 months recommended), click **Add**, and immediately copy the **Value** shown — it is displayed only once.\n5. Navigate to **Subscriptions**, open the subscription you want Anton to monitor, and copy the **Subscription ID**.\n6. In that same subscription, go to **Access control (IAM) → Add role assignment**. Select the **Monitoring Reader** built-in role, assign it to the app you just registered, and save.\n7. If you also need Application Insights query access, add the **Reader** role at the resource group or Application Insights resource level as well.\n8. Paste all four values into the fields below and click **Submit**.\n\n## Notes\n\n- The client secret is shown only once — if you lose it, generate a new one in **Certificates & secrets** and update the field in Anton.\n- For Log Analytics workspace queries, ensure the workspace's **Access control mode** allows workspace-level permissions, or grant the service principal the **Log Analytics Reader** role on the workspace.\n- Anton queries the Azure Monitor REST API (`management.azure.com`) and the Log Analytics API (`api.loganalytics.io`) — ensure no network policy blocks outbound access to these endpoints.\n",
         "help_url": "https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/rest-api-walkthrough",
         "fields": [
           {
@@ -50,7 +50,7 @@
             "type": "text",
             "required": true,
             "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-            "description": "Your Azure Active Directory tenant ID. Found under Azure Active Directory \u2192 Overview \u2192 Directory ID."
+            "description": "Your Azure Active Directory tenant ID. Found under Azure Active Directory → Overview → Directory ID."
           },
           {
             "name": "client_id",
@@ -67,7 +67,7 @@
             "required": true,
             "secret": true,
             "placeholder": "Paste the secret value here",
-            "description": "The client secret value generated under Certificates & secrets. Shown only once \u2014 copy it immediately after creation."
+            "description": "The client secret value generated under Certificates & secrets. Shown only once — copy it immediately after creation."
           },
           {
             "name": "subscription_id",
@@ -83,7 +83,7 @@
             "type": "text",
             "required": false,
             "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-            "description": "Optional. The workspace ID for Log Analytics / Application Insights queries. Found in your Log Analytics workspace \u2192 Overview \u2192 Workspace ID."
+            "description": "Optional. The workspace ID for Log Analytics / Application Insights queries. Found in your Log Analytics workspace → Overview → Workspace ID."
           },
           {
             "name": "cloud_environment",
@@ -174,6 +174,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/azure_monitor.svg"
+  },
+  "logo_url": "logos/azure_monitor.svg"
 }

@@ -48,7 +48,7 @@
             "payment.read"
           ]
         },
-        "how_to": "## Connect Grab via OAuth 2.0\n\nYou'll need a registered app on the Grab Developer Console to obtain a Client ID and Secret.\n\n### 1. Create a Grab Developer app\n\n1. Go to [developer.grab.com](https://developer.grab.com) and sign in with your Grab account.\n2. Navigate to **My Apps \u2192 Create App**.\n3. Fill in the app name, description, and select the product APIs you need (e.g. Rides, GrabFood, GrabPay).\n4. Under **Redirect URIs**, add `http://localhost` (Anton uses a local redirect for the OAuth exchange).\n5. Submit the app for review. Sandbox access is typically instant; production access may require Grab approval.\n\n### 2. Copy your credentials\n\n1. Open your app in the Developer Console.\n2. Copy the **Client ID** and **Client Secret** from the **Credentials** tab.\n3. Paste them into the fields below.\n\n### 3. Authorize\n\n1. Click **Submit**. Anton opens your browser to Grab's GrabID consent screen.\n2. Sign in with the Grab account you want to connect.\n3. Review and accept the requested permissions.\n4. The browser redirects back to Anton and stores your access and refresh tokens locally.\n\n### Notes\n\n- Scopes available depend on which product APIs Grab approved for your app. Remove any scopes below that your app doesn't support.\n- Grab refresh tokens expire; Anton will prompt you to re-authorize when needed.\n- To revoke access, visit your Grab account's connected apps settings or delete the app in the Developer Console.",
+        "how_to": "## Connect Grab via OAuth 2.0\n\nYou'll need a registered app on the Grab Developer Console to obtain a Client ID and Secret.\n\n### 1. Create a Grab Developer app\n\n1. Go to [developer.grab.com](https://developer.grab.com) and sign in with your Grab account.\n2. Navigate to **My Apps → Create App**.\n3. Fill in the app name, description, and select the product APIs you need (e.g. Rides, GrabFood, GrabPay).\n4. Under **Redirect URIs**, add `http://localhost` (Anton uses a local redirect for the OAuth exchange).\n5. Submit the app for review. Sandbox access is typically instant; production access may require Grab approval.\n\n### 2. Copy your credentials\n\n1. Open your app in the Developer Console.\n2. Copy the **Client ID** and **Client Secret** from the **Credentials** tab.\n3. Paste them into the fields below.\n\n### 3. Authorize\n\n1. Click **Submit**. Anton opens your browser to Grab's GrabID consent screen.\n2. Sign in with the Grab account you want to connect.\n3. Review and accept the requested permissions.\n4. The browser redirects back to Anton and stores your access and refresh tokens locally.\n\n### Notes\n\n- Scopes available depend on which product APIs Grab approved for your app. Remove any scopes below that your app doesn't support.\n- Grab refresh tokens expire; Anton will prompt you to re-authorize when needed.\n- To revoke access, visit your Grab account's connected apps settings or delete the app in the Developer Console.",
         "help_url": "https://developer.grab.com/docs/grabid/",
         "fields": [
           {
@@ -57,7 +57,7 @@
             "type": "text",
             "required": true,
             "placeholder": "grab-client-xxxxxxxxxxxxxxxx",
-            "description": "Found in your Grab Developer Console under My Apps \u2192 your app \u2192 Credentials."
+            "description": "Found in your Grab Developer Console under My Apps → your app → Credentials."
           },
           {
             "name": "client_secret",
@@ -65,7 +65,7 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "description": "Paired with the Client ID. Keep this confidential \u2014 never share it publicly."
+            "description": "Paired with the Client ID. Keep this confidential — never share it publicly."
           },
           {
             "name": "environment",
@@ -87,6 +87,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/grab.svg"
+  },
+  "logo_url": "logos/grab.svg"
 }

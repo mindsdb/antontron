@@ -32,9 +32,9 @@
       {
         "id": "personal-api-key",
         "label": "Personal API Key",
-        "description": "Paste a Linear personal API key generated from Settings \u2192 API \u2192 Personal API keys. Quickest path \u2014 no OAuth app setup required.",
+        "description": "Paste a Linear personal API key generated from Settings → API → Personal API keys. Quickest path — no OAuth app setup required.",
         "recommended": true,
-        "how_to": "## Generate a Linear Personal API Key\n\nLinear personal API keys give scoped access to your workspace without requiring an OAuth app setup.\n\n### Steps\n\n1. Open [Linear](https://linear.app) and sign in.\n2. Click your workspace avatar in the top-left, then go to **Settings**.\n3. In the left sidebar, click **API** under the **My Account** section.\n4. Scroll to **Personal API keys** and click **Create key**.\n5. Give the key a name like `Anton` so you can identify it later.\n6. Click **Create** \u2014 Linear shows the key **once**. Copy it immediately.\n7. Paste the key into the **API Key** field below.\n\n### Notes\n\n- The key inherits your Linear account permissions \u2014 it can access all teams and projects you belong to.\n- If you lose the key, delete it in Settings \u2192 API and generate a new one.\n- Keys can be revoked at any time from the same API settings page without affecting other integrations.",
+        "how_to": "## Generate a Linear Personal API Key\n\nLinear personal API keys give scoped access to your workspace without requiring an OAuth app setup.\n\n### Steps\n\n1. Open [Linear](https://linear.app) and sign in.\n2. Click your workspace avatar in the top-left, then go to **Settings**.\n3. In the left sidebar, click **API** under the **My Account** section.\n4. Scroll to **Personal API keys** and click **Create key**.\n5. Give the key a name like `Anton` so you can identify it later.\n6. Click **Create** — Linear shows the key **once**. Copy it immediately.\n7. Paste the key into the **API Key** field below.\n\n### Notes\n\n- The key inherits your Linear account permissions — it can access all teams and projects you belong to.\n- If you lose the key, delete it in Settings → API and generate a new one.\n- Keys can be revoked at any time from the same API settings page without affecting other integrations.",
         "help_url": "https://developers.linear.app/docs/graphql/working-with-the-graphql-api#personal-api-keys",
         "fields": [
           {
@@ -44,7 +44,7 @@
             "required": true,
             "secret": true,
             "placeholder": "lin_api_xxxxxxxxxxxxxxxxxxxx",
-            "description": "Your Linear personal API key. Found in Settings \u2192 API \u2192 Personal API keys. Shown only once when created."
+            "description": "Your Linear personal API key. Found in Settings → API → Personal API keys. Shown only once when created."
           },
           {
             "name": "workspace_url",
@@ -52,7 +52,7 @@
             "type": "url",
             "required": false,
             "placeholder": "https://linear.app/your-workspace",
-            "description": "Optional. Your Linear workspace URL \u2014 helps Anton disambiguate if you belong to multiple workspaces."
+            "description": "Optional. Your Linear workspace URL — helps Anton disambiguate if you belong to multiple workspaces."
           }
         ]
       },
@@ -75,7 +75,7 @@
             "actor": "user"
           }
         },
-        "how_to": "## OAuth 2.0 \u2014 Bring Your Own OAuth App\n\nThis method requires creating a Linear OAuth application in your workspace. Suitable for deployments where multiple users need to connect.\n\n### Steps\n\n1. Open [Linear](https://linear.app) and sign in as a workspace admin.\n2. Go to **Settings** \u2192 **API** \u2192 **OAuth applications**.\n3. Click **Create application**.\n4. Set the name to `Anton` and add `http://127.0.0.1` as a redirect URI.\n5. Click **Create** \u2014 Linear shows your **Client ID** and **Client Secret**.\n6. Copy both values into the fields below.\n7. Click **Submit** \u2014 Anton opens a browser window for you to authorize the app.\n\n### Scopes requested\n\n- `read` \u2014 read all workspace data\n- `write` \u2014 create and update issues and comments\n- `issues:create` \u2014 create new issues\n- `comments:create` \u2014 post comments\n\n### Notes\n\n- The client secret is shown once; store it securely.\n- You can revoke the OAuth app at any time from Settings \u2192 API \u2192 OAuth applications.",
+        "how_to": "## OAuth 2.0 — Bring Your Own OAuth App\n\nThis method requires creating a Linear OAuth application in your workspace. Suitable for deployments where multiple users need to connect.\n\n### Steps\n\n1. Open [Linear](https://linear.app) and sign in as a workspace admin.\n2. Go to **Settings** → **API** → **OAuth applications**.\n3. Click **Create application**.\n4. Set the name to `Anton` and add `http://127.0.0.1` as a redirect URI.\n5. Click **Create** — Linear shows your **Client ID** and **Client Secret**.\n6. Copy both values into the fields below.\n7. Click **Submit** — Anton opens a browser window for you to authorize the app.\n\n### Scopes requested\n\n- `read` — read all workspace data\n- `write` — create and update issues and comments\n- `issues:create` — create new issues\n- `comments:create` — post comments\n\n### Notes\n\n- The client secret is shown once; store it securely.\n- You can revoke the OAuth app at any time from Settings → API → OAuth applications.",
         "help_url": "https://developers.linear.app/docs/oauth/authentication",
         "fields": [
           {
@@ -84,7 +84,7 @@
             "type": "text",
             "required": true,
             "placeholder": "abc123def456",
-            "description": "From Linear Settings \u2192 API \u2192 OAuth applications \u2192 your app's Client ID."
+            "description": "From Linear Settings → API → OAuth applications → your app's Client ID."
           },
           {
             "name": "client_secret",
@@ -96,6 +96,9 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/linear.svg"
+  },
+  "logo_url": "logos/linear.svg",
+  "featured": true
 }

@@ -45,12 +45,18 @@ const FONT_BODY    = 'var(--font-body)';
 const FONT_DISPLAY = 'var(--font-display)';
 const FONT_MONO    = 'var(--font-mono)';
 
-function FormLogo({ logo, color }) {
-  // Icon-name only — pulls from the app's palette (`Ico.<name>`).
-  // Falls back to the generic database glyph when the name is
-  // unknown or absent. URLs / data URIs are intentionally NOT
-  // supported here — keeps the connect surface predictable and
-  // theme-coherent (no random raster images breaking the rhythm).
+function FormLogo({ logo, logoUrl, color }) {
+  if (logoUrl) {
+    return (
+      <span style={{
+        display: 'inline-grid', placeItems: 'center',
+        width: 36, height: 36, borderRadius: 8,
+        background: 'var(--surface-2)',
+      }}>
+        <img src={logoUrl} alt="" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+      </span>
+    );
+  }
   const fn = (logo && Ico[logo]) || Ico.database;
   return (
     <span style={{
@@ -416,7 +422,7 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
           "Pick how you want to connect:" caption). */}
       {!(isMultiMethod && !activeMethod) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <FormLogo logo={spec.logo} color={spec.logo_color} />
+          <FormLogo logo={spec.logo} logoUrl={spec.logo_url} color={spec.logo_color} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{
               fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600,

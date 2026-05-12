@@ -38,9 +38,9 @@
       {
         "id": "access-key",
         "label": "IAM Access Key",
-        "description": "Paste your IAM Access Key ID and Secret Access Key. The simplest and most common way to connect AWS programmatically \u2014 generate a key pair in the IAM console and paste it here.",
+        "description": "Paste your IAM Access Key ID and Secret Access Key. The simplest and most common way to connect AWS programmatically — generate a key pair in the IAM console and paste it here.",
         "recommended": true,
-        "how_to": "## IAM Access Key\n\nGenerate a dedicated IAM user with only the permissions Anton needs, then paste the credentials below.\n\n### Steps\n\n1. Sign in to the [AWS Management Console](https://console.aws.amazon.com/) and open **IAM**.\n2. Go to **Users \u2192 Create user**. Give it a name like `anton-integration`.\n3. On the **Set permissions** step, attach only the policies you need (e.g. `AmazonS3ReadOnlyAccess`, `AWSLambda_ReadOnlyAccess`).\n4. After the user is created, open the user \u2192 **Security credentials** tab \u2192 **Create access key**.\n5. Select **Application running outside AWS** as the use case and click through.\n6. Copy the **Access key ID** and **Secret access key** (the secret is shown only once \u2014 save it now).\n7. Paste both values below, and set **Default region** to the AWS region your resources live in (e.g. `us-east-1`).\n\n### Notes\n\n- Follow the principle of least privilege \u2014 avoid using root account credentials or over-permissioned keys.\n- If the key is ever exposed, deactivate it immediately in IAM \u2192 Security credentials.\n- See [AWS best practices for access keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#lock-away-credentials).",
+        "how_to": "## IAM Access Key\n\nGenerate a dedicated IAM user with only the permissions Anton needs, then paste the credentials below.\n\n### Steps\n\n1. Sign in to the [AWS Management Console](https://console.aws.amazon.com/) and open **IAM**.\n2. Go to **Users → Create user**. Give it a name like `anton-integration`.\n3. On the **Set permissions** step, attach only the policies you need (e.g. `AmazonS3ReadOnlyAccess`, `AWSLambda_ReadOnlyAccess`).\n4. After the user is created, open the user → **Security credentials** tab → **Create access key**.\n5. Select **Application running outside AWS** as the use case and click through.\n6. Copy the **Access key ID** and **Secret access key** (the secret is shown only once — save it now).\n7. Paste both values below, and set **Default region** to the AWS region your resources live in (e.g. `us-east-1`).\n\n### Notes\n\n- Follow the principle of least privilege — avoid using root account credentials or over-permissioned keys.\n- If the key is ever exposed, deactivate it immediately in IAM → Security credentials.\n- See [AWS best practices for access keys](https://docs.aws.amazon.com/IAM/latest/UserGuide/best-practices.html#lock-away-credentials).",
         "help_url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_access-keys.html",
         "fields": [
           {
@@ -49,7 +49,7 @@
             "type": "text",
             "required": true,
             "placeholder": "AKIAIOSFODNN7EXAMPLE",
-            "description": "Starts with AKIA for long-term IAM credentials. Found in IAM \u2192 Users \u2192 Security credentials."
+            "description": "Starts with AKIA for long-term IAM credentials. Found in IAM → Users → Security credentials."
           },
           {
             "name": "secret_access_key",
@@ -58,7 +58,7 @@
             "required": true,
             "secret": true,
             "placeholder": "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY",
-            "description": "Paired with the Access Key ID. Shown only once at creation time \u2014 if lost, generate a new key pair."
+            "description": "Paired with the Access Key ID. Shown only once at creation time — if lost, generate a new key pair."
           },
           {
             "name": "default_region",
@@ -70,107 +70,107 @@
             "options": [
               {
                 "value": "us-east-1",
-                "label": "US East (N. Virginia) \u2014 us-east-1"
+                "label": "US East (N. Virginia) — us-east-1"
               },
               {
                 "value": "us-east-2",
-                "label": "US East (Ohio) \u2014 us-east-2"
+                "label": "US East (Ohio) — us-east-2"
               },
               {
                 "value": "us-west-1",
-                "label": "US West (N. California) \u2014 us-west-1"
+                "label": "US West (N. California) — us-west-1"
               },
               {
                 "value": "us-west-2",
-                "label": "US West (Oregon) \u2014 us-west-2"
+                "label": "US West (Oregon) — us-west-2"
               },
               {
                 "value": "af-south-1",
-                "label": "Africa (Cape Town) \u2014 af-south-1"
+                "label": "Africa (Cape Town) — af-south-1"
               },
               {
                 "value": "ap-east-1",
-                "label": "Asia Pacific (Hong Kong) \u2014 ap-east-1"
+                "label": "Asia Pacific (Hong Kong) — ap-east-1"
               },
               {
                 "value": "ap-south-1",
-                "label": "Asia Pacific (Mumbai) \u2014 ap-south-1"
+                "label": "Asia Pacific (Mumbai) — ap-south-1"
               },
               {
                 "value": "ap-south-2",
-                "label": "Asia Pacific (Hyderabad) \u2014 ap-south-2"
+                "label": "Asia Pacific (Hyderabad) — ap-south-2"
               },
               {
                 "value": "ap-northeast-1",
-                "label": "Asia Pacific (Tokyo) \u2014 ap-northeast-1"
+                "label": "Asia Pacific (Tokyo) — ap-northeast-1"
               },
               {
                 "value": "ap-northeast-2",
-                "label": "Asia Pacific (Seoul) \u2014 ap-northeast-2"
+                "label": "Asia Pacific (Seoul) — ap-northeast-2"
               },
               {
                 "value": "ap-northeast-3",
-                "label": "Asia Pacific (Osaka) \u2014 ap-northeast-3"
+                "label": "Asia Pacific (Osaka) — ap-northeast-3"
               },
               {
                 "value": "ap-southeast-1",
-                "label": "Asia Pacific (Singapore) \u2014 ap-southeast-1"
+                "label": "Asia Pacific (Singapore) — ap-southeast-1"
               },
               {
                 "value": "ap-southeast-2",
-                "label": "Asia Pacific (Sydney) \u2014 ap-southeast-2"
+                "label": "Asia Pacific (Sydney) — ap-southeast-2"
               },
               {
                 "value": "ap-southeast-3",
-                "label": "Asia Pacific (Jakarta) \u2014 ap-southeast-3"
+                "label": "Asia Pacific (Jakarta) — ap-southeast-3"
               },
               {
                 "value": "ca-central-1",
-                "label": "Canada (Central) \u2014 ca-central-1"
+                "label": "Canada (Central) — ca-central-1"
               },
               {
                 "value": "eu-central-1",
-                "label": "Europe (Frankfurt) \u2014 eu-central-1"
+                "label": "Europe (Frankfurt) — eu-central-1"
               },
               {
                 "value": "eu-central-2",
-                "label": "Europe (Zurich) \u2014 eu-central-2"
+                "label": "Europe (Zurich) — eu-central-2"
               },
               {
                 "value": "eu-west-1",
-                "label": "Europe (Ireland) \u2014 eu-west-1"
+                "label": "Europe (Ireland) — eu-west-1"
               },
               {
                 "value": "eu-west-2",
-                "label": "Europe (London) \u2014 eu-west-2"
+                "label": "Europe (London) — eu-west-2"
               },
               {
                 "value": "eu-west-3",
-                "label": "Europe (Paris) \u2014 eu-west-3"
+                "label": "Europe (Paris) — eu-west-3"
               },
               {
                 "value": "eu-north-1",
-                "label": "Europe (Stockholm) \u2014 eu-north-1"
+                "label": "Europe (Stockholm) — eu-north-1"
               },
               {
                 "value": "eu-south-1",
-                "label": "Europe (Milan) \u2014 eu-south-1"
+                "label": "Europe (Milan) — eu-south-1"
               },
               {
                 "value": "eu-south-2",
-                "label": "Europe (Spain) \u2014 eu-south-2"
+                "label": "Europe (Spain) — eu-south-2"
               },
               {
                 "value": "me-central-1",
-                "label": "Middle East (UAE) \u2014 me-central-1"
+                "label": "Middle East (UAE) — me-central-1"
               },
               {
                 "value": "me-south-1",
-                "label": "Middle East (Bahrain) \u2014 me-south-1"
+                "label": "Middle East (Bahrain) — me-south-1"
               },
               {
                 "value": "sa-east-1",
-                "label": "South America (S\u00e3o Paulo) \u2014 sa-east-1"
+                "label": "South America (São Paulo) — sa-east-1"
               }
             ]
           }
@@ -179,9 +179,9 @@
       {
         "id": "sts-temporary-credentials",
         "label": "STS Temporary Credentials",
-        "description": "Use short-lived credentials issued by AWS Security Token Service (STS) \u2014 typically from AssumeRole, federated login, or an EC2/Lambda instance profile. Requires an Access Key ID, Secret Access Key, and a session token.",
+        "description": "Use short-lived credentials issued by AWS Security Token Service (STS) — typically from AssumeRole, federated login, or an EC2/Lambda instance profile. Requires an Access Key ID, Secret Access Key, and a session token.",
         "recommended": false,
-        "how_to": "## STS Temporary Credentials\n\nSTS credentials are short-lived tokens issued when you assume an IAM role, use federated identity, or retrieve credentials from an EC2/ECS/Lambda instance metadata service. They expire automatically.\n\n### When to use this\n\n- Your organization uses AWS SSO / IAM Identity Center and hands out temporary tokens.\n- You're assuming a cross-account role via `aws sts assume-role`.\n- You retrieved credentials from the EC2 instance metadata endpoint and want to paste them directly.\n\n### Steps\n\n1. Obtain temporary credentials from STS. For example, using the AWS CLI:\n   - `aws sts assume-role --role-arn arn:aws:iam::123456789012:role/MyRole --role-session-name anton`\n2. The response includes `AccessKeyId`, `SecretAccessKey`, and `SessionToken`.\n3. Paste all three values below, along with the **Default region**.\n\n### Notes\n\n- STS credentials expire \u2014 the default session duration is 1 hour (up to 12 hours depending on role settings). Anton will return auth errors once they expire; you'll need to paste fresh credentials.\n- For long-running access, prefer long-term IAM access keys (the **IAM Access Key** method) or configure automatic role assumption at the infrastructure level.\n- See [AWS STS docs](https://docs.aws.amazon.com/STS/latest/APIReference/welcome.html) for full details.",
+        "how_to": "## STS Temporary Credentials\n\nSTS credentials are short-lived tokens issued when you assume an IAM role, use federated identity, or retrieve credentials from an EC2/ECS/Lambda instance metadata service. They expire automatically.\n\n### When to use this\n\n- Your organization uses AWS SSO / IAM Identity Center and hands out temporary tokens.\n- You're assuming a cross-account role via `aws sts assume-role`.\n- You retrieved credentials from the EC2 instance metadata endpoint and want to paste them directly.\n\n### Steps\n\n1. Obtain temporary credentials from STS. For example, using the AWS CLI:\n   - `aws sts assume-role --role-arn arn:aws:iam::123456789012:role/MyRole --role-session-name anton`\n2. The response includes `AccessKeyId`, `SecretAccessKey`, and `SessionToken`.\n3. Paste all three values below, along with the **Default region**.\n\n### Notes\n\n- STS credentials expire — the default session duration is 1 hour (up to 12 hours depending on role settings). Anton will return auth errors once they expire; you'll need to paste fresh credentials.\n- For long-running access, prefer long-term IAM access keys (the **IAM Access Key** method) or configure automatic role assumption at the infrastructure level.\n- See [AWS STS docs](https://docs.aws.amazon.com/STS/latest/APIReference/welcome.html) for full details.",
         "help_url": "https://docs.aws.amazon.com/IAM/latest/UserGuide/id_credentials_temp.html",
         "fields": [
           {
@@ -220,112 +220,114 @@
             "options": [
               {
                 "value": "us-east-1",
-                "label": "US East (N. Virginia) \u2014 us-east-1"
+                "label": "US East (N. Virginia) — us-east-1"
               },
               {
                 "value": "us-east-2",
-                "label": "US East (Ohio) \u2014 us-east-2"
+                "label": "US East (Ohio) — us-east-2"
               },
               {
                 "value": "us-west-1",
-                "label": "US West (N. California) \u2014 us-west-1"
+                "label": "US West (N. California) — us-west-1"
               },
               {
                 "value": "us-west-2",
-                "label": "US West (Oregon) \u2014 us-west-2"
+                "label": "US West (Oregon) — us-west-2"
               },
               {
                 "value": "af-south-1",
-                "label": "Africa (Cape Town) \u2014 af-south-1"
+                "label": "Africa (Cape Town) — af-south-1"
               },
               {
                 "value": "ap-east-1",
-                "label": "Asia Pacific (Hong Kong) \u2014 ap-east-1"
+                "label": "Asia Pacific (Hong Kong) — ap-east-1"
               },
               {
                 "value": "ap-south-1",
-                "label": "Asia Pacific (Mumbai) \u2014 ap-south-1"
+                "label": "Asia Pacific (Mumbai) — ap-south-1"
               },
               {
                 "value": "ap-south-2",
-                "label": "Asia Pacific (Hyderabad) \u2014 ap-south-2"
+                "label": "Asia Pacific (Hyderabad) — ap-south-2"
               },
               {
                 "value": "ap-northeast-1",
-                "label": "Asia Pacific (Tokyo) \u2014 ap-northeast-1"
+                "label": "Asia Pacific (Tokyo) — ap-northeast-1"
               },
               {
                 "value": "ap-northeast-2",
-                "label": "Asia Pacific (Seoul) \u2014 ap-northeast-2"
+                "label": "Asia Pacific (Seoul) — ap-northeast-2"
               },
               {
                 "value": "ap-northeast-3",
-                "label": "Asia Pacific (Osaka) \u2014 ap-northeast-3"
+                "label": "Asia Pacific (Osaka) — ap-northeast-3"
               },
               {
                 "value": "ap-southeast-1",
-                "label": "Asia Pacific (Singapore) \u2014 ap-southeast-1"
+                "label": "Asia Pacific (Singapore) — ap-southeast-1"
               },
               {
                 "value": "ap-southeast-2",
-                "label": "Asia Pacific (Sydney) \u2014 ap-southeast-2"
+                "label": "Asia Pacific (Sydney) — ap-southeast-2"
               },
               {
                 "value": "ap-southeast-3",
-                "label": "Asia Pacific (Jakarta) \u2014 ap-southeast-3"
+                "label": "Asia Pacific (Jakarta) — ap-southeast-3"
               },
               {
                 "value": "ca-central-1",
-                "label": "Canada (Central) \u2014 ca-central-1"
+                "label": "Canada (Central) — ca-central-1"
               },
               {
                 "value": "eu-central-1",
-                "label": "Europe (Frankfurt) \u2014 eu-central-1"
+                "label": "Europe (Frankfurt) — eu-central-1"
               },
               {
                 "value": "eu-central-2",
-                "label": "Europe (Zurich) \u2014 eu-central-2"
+                "label": "Europe (Zurich) — eu-central-2"
               },
               {
                 "value": "eu-west-1",
-                "label": "Europe (Ireland) \u2014 eu-west-1"
+                "label": "Europe (Ireland) — eu-west-1"
               },
               {
                 "value": "eu-west-2",
-                "label": "Europe (London) \u2014 eu-west-2"
+                "label": "Europe (London) — eu-west-2"
               },
               {
                 "value": "eu-west-3",
-                "label": "Europe (Paris) \u2014 eu-west-3"
+                "label": "Europe (Paris) — eu-west-3"
               },
               {
                 "value": "eu-north-1",
-                "label": "Europe (Stockholm) \u2014 eu-north-1"
+                "label": "Europe (Stockholm) — eu-north-1"
               },
               {
                 "value": "eu-south-1",
-                "label": "Europe (Milan) \u2014 eu-south-1"
+                "label": "Europe (Milan) — eu-south-1"
               },
               {
                 "value": "eu-south-2",
-                "label": "Europe (Spain) \u2014 eu-south-2"
+                "label": "Europe (Spain) — eu-south-2"
               },
               {
                 "value": "me-central-1",
-                "label": "Middle East (UAE) \u2014 me-central-1"
+                "label": "Middle East (UAE) — me-central-1"
               },
               {
                 "value": "me-south-1",
-                "label": "Middle East (Bahrain) \u2014 me-south-1"
+                "label": "Middle East (Bahrain) — me-south-1"
               },
               {
                 "value": "sa-east-1",
-                "label": "South America (S\u00e3o Paulo) \u2014 sa-east-1"
+                "label": "South America (São Paulo) — sa-east-1"
               }
             ]
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/aws.svg"
+  },
+  "logo_url": "logos/aws.svg"
 }

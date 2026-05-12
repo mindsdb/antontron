@@ -45,7 +45,7 @@
             "prompt": "consent"
           }
         },
-        "how_to": "## Create a Zoho API Client\n\nZoho Books uses OAuth 2.0. You need to register your own app in the Zoho API Console to get a Client ID and Client Secret.\n\n### Steps\n\n1. Go to [Zoho API Console](https://api-console.zoho.com/) and sign in with the Zoho account linked to your Books organization.\n2. Click **Add Client** and choose **Self Client** (recommended for desktop/server use).\n3. Fill in any name (e.g. `Anton`) and click **Create**.\n4. On the client's **Client Secret** tab, copy the **Client ID** and **Client Secret** \u2014 paste them into the fields below.\n5. Select the **Data Center / Region** that matches where your Zoho account is hosted (e.g. `.com` for US, `.eu` for Europe).\n6. Click **Submit**. Anton will open a browser window to Zoho's consent screen.\n7. Grant the requested permissions and you'll be redirected back to Anton automatically.\n\n### Notes\n\n- The region you pick here **must match** the Zoho data center where your account lives. If you sign in at `accounts.zoho.eu`, pick **EU**.\n- Zoho refresh tokens are long-lived but can be revoked from **API Console \u2192 Your App \u2192 Revoke Token**.\n- The scope `ZohoBooks.fullaccess.all` grants full read/write access to your Books organization. Use `ZohoBooks.contacts.READ` etc. if you need narrower access.\n",
+        "how_to": "## Create a Zoho API Client\n\nZoho Books uses OAuth 2.0. You need to register your own app in the Zoho API Console to get a Client ID and Client Secret.\n\n### Steps\n\n1. Go to [Zoho API Console](https://api-console.zoho.com/) and sign in with the Zoho account linked to your Books organization.\n2. Click **Add Client** and choose **Self Client** (recommended for desktop/server use).\n3. Fill in any name (e.g. `Anton`) and click **Create**.\n4. On the client's **Client Secret** tab, copy the **Client ID** and **Client Secret** — paste them into the fields below.\n5. Select the **Data Center / Region** that matches where your Zoho account is hosted (e.g. `.com` for US, `.eu` for Europe).\n6. Click **Submit**. Anton will open a browser window to Zoho's consent screen.\n7. Grant the requested permissions and you'll be redirected back to Anton automatically.\n\n### Notes\n\n- The region you pick here **must match** the Zoho data center where your account lives. If you sign in at `accounts.zoho.eu`, pick **EU**.\n- Zoho refresh tokens are long-lived but can be revoked from **API Console → Your App → Revoke Token**.\n- The scope `ZohoBooks.fullaccess.all` grants full read/write access to your Books organization. Use `ZohoBooks.contacts.READ` etc. if you need narrower access.\n",
         "help_url": "https://www.zoho.com/books/api/v3/oauth/#overview",
         "fields": [
           {
@@ -54,7 +54,7 @@
             "type": "text",
             "required": true,
             "placeholder": "1000.XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
-            "description": "From Zoho API Console \u2192 your Self Client \u2192 Client Secret tab."
+            "description": "From Zoho API Console → your Self Client → Client Secret tab."
           },
           {
             "name": "client_secret",
@@ -70,7 +70,7 @@
             "type": "select",
             "required": true,
             "default": "com",
-            "description": "Must match the Zoho data center where your account is hosted. Check the domain you use to log in to Zoho (e.g. accounts.zoho.eu \u2192 EU).",
+            "description": "Must match the Zoho data center where your account is hosted. Check the domain you use to log in to Zoho (e.g. accounts.zoho.eu → EU).",
             "options": [
               {
                 "value": "com",
@@ -100,10 +100,12 @@
             "type": "text",
             "required": false,
             "placeholder": "123456789",
-            "description": "Optional. Your Zoho Books Organization ID (found in Settings \u2192 Organization Profile). Required if your account manages multiple organizations."
+            "description": "Optional. Your Zoho Books Organization ID (found in Settings → Organization Profile). Required if your account manages multiple organizations."
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/zoho_books.svg"
+  },
+  "logo_url": "logos/zoho_books.svg"
 }

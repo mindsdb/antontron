@@ -32,9 +32,9 @@
       {
         "id": "api-key",
         "label": "API Key",
-        "description": "Paste your personal Heroku API key from Account Settings. No OAuth setup required \u2014 the simplest and fastest way to connect.",
+        "description": "Paste your personal Heroku API key from Account Settings. No OAuth setup required — the simplest and fastest way to connect.",
         "recommended": true,
-        "how_to": "## Connect with a Heroku API Key\n\nHeroku issues a personal API key tied to your account that grants full API access.\n\n### Steps\n\n1. Log in to [Heroku Dashboard](https://dashboard.heroku.com).\n2. Click your avatar or account menu in the top-right corner and select **Account settings**.\n3. Scroll down to the **API Key** section.\n4. Click **Reveal** to display your key, then copy it.\n5. Paste the key into the **API Key** field below.\n\n### Notes\n\n- The API key grants full access to your Heroku account \u2014 treat it like a password.\n- If you need to revoke access, return to **Account settings \u2192 API Key** and click **Regenerate API Key**. Any previous key is immediately invalidated.\n- For team or enterprise setups, consider creating a dedicated Heroku account with limited access and using its API key instead.\n- Read [Heroku's API authentication docs](https://devcenter.heroku.com/articles/platform-api-reference#authentication) for full details.\n",
+        "how_to": "## Connect with a Heroku API Key\n\nHeroku issues a personal API key tied to your account that grants full API access.\n\n### Steps\n\n1. Log in to [Heroku Dashboard](https://dashboard.heroku.com).\n2. Click your avatar or account menu in the top-right corner and select **Account settings**.\n3. Scroll down to the **API Key** section.\n4. Click **Reveal** to display your key, then copy it.\n5. Paste the key into the **API Key** field below.\n\n### Notes\n\n- The API key grants full access to your Heroku account — treat it like a password.\n- If you need to revoke access, return to **Account settings → API Key** and click **Regenerate API Key**. Any previous key is immediately invalidated.\n- For team or enterprise setups, consider creating a dedicated Heroku account with limited access and using its API key instead.\n- Read [Heroku's API authentication docs](https://devcenter.heroku.com/articles/platform-api-reference#authentication) for full details.\n",
         "help_url": "https://devcenter.heroku.com/articles/platform-api-reference#authentication",
         "fields": [
           {
@@ -44,7 +44,7 @@
             "required": true,
             "secret": true,
             "placeholder": "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx",
-            "description": "Found in Heroku Dashboard \u2192 Account settings \u2192 API Key \u2192 Reveal."
+            "description": "Found in Heroku Dashboard → Account settings → API Key → Reveal."
           },
           {
             "name": "account_email",
@@ -59,7 +59,7 @@
       {
         "id": "oauth",
         "label": "OAuth (Bring Your Own Client)",
-        "description": "Use a Heroku OAuth client for delegated access. Requires creating an OAuth client in your Heroku account first \u2014 recommended for multi-user or production integrations.",
+        "description": "Use a Heroku OAuth client for delegated access. Requires creating an OAuth client in your Heroku account first — recommended for multi-user or production integrations.",
         "recommended": false,
         "submit_action": "oauth_launch",
         "oauth": {
@@ -70,7 +70,7 @@
           ],
           "extra_auth_params": {}
         },
-        "how_to": "## Connect with Heroku OAuth\n\nHeroku supports OAuth 2.0 for delegated access without sharing your personal API key.\n\n### Steps\n\n1. Install the [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) if you haven't already.\n2. Run `heroku clients:create Anton http://localhost` to register a new OAuth client. Heroku returns a **Client ID** and **Client Secret**.\n3. Copy those values into the fields below.\n4. Choose a scope \u2014 `global` gives full access; use a narrower scope if your Heroku plan supports it.\n5. Click **Submit** to open a browser window where you authorize the OAuth client.\n\n### Notes\n\n- OAuth clients are managed via `heroku clients` CLI commands or the Platform API.\n- The `global` scope mirrors full API key access. Check [Heroku OAuth scopes](https://devcenter.heroku.com/articles/oauth#scopes) for narrower options.\n- Tokens can be revoked from **Account settings \u2192 Authorized applications** or via the API.\n",
+        "how_to": "## Connect with Heroku OAuth\n\nHeroku supports OAuth 2.0 for delegated access without sharing your personal API key.\n\n### Steps\n\n1. Install the [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) if you haven't already.\n2. Run `heroku clients:create Anton http://localhost` to register a new OAuth client. Heroku returns a **Client ID** and **Client Secret**.\n3. Copy those values into the fields below.\n4. Choose a scope — `global` gives full access; use a narrower scope if your Heroku plan supports it.\n5. Click **Submit** to open a browser window where you authorize the OAuth client.\n\n### Notes\n\n- OAuth clients are managed via `heroku clients` CLI commands or the Platform API.\n- The `global` scope mirrors full API key access. Check [Heroku OAuth scopes](https://devcenter.heroku.com/articles/oauth#scopes) for narrower options.\n- Tokens can be revoked from **Account settings → Authorized applications** or via the API.\n",
         "help_url": "https://devcenter.heroku.com/articles/oauth",
         "fields": [
           {
@@ -91,6 +91,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/heroku.svg"
+  },
+  "logo_url": "logos/heroku.svg"
 }

@@ -33,7 +33,7 @@
         "label": "API Token",
         "description": "Paste your InfluxDB URL, API token, organization, and bucket. Works with both InfluxDB Cloud and self-hosted v2+ instances. Simplest and recommended path.",
         "recommended": true,
-        "how_to": "## Connect with an InfluxDB API Token\n\nInfluxDB 2.x and InfluxDB Cloud use token-based authentication. You generate a token in the UI and paste it here along with your instance details.\n\n### Steps for InfluxDB Cloud\n\n1. Log in to [InfluxDB Cloud](https://cloud2.influxdata.com/).\n2. From the left sidebar, click **Load Data \u2192 API Tokens**.\n3. Click **Generate API Token \u2192 Custom API Token** (or All-Access Token for full access).\n4. Give the token a name like `Anton`, select the buckets and permissions you need (read is sufficient for queries; add write if Anton should ingest data), and click **Generate**.\n5. Copy the token \u2014 it is only shown once. Store it somewhere safe before closing the dialog.\n6. Find your **Organization name** under your account avatar in the top-left corner.\n7. Find your **Bucket name** under **Load Data \u2192 Buckets**.\n8. Your **URL** is shown in the browser address bar (e.g. `https://us-east-1-1.aws.cloud2.influxdata.com`).\n\n### Steps for self-hosted InfluxDB 2.x\n\n1. Open the InfluxDB UI (default: `http://localhost:8086`).\n2. Go to **Data \u2192 API Tokens \u2192 Generate Token**.\n3. Select the appropriate read/write permissions and click **Save**.\n4. Copy the token when it appears.\n5. Use `http://localhost:8086` (or your server's address) as the URL, and note your org and bucket names.\n\n### Notes\n\n- Tokens are shown only once at creation. If lost, generate a new one.\n- For InfluxDB 1.x, use the **Username / Password** method instead \u2014 v1 does not use tokens.\n- Make sure the bucket name matches exactly (case-sensitive).\n",
+        "how_to": "## Connect with an InfluxDB API Token\n\nInfluxDB 2.x and InfluxDB Cloud use token-based authentication. You generate a token in the UI and paste it here along with your instance details.\n\n### Steps for InfluxDB Cloud\n\n1. Log in to [InfluxDB Cloud](https://cloud2.influxdata.com/).\n2. From the left sidebar, click **Load Data → API Tokens**.\n3. Click **Generate API Token → Custom API Token** (or All-Access Token for full access).\n4. Give the token a name like `Anton`, select the buckets and permissions you need (read is sufficient for queries; add write if Anton should ingest data), and click **Generate**.\n5. Copy the token — it is only shown once. Store it somewhere safe before closing the dialog.\n6. Find your **Organization name** under your account avatar in the top-left corner.\n7. Find your **Bucket name** under **Load Data → Buckets**.\n8. Your **URL** is shown in the browser address bar (e.g. `https://us-east-1-1.aws.cloud2.influxdata.com`).\n\n### Steps for self-hosted InfluxDB 2.x\n\n1. Open the InfluxDB UI (default: `http://localhost:8086`).\n2. Go to **Data → API Tokens → Generate Token**.\n3. Select the appropriate read/write permissions and click **Save**.\n4. Copy the token when it appears.\n5. Use `http://localhost:8086` (or your server's address) as the URL, and note your org and bucket names.\n\n### Notes\n\n- Tokens are shown only once at creation. If lost, generate a new one.\n- For InfluxDB 1.x, use the **Username / Password** method instead — v1 does not use tokens.\n- Make sure the bucket name matches exactly (case-sensitive).\n",
         "help_url": "https://docs.influxdata.com/influxdb/cloud/security/tokens/create-token/",
         "fields": [
           {
@@ -50,7 +50,7 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "description": "Your InfluxDB API token. Found under Load Data \u2192 API Tokens in the InfluxDB UI. Shown only once at creation."
+            "description": "Your InfluxDB API token. Found under Load Data → API Tokens in the InfluxDB UI. Shown only once at creation."
           },
           {
             "name": "organization",
@@ -84,7 +84,7 @@
         "label": "Username / Password (v1.x)",
         "description": "For legacy InfluxDB 1.x instances that use username and password authentication instead of API tokens.",
         "recommended": false,
-        "how_to": "## Connect to InfluxDB 1.x with Username and Password\n\nInfluxDB 1.x uses HTTP basic authentication rather than the token model introduced in v2.\n\n### Steps\n\n1. Confirm your InfluxDB server is running version 1.x (check `influxd version` on the host or ask your admin).\n2. Obtain the username and password for an InfluxDB user that has read (and optionally write) privileges on the target database.\n3. Enter the URL of your InfluxDB 1.x server (e.g. `http://myserver:8086`).\n4. Enter the **Database name** \u2014 this is the v1 equivalent of a bucket.\n\n### Notes\n\n- InfluxDB 1.x does not support API tokens; use this method only for v1 instances.\n- If authentication is disabled on your v1 server, leave username and password blank.\n- For InfluxDB 2.x or Cloud, use the **API Token** method instead.\n",
+        "how_to": "## Connect to InfluxDB 1.x with Username and Password\n\nInfluxDB 1.x uses HTTP basic authentication rather than the token model introduced in v2.\n\n### Steps\n\n1. Confirm your InfluxDB server is running version 1.x (check `influxd version` on the host or ask your admin).\n2. Obtain the username and password for an InfluxDB user that has read (and optionally write) privileges on the target database.\n3. Enter the URL of your InfluxDB 1.x server (e.g. `http://myserver:8086`).\n4. Enter the **Database name** — this is the v1 equivalent of a bucket.\n\n### Notes\n\n- InfluxDB 1.x does not support API tokens; use this method only for v1 instances.\n- If authentication is disabled on your v1 server, leave username and password blank.\n- For InfluxDB 2.x or Cloud, use the **API Token** method instead.\n",
         "help_url": "https://docs.influxdata.com/influxdb/v1/administration/authentication_and_authorization/",
         "fields": [
           {
@@ -129,6 +129,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/influxdb.svg"
+  },
+  "logo_url": "logos/influxdb.svg"
 }
