@@ -1016,7 +1016,7 @@ async def _build_chat_session(
     workspace.apply_env_to_process()
 
     anton_dir = base / ".anton"
-    artifacts_dir = Path(settings.artifacts_dir)
+    artifacts_dir = Path(getattr(settings, "artifacts_dir", None) or settings.output_dir)
     context_dir = Path(settings.context_dir)
     episodes_dir = anton_dir / "episodes"
     project_memory_dir = anton_dir / "memory"
