@@ -63,10 +63,10 @@ function MemoryRow({ entry, onOpen }) {
 // Row for a project context file (anton.md or any uploaded file).
 // Same visual rhythm as MemoryRow but distinguishes the always-
 // present anton.md with a subtle "Project instructions" label.
-function attachmentSourceIcon(source) {
-  if (source === 'url') return Ico.globe(13);
-  if (source === 'snippet') return Ico.code(13);
+function attachmentSourceIcon(item) {
+  const source = item.source || item.kind || 'file';
   if (source === 'connector') return Ico.link(13);
+  if (item.mime && String(item.mime).startsWith('image/')) return Ico.image(13);
   return Ico.doc(13);
 }
 
@@ -85,7 +85,7 @@ function SessionAttachmentRow({ item }) {
       style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
       title={item.note || item.textPreview || label}
     >
-      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{attachmentSourceIcon(item.source || item.kind)}</span>
+      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{attachmentSourceIcon(item)}</span>
       <span className="min-w-0">
         <span className="block truncate text-[12.5px] text-ink">{label}</span>
         {sub ? (

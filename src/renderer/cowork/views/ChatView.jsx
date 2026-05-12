@@ -300,9 +300,8 @@ function ConnectIntroPillButton({ kind, renderIcon, label, onClick }) {
 
 function userTurnAttachmentIcon(a) {
   const src = a.source || a.kind || 'file';
-  if (src === 'url') return Ico.globe(13);
-  if (src === 'snippet') return Ico.code(13);
   if (src === 'connector') return Ico.link(13);
+  if (a.mime && String(a.mime).startsWith('image/')) return Ico.image(13);
   return Ico.doc(13);
 }
 
@@ -322,7 +321,10 @@ function userTurnAttachmentMeta(a) {
 
 function userTurnAttachmentLabel(a) {
   const src = a.source || a.kind || 'file';
-  return a.name || (src === 'url' ? 'URL' : src === 'snippet' ? 'Snippet' : src === 'connector' ? 'Connector' : 'File');
+  if (a.name) return a.name;
+  if (src === 'connector') return 'Connector';
+  if (a.mime && String(a.mime).startsWith('image/')) return 'Image';
+  return 'File';
 }
 
 function UserTurn({ content, attachments, time, onDelete }) {

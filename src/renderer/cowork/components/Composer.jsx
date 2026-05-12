@@ -3,13 +3,8 @@ import Ico from './Icons';
 
 function AttachmentChip({ attachment, onRemove }) {
   const src = attachment.source || attachment.kind || 'file';
-  const label = src === 'connector'
-    ? 'Connector'
-    : src === 'url'
-      ? 'URL'
-      : src === 'snippet'
-        ? 'Snippet'
-        : 'File';
+  const isImage = attachment.mime && String(attachment.mime).startsWith('image/');
+  const label = src === 'connector' ? 'Connector' : isImage ? 'Image' : 'File';
   const status = attachment.pendingFile
     ? 'Queued'
     : (attachment.extractionStatus && attachment.extractionStatus !== 'ready'
@@ -19,9 +14,8 @@ function AttachmentChip({ attachment, onRemove }) {
     <div className="attachment-chip" title={attachment.note || attachment.textPreview || attachment.name}>
       <span className="attachment-chip-icon">
         {src === 'connector' ? Ico.link(13)
-          : src === 'url' ? Ico.globe(13)
-            : src === 'snippet' ? Ico.code(13)
-              : Ico.doc(13)}
+          : isImage ? Ico.image(13)
+            : Ico.doc(13)}
       </span>
       <span className="attachment-chip-body">
         <span className="attachment-chip-name">{attachment.name || label}</span>
