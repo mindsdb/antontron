@@ -47,7 +47,10 @@ export default function Composer({
   attachments = [],
   connectors = [],
   onAttachFiles,
-  onAttachConnector,
+  /** When set with `onUpdateConnectorMute`, Connectors submenu toggles mute (applied when you send). */
+  conversationId = null,
+  disabledConnections = [],
+  onUpdateConnectorMute,
   onRemoveAttachment,
   placeholder = 'Hi Boss, how can I help you today?',
   disabled = false,
@@ -162,20 +165,25 @@ export default function Composer({
     }
   }
 
-  async function pickConnector(connector) {
-    if (!onAttachConnector) {
-      setOpenMenu(null);
-      setConnectorsOpen(false);
-      return;
-    }
+  function pairKey(engine, name) {
+    return `${String(engine || '').trim().toLowerCase()}\t${String(name || '').trim()}`;
+  }
+
+  function isConnectionDisabled(connector) {
+    const k = pairKey(connector.engine, connector.name);
+    return (disabledConnections || []).some((d) => pairKey(d.engine, d.name) === k);
+  }
+
+  const canMuteConnectors = typeof onUpdateConnectorMute === 'function';
+
+  async function setConnectorUseInChat(connector, useInChat) {
+    if (!canMuteConnectors) return;
     setBusy(true);
     setError('');
     try {
-      await onAttachConnector(connector);
-      setOpenMenu(null);
-      setConnectorsOpen(false);
+      await Promise.resolve(onUpdateConnectorMute(connector, useInChat));
     } catch (err) {
-      setError(err.message || 'Could not attach connector.');
+      setError(err?.message || 'Could not update datasource setting.');
     } finally {
       setBusy(false);
     }
@@ -344,21 +352,56 @@ export default function Composer({
                   No connectors yet. Add one in Utilities → Datasources.
                 </div>
               ) : (
-                connectors.map((c) => (
-                  <button
-                    key={`${c.engine}:${c.name}`}
-                    className="menu-item"
-                    style={{ paddingLeft: 26 }}
-                    disabled={busy}
-                    onClick={() => pickConnector(c)}
-                  >
-                    <span style={{ display: 'inline-flex', color: 'var(--frost-700)' }}>{Ico.doc(13)}</span>
-                    <span style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
-                      <span style={{ fontWeight: 500 }}>{c.name}</span>
-                      <span style={{ fontSize: 11, color: 'var(--frost-600)' }}>{c.displayName || c.engine}</span>
-                    </span>
-                  </button>
-                ))
+                connectors.map((c) => {
+                  const muted = isConnectionDisabled(c);
+                  return (
+                    <div
+                      key={`${c.engine}:${c.name}`}
+                      className="menu-item"
+                      style={{
+                        paddingLeft: 12,
+                        paddingRight: 12,
+                        cursor: 'default',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 10,
+                        flexWrap: 'nowrap',
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      <span style={{ display: 'inline-flex', color: 'var(--frost-700)', flexShrink: 0 }}>{Ico.link(13)}</span>
+                      <span style={{
+                        flex: '1 1 120px',
+                        minWidth: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        gap: 2,
+                      }}
+                      >
+                        <span style={{ fontWeight: 500 }}>{c.name}</span>
+                        <span style={{ fontSize: 11, color: 'var(--frost-600)' }}>{c.displayName || c.engine}</span>
+                      </span>
+                      {canMuteConnectors ? (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-checked={!muted}
+                          aria-label={muted ? `Enable ${c.name} for this chat` : `Disable ${c.name} for this chat`}
+                          className={`toggle${!muted ? ' on' : ''}`}
+                          disabled={busy}
+                          style={{ flexShrink: 0 }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setConnectorUseInChat(c, muted);
+                          }}
+                        >
+                          <span className="toggle-thumb" />
+                        </button>
+                      ) : null}
+                    </div>
+                  );
+                })
               )}
             </div>
           )}

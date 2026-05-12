@@ -786,7 +786,8 @@ export default function ChatView({
   attachments,
   connectors,
   onAttachFiles,
-  onAttachConnector,
+  disabledConnections,
+  onUpdateConnectorMute,
   onRemoveAttachment,
   onPinTask,
   onUnpinTask,
@@ -1454,7 +1455,9 @@ export default function ChatView({
             attachments={attachments}
             connectors={connectors}
             onAttachFiles={onAttachFiles}
-            onAttachConnector={onAttachConnector}
+            conversationId={task.id}
+            disabledConnections={disabledConnections ?? task.disabledConnections ?? []}
+            onUpdateConnectorMute={onUpdateConnectorMute}
             onRemoveAttachment={onRemoveAttachment}
             placeholder="Reply…"
             metaReadOnly

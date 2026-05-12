@@ -154,6 +154,13 @@ function _conversationToTask(conv, messages = []) {
   // the replay at the api boundary so the rest of the app sees a
   // consistent message shape regardless of whether the data came from
   // a fresh stream or a server reload.
+  const rawDisabled = conv.disabled_connections ?? conv.disabledConnections;
+  const disabledConnections = Array.isArray(rawDisabled)
+    ? rawDisabled
+      .filter((x) => x && typeof x.engine === 'string' && typeof x.name === 'string')
+      .map((x) => ({ engine: x.engine.trim(), name: x.name.trim() }))
+    : [];
+
   return {
     id: conv.id,
     title: conv.title || conv.preview || conv.id || 'Untitled task',
@@ -164,6 +171,7 @@ function _conversationToTask(conv, messages = []) {
     projectPath: conv.project_path || null,
     model: null,
     attachments: [],
+    disabledConnections,
     pinned: false,
     // Carry the schedule linkage through so the renderer can group
     // multiple runs of the same schedule into a single "view all"
@@ -237,7 +245,7 @@ export function allocateConversationId() {
 // callback shape the rest of the app already speaks. `conversationId` is
 // optional — omit it to start a new conversation; the caller learns the
 // new id via the first onChunk/onProgress/onDone callback's second arg.
-function _streamResponse(text, { conversationId, projectName, projectPath, model, attachmentIds = [], onChunk, onProgress, onToolResult, onDone, onError, onEvent } = {}) {
+function _streamResponse(text, { conversationId, projectName, projectPath, model, attachmentIds = [], disabledConnections, onChunk, onProgress, onToolResult, onDone, onError, onEvent } = {}) {
   const ctrl = new AbortController();
   (async () => {
     try {
@@ -254,6 +262,9 @@ function _streamResponse(text, { conversationId, projectName, projectPath, model
           // every conversation would fall back to the active project.
           project: projectName || null,
           attachment_ids: attachmentIds,
+          ...(disabledConnections !== undefined
+            ? { disabled_connections: disabledConnections }
+            : {}),
         }),
         signal: ctrl.signal,
       });
@@ -949,6 +960,14 @@ export async function renameConversation(id, title) {
   return req(`/conversations/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ title }),
+  });
+}
+
+/** PATCH conversation meta (`title`, `project`, `disabled_connections`, …). */
+export async function patchConversation(id, body) {
+  return req(`/conversations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
   });
 }
 

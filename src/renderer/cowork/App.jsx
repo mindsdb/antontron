@@ -27,7 +27,7 @@ import { useBreakpoint } from './hooks/useBreakpoint';
 import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettings, fetchHealth,
          createProject, updateSettings, streamNewSession, streamMessage,
          streamDataVaultSubmission,
-         allocateConversationId, uploadAttachments, createSnippetAttachment,
+         allocateConversationId, uploadAttachments,
          deleteAttachment, searchCowork, fetchPins, pinTask, unpinTask,
          recordTaskVisit, fetchSchedules, createSchedule, updateSchedule, deleteSchedule,
          pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
@@ -105,6 +105,16 @@ async function resolveComposerAttachmentsForSend(projectName, sessionId, attachm
   }
   const merged = [...rest, ...uploaded];
   return { merged, attachmentIds: merged.map((x) => x.id) };
+}
+
+function normalizeComposerDisabledConnections(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((d) => ({
+      engine: String(d.engine || '').trim(),
+      name: String(d.name || '').trim(),
+    }))
+    .filter((d) => d.engine && d.name);
 }
 
 const ACCENT_VARS = {
@@ -475,6 +485,9 @@ function mergeTasksFromServer(serverTasks, localTasks) {
       attachments: lMessages.length && Array.isArray(l.attachments) && l.attachments.length
         ? l.attachments
         : server.attachments,
+      // Muted-datasource toggles can change while a turn streams; keep
+      // the client list when present.
+      disabledConnections: l.disabledConnections ?? server.disabledConnections ?? [],
     };
   });
   // Carry over local-only tasks the server hasn't seen yet (e.g. a
@@ -534,6 +547,8 @@ function AppCore() {
   const [pins, setPins] = useState([]);
   const [connectors, setConnectors] = useState([]);
   const [composerAttachments, setComposerAttachments] = useState([]);
+  /** Muted vault connections for the next send (all composers); persisted on stream. */
+  const [composerDisabledConnections, setComposerDisabledConnections] = useState([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [connectorPickerOpen, setConnectorPickerOpen] = useState(false);
   const [serverHelpOpen, setServerHelpOpen] = useState(false);
@@ -555,6 +570,8 @@ function AppCore() {
   // mid-turn)" when the user navigates back to it. See
   // `reconcileTaskMessages` for the cleanup it enables.
   const activeStreamingTaskIdRef = useRef(null);
+  const composerMuteLastTaskIdRef = useRef(null);
+  const prevRouteForComposerMuteRef = useRef(null);
 
   const handleStopStream = useCallback(async () => {
     // 1) Cancel the running scratchpad (if any) so anton stops
@@ -1018,6 +1035,25 @@ function AppCore() {
     ? (models.find((m) => m.id === currentTask.model) || { id: currentTask.model, name: currentTask.model, desc: 'Configured Anton model' })
     : selectedModel;
 
+  useEffect(() => {
+    const prev = prevRouteForComposerMuteRef.current;
+    prevRouteForComposerMuteRef.current = route;
+    if (prev === 'task' && (route === 'home' || route === 'projects')) {
+      composerMuteLastTaskIdRef.current = null;
+      setComposerDisabledConnections([]);
+    }
+  }, [route]);
+
+  useEffect(() => {
+    if (route !== 'task' || !currentTask?.id) return;
+    const tid = currentTask.id;
+    if (composerMuteLastTaskIdRef.current === tid) return;
+    composerMuteLastTaskIdRef.current = tid;
+    setComposerDisabledConnections(
+      normalizeComposerDisabledConnections(currentTask.disabledConnections),
+    );
+  }, [route, currentTask?.id]);
+
   const selectTask = (id) => {
     if (isNarrow) setMobileSidebarOpen(false);
     const task = tasks.find((t) => t.id === id);
@@ -1056,8 +1092,13 @@ function AppCore() {
           const fromServer = hydrateMessagesFromServerEvents(fresh.messages);
           const enriched = mergeConvTurns(id, fromServer);
           const reconciled = reconcileTaskMessages(enriched, isLive);
+          const dc = Array.isArray(fresh.disabledConnections) ? fresh.disabledConnections : undefined;
           setTasks((prev) => prev.map((t) =>
-            t.id === id ? { ...t, messages: reconciled } : t
+            t.id === id ? {
+              ...t,
+              messages: reconciled,
+              ...(dc !== undefined ? { disabledConnections: dc } : {}),
+            } : t
           ));
         }).catch(() => {});
       } else {
@@ -1497,19 +1538,26 @@ function AppCore() {
     setComposerAttachments((prev) => [...prev, ...list]);
   };
 
-  const handleAttachConnector = async (connector) => {
-    const label = connector.displayName || connector.engine;
-    const title = `Connector · ${connector.name}`;
-    const content = `Use the "${connector.name}" datasource (${label}) for this task. Connection metadata is loaded from the local data vault.`;
-    const data = await createSnippetAttachment({
-      title,
-      content,
-      project_path: attachmentProjectPath,
-      session_id: attachmentSessionId,
+  const handleComposerConnectorMute = useCallback((connector, useInChat) => {
+    const engine = String(connector?.engine || '').trim();
+    const name = String(connector?.name || '').trim();
+    if (!engine || !name) return;
+    const pk = (x) => `${x.engine.toLowerCase()}\t${x.name}`;
+    const ckey = pk({ engine, name });
+    setComposerDisabledConnections((prev) => {
+      const cur = normalizeComposerDisabledConnections(prev);
+      let next;
+      if (useInChat) {
+        next = cur.filter((x) => pk(x) !== ckey);
+      } else {
+        if (cur.some((x) => pk(x) === ckey)) return cur;
+        next = [...cur, { engine, name }];
+      }
+      const sig = (arr) => [...arr.map(pk)].sort().join('|');
+      if (sig(cur) === sig(next)) return cur;
+      return next;
     });
-    const attachment = data?.attachment ? { ...data.attachment, source: 'connector', name: connector.name } : null;
-    if (attachment) setComposerAttachments((prev) => [...prev, attachment]);
-  };
+  }, []);
 
   const handleRemoveAttachment = async (id) => {
     const target = composerAttachments.find((a) => a.id === id);
@@ -1542,6 +1590,8 @@ function AppCore() {
     }
     const effectiveProjectName = selectedProject?.name || 'general';
     const effectiveProjectPath = selectedProject?.path || generalProject?.path || null;
+
+    const disabledForSend = normalizeComposerDisabledConnections(composerDisabledConnections);
 
     const rawComposer = composerAttachments;
     const hasPendingFiles = rawComposer.some(isPendingFileAttachment);
@@ -1576,6 +1626,7 @@ function AppCore() {
       projectName: effectiveProjectName,
       model: selectedModel?.id ?? null,
       attachments: sendingAttachments,
+      disabledConnections: disabledForSend,
     };
     setTasks((prev) => [newT, ...prev]);
     setActiveTaskId(taskId);
@@ -1627,6 +1678,7 @@ function AppCore() {
       projectPath: effectiveProjectPath,
       model: selectedModel?.id,
       attachmentIds,
+      disabledConnections: disabledForSend,
       onEvent(ev) {
         streamState = reduceStream(streamState, ev);
         // Track latest in-progress scratchpad so the Stop button
@@ -1742,6 +1794,8 @@ function AppCore() {
     if (!currentTask) return;
     const id = currentTask.id;
 
+    const disabledForSend = normalizeComposerDisabledConnections(composerDisabledConnections);
+
     const taskProjectName = currentTask.projectName
       || (currentTaskProject?.name)
       || null;
@@ -1760,6 +1814,7 @@ function AppCore() {
       t.id === id
         ? {
             ...t,
+            disabledConnections: disabledForSend,
             status: 'active',
             attachments: [...(t.attachments || []), ...sendingAttachments],
             messages: withThinkingPlaceholder([...t.messages, { role: 'user', content: text, attachments: sendingAttachments }]),
@@ -1801,6 +1856,7 @@ function AppCore() {
       projectPath: taskProjectPath,
       model: taskModel,
       attachmentIds,
+      disabledConnections: disabledForSend,
       onEvent(ev) {
         streamState = reduceStream(streamState, ev);
         const open = streamState.steps.find((s) => s.status === 'in_progress' && s._isScratchpad);
@@ -2381,8 +2437,9 @@ function AppCore() {
             attachments={composerAttachments}
             connectors={connectors}
             onAttachFiles={handleAttachFiles}
-            onAttachConnector={handleAttachConnector}
             onRemoveAttachment={handleRemoveAttachment}
+            disabledConnections={composerDisabledConnections}
+            onUpdateConnectorMute={handleComposerConnectorMute}
             configReady={health.config_ready ?? settings.configReady}
             configError={health.config_error ?? settings.configError}
             onOpenSettings={() => setRoute('settings')}
@@ -2407,8 +2464,9 @@ function AppCore() {
             attachments={composerAttachments}
             connectors={connectors}
             onAttachFiles={handleAttachFiles}
-            onAttachConnector={handleAttachConnector}
+            disabledConnections={composerDisabledConnections}
             onRemoveAttachment={handleRemoveAttachment}
+            onUpdateConnectorMute={handleComposerConnectorMute}
             onPinTask={handlePinTask}
             onUnpinTask={handleUnpinTask}
             onRenameTask={handleRenameTask}
@@ -2457,8 +2515,9 @@ function AppCore() {
             attachments={composerAttachments}
             connectors={connectors}
             onAttachFiles={handleAttachFiles}
-            onAttachConnector={handleAttachConnector}
             onRemoveAttachment={handleRemoveAttachment}
+            disabledConnections={composerDisabledConnections}
+            onUpdateConnectorMute={handleComposerConnectorMute}
             onOpenSchedule={(task) => {
               // Same handler ScheduledView uses — routes to the
               // schedule detail page for the clicked row.
