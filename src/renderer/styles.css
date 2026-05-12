@@ -873,36 +873,6 @@ body[data-theme="dark"] .legal-viewer-overlay {
   font-size: 11px;
 }
 
-/* ─── Terminal ─── */
-.terminal-body {
-  flex: 1;
-  padding: 0;
-  overflow: hidden;
-  background: var(--bg-primary);
-}
-
-.terminal-body .xterm {
-  height: 100%;
-  padding: 8px;
-}
-
-.terminal-drop-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.terminal-drop-overlay.active {
-  pointer-events: all;
-}
-
-.terminal-body.drag-over {
-  outline: 2px solid var(--cyan);
-  outline-offset: -2px;
-  background: rgba(0, 229, 255, 0.05);
-}
-
 /* ─── Status Dot ─── */
 .status-dot {
   width: 8px;
