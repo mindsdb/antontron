@@ -803,6 +803,18 @@ function AppCore() {
     return () => window.removeEventListener('anton:projects-changed', handler);
   }, []);
 
+  // Connect Apps and Data (customize) updates its own listing after
+  // disconnect, but App-level `connectors` feeds the chat composer (+ →
+  // Connectors). Refresh when leaving this route so the menu matches the vault.
+  useEffect(() => {
+    if (route !== 'customize') return undefined;
+    return () => {
+      fetchDatasources()
+        .then((data) => setConnectors(Array.isArray(data?.connections) ? data.connections : []))
+        .catch(() => {});
+    };
+  }, [route]);
+
   // Whenever serverOnline flips from false → true (boot finishing,
   // user manually starting, etc.), re-fetch everything. Without this,
   // the initial refreshData() on a slow-cold-boot returns empties and
@@ -2619,6 +2631,8 @@ function AppCore() {
         {route === 'customize' && (
           <CustomizeView
             connectors={connectors}
+            onConnectionsSynced={(next) =>
+              setConnectors(Array.isArray(next) ? next : [])}
             onOpenSettings={() => setRoute('settings')}
             onConnectNew={handleStartConnectChat}
             // Modify is disabled for now — pass nothing through so the
