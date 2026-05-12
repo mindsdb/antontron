@@ -335,70 +335,74 @@ export default function Composer({
               {connectorsOpen ? Ico.chevDown(12) : Ico.chevRight(12)}
             </span>
           </button>
-          {connectorsOpen && (
-            <div style={{
-              borderTop: '1px solid var(--border-0)',
-              marginTop: 4, paddingTop: 4,
-              maxHeight: 220, overflowY: 'auto',
-            }}>
-              {connectors.length === 0 ? (
-                <div style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--frost-600)' }}>
-                  No connectors yet. Add one in Utilities → Datasources.
-                </div>
-              ) : (
-                connectors.map((c) => {
-                  const muted = isConnectionDisabled(c);
-                  return (
-                    <div
-                      key={`${c.engine}:${c.name}`}
-                      className="menu-item"
-                      style={{
-                        paddingLeft: 12,
-                        paddingRight: 12,
-                        cursor: 'default',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 10,
-                        flexWrap: 'nowrap',
-                      }}
-                      onMouseDown={(e) => e.stopPropagation()}
-                    >
-                      <span style={{ display: 'inline-flex', color: 'var(--frost-700)', flexShrink: 0 }}>{Ico.link(13)}</span>
-                      <span style={{
-                        flex: '1 1 120px',
-                        minWidth: 0,
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'flex-start',
-                        gap: 2,
-                      }}
+          <div
+            className={`menu-connectors-accordion${connectorsOpen ? ' is-open' : ''}`}
+            aria-hidden={!connectorsOpen}
+          >
+            <div className="menu-connectors-accordion__inner">
+              <div
+                className="menu-connectors-accordion__scroll"
+                inert={!connectorsOpen || undefined}
+              >
+                {connectors.length === 0 ? (
+                  <div style={{ padding: '8px 14px', fontSize: 12.5, color: 'var(--frost-600)' }}>
+                    No connectors yet. Add one in Utilities → Datasources.
+                  </div>
+                ) : (
+                  connectors.map((c) => {
+                    const muted = isConnectionDisabled(c);
+                    return (
+                      <div
+                        key={`${c.engine}:${c.name}`}
+                        className="menu-item"
+                        style={{
+                          paddingLeft: 12,
+                          paddingRight: 12,
+                          cursor: 'default',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 10,
+                          flexWrap: 'nowrap',
+                        }}
+                        onMouseDown={(e) => e.stopPropagation()}
                       >
-                        <span style={{ fontWeight: 500 }}>{c.name}</span>
-                        <span style={{ fontSize: 11, color: 'var(--frost-600)' }}>{c.displayName || c.engine}</span>
-                      </span>
-                      {canMuteConnectors ? (
-                        <button
-                          type="button"
-                          role="switch"
-                          aria-checked={!muted}
-                          aria-label={muted ? `Enable ${c.name} for this chat` : `Disable ${c.name} for this chat`}
-                          className={`toggle${!muted ? ' on' : ''}`}
-                          disabled={busy}
-                          style={{ flexShrink: 0 }}
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setConnectorUseInChat(c, muted);
-                          }}
+                        <span style={{ display: 'inline-flex', color: 'var(--frost-700)', flexShrink: 0 }}>{Ico.link(13)}</span>
+                        <span style={{
+                          flex: '1 1 120px',
+                          minWidth: 0,
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'flex-start',
+                          gap: 2,
+                        }}
                         >
-                          <span className="toggle-thumb" />
-                        </button>
-                      ) : null}
-                    </div>
-                  );
-                })
-              )}
+                          <span style={{ fontWeight: 500 }}>{c.name}</span>
+                          <span style={{ fontSize: 11, color: 'var(--frost-600)' }}>{c.displayName || c.engine}</span>
+                        </span>
+                        {canMuteConnectors ? (
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={!muted}
+                            aria-label={muted ? `Enable ${c.name} for this chat` : `Disable ${c.name} for this chat`}
+                            className={`toggle${!muted ? ' on' : ''}`}
+                            disabled={busy}
+                            style={{ flexShrink: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setConnectorUseInChat(c, muted);
+                            }}
+                          >
+                            <span className="toggle-thumb" />
+                          </button>
+                        ) : null}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
             </div>
-          )}
+          </div>
           {error && (
             <div style={{ padding: '6px 14px', fontSize: 12, color: 'var(--danger-600, #b3261e)' }}>{error}</div>
           )}

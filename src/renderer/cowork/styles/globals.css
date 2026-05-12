@@ -564,6 +564,32 @@ button.meta-pill:hover { background: var(--surface-0); border-color: var(--borde
   animation: fadein-down .14s ease-out;
 }
 
+/* Connectors row inside the attach (+) menu — smooth expand/collapse */
+.menu-connectors-accordion {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.menu-connectors-accordion.is-open {
+  grid-template-rows: 1fr;
+}
+.menu-connectors-accordion__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.menu-connectors-accordion__scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-0);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu-connectors-accordion {
+    transition: none;
+  }
+}
+
 /* ─── Customize ───────────────────────────────────────────────────────────── */
 .customize-view {
   flex: 1;
