@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import Ico from '../components/Icons';
 import { validateSettings, revealSettingKey, testProviders } from '../api';
 
@@ -180,7 +180,11 @@ function Section({ title, subtitle, children }) {
       alignItems: 'flex-start',
     }}>
       <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{title}</div>
+        <h4 style={{
+          margin: 0, padding: 0,
+          fontSize: 14, fontWeight: 600, color: 'var(--text-strong)',
+          fontFamily: 'inherit', lineHeight: 1.3,
+        }}>{title}</h4>
         {subtitle && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>{subtitle}</div>}
       </div>
       <div>{children}</div>
@@ -192,6 +196,8 @@ function Section({ title, subtitle, children }) {
 // toggle. Uses the theme tokens so it reads well in light + dark.
 function CollapsibleGroup({ title, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
+  const panelId = useId();
+  const headingId = useId();
   return (
     <div style={{
       border: '1px solid var(--border-subtle)',
@@ -202,45 +208,67 @@ function CollapsibleGroup({ title, defaultOpen = true, children }) {
       marginBottom: 14,
       overflow: 'hidden',
     }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-          padding: '14px 18px', background: 'transparent', border: 0,
-          fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600,
-          letterSpacing: '0.04em', textTransform: 'uppercase',
-          color: 'var(--text-muted)', cursor: 'pointer', textAlign: 'left',
-        }}
-      >
-        <span style={{
-          display: 'inline-flex', width: 14, height: 14,
-          color: 'var(--text-muted)',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
-        }}>{Ico.chevronRight ? Ico.chevronRight(12) : '›'}</span>
-        <span style={{ flex: 1 }}>{title}</span>
-      </button>
+      {/* W3C "Accordion" pattern: heading wraps the toggle button so the
+          group surfaces in SR heading navigation, while the button still
+          owns interaction. h3 margin reset to keep the visual layout. */}
+      <h3 id={headingId} style={{ margin: 0, padding: 0, fontWeight: 'inherit', fontSize: 'inherit' }}>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+            padding: '14px 18px', background: 'transparent', border: 0,
+            fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            color: 'var(--text-muted)', cursor: 'pointer', textAlign: 'left',
+          }}
+        >
+          <span aria-hidden="true" style={{
+            display: 'inline-flex', width: 14, height: 14,
+            color: 'var(--text-muted)',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}>{Ico.chevronRight ? Ico.chevronRight(12) : '›'}</span>
+          <span style={{ flex: 1 }}>{title}</span>
+        </button>
+      </h3>
       {open && (
-        <div style={{ padding: '0 18px 8px' }}>{children}</div>
+        <div id={panelId} role="region" aria-labelledby={headingId} style={{ padding: '0 18px 8px' }}>{children}</div>
       )}
     </div>
   );
 }
 
-function Segmented({ value, onChange, options, style }) {
+function Segmented({ value, onChange, options, style, groupLabel }) {
+  // Use radiogroup semantics when a label is supplied — AT announces the
+  // group and reads each option's checked state. Without a label, fall
+  // back to a plain group so AT users at least hear the boundary.
+  const groupRole = groupLabel ? 'radiogroup' : 'group';
   return (
-    <div className="segmented" style={style}>
-      {options.map((o) => (
-        <button
-          key={o.value}
-          className={value === o.value ? 'active' : ''}
-          onClick={() => onChange(o.value)}
-          title={o.title}
-          aria-label={o.ariaLabel || o.title}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div
+      className="segmented"
+      role={groupRole}
+      aria-label={groupLabel}
+      style={style}
+    >
+      {options.map((o) => {
+        const selected = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            className={selected ? 'active' : ''}
+            onClick={() => onChange(o.value)}
+            title={o.title}
+            aria-label={o.ariaLabel || o.title}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -947,17 +975,26 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               const icon = testing
                 ? (<span className="spinner" style={{ width: 15, height: 15 }} />)
                 : effectiveReady ? Ico.check(15) : Ico.key(15);
+              // Failure states use role="alert" (assertive) so AT users hear
+              // them immediately; success/progress use role="status"
+              // (polite) so they queue behind in-progress speech.
+              const bannerRole = anyActiveFail || (tested && !effectiveReady) ? 'alert' : 'status';
               return (
-                <div style={{
-                  padding: 14, marginBottom: 22,
-                  border: `1px solid ${tone.border}`,
-                  background: tone.bg,
-                  borderRadius: 10,
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  animation: tested && !testing ? 'set-badge-pulse 1.6s ease-out 1' : 'none',
-                  transition: 'background .2s ease, border-color .2s ease',
-                }}>
-                  <span style={{
+                <div
+                  role={bannerRole}
+                  aria-live={bannerRole === 'alert' ? 'assertive' : 'polite'}
+                  aria-atomic="true"
+                  style={{
+                    padding: 14, marginBottom: 22,
+                    border: `1px solid ${tone.border}`,
+                    background: tone.bg,
+                    borderRadius: 10,
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    animation: tested && !testing ? 'set-badge-pulse 1.6s ease-out 1' : 'none',
+                    transition: 'background .2s ease, border-color .2s ease',
+                  }}
+                >
+                  <span aria-hidden="true" style={{
                     width: 30, height: 30, borderRadius: 8,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     color: tone.icoFg, background: tone.icoBg,
@@ -1059,29 +1096,51 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     }}
                   />
                 );
+                // Each provider row is a sub-section in the Providers group,
+                // so every row gets an <h4> for SR heading navigation. Known
+                // types render the label visibly; the openai-compatible row
+                // already shows an editable name input as its title, so the
+                // <h4> uses the `.sr-only` utility (its text is the current
+                // name or a sensible fallback) — keeps the visual unchanged
+                // while making the row reachable by H/4 navigation.
+                const headingBaseStyle = {
+                  margin: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1.3,
+                  fontSize: 14, fontWeight: 600, color: 'var(--text-strong)',
+                };
+                const customHeadingText = p.type === 'openai-compatible'
+                  ? ((p.name || '').trim() || 'Custom OpenAI-compatible provider')
+                  : null;
                 const titleNode = (
                   <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     {dot}
-                    {p.type === 'openai-compatible' ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        <input
-                          className="field-input"
-                          value={p.name ?? ''}
-                          onChange={(e) => updateProviderField('openai-compatible', 'name', e.target.value)}
-                          placeholder="Custom provider name"
-                          title="Display name for this custom provider — shown in the model dropdowns below."
-                          aria-label="Custom provider name"
-                          style={{
-                            width: 220, fontSize: 13.5, fontWeight: 600,
-                            borderColor: !(p.name || '').trim() ? 'rgba(224,112,96,0.55)' : undefined,
-                          }}
-                        />
-                        {!(p.name || '').trim() && (
-                          <span style={{ fontSize: 10.5, color: '#E07060' }}>Name required</span>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{label}</span>
+                    {p.type === 'openai-compatible' ? (() => {
+                      const nameEmpty = !(p.name || '').trim();
+                      const errorId = `provider-name-error-${p.type}`;
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <h4 className="sr-only">{customHeadingText}</h4>
+                          <input
+                            className="field-input"
+                            value={p.name ?? ''}
+                            onChange={(e) => updateProviderField('openai-compatible', 'name', e.target.value)}
+                            placeholder="Custom provider name"
+                            title="Display name for this custom provider — shown in the model dropdowns below."
+                            aria-label="Custom provider name"
+                            aria-invalid={nameEmpty || undefined}
+                            aria-describedby={nameEmpty ? errorId : undefined}
+                            aria-required="true"
+                            style={{
+                              width: 220, fontSize: 13.5, fontWeight: 600,
+                              borderColor: nameEmpty ? 'rgba(224,112,96,0.55)' : undefined,
+                            }}
+                          />
+                          {nameEmpty && (
+                            <span id={errorId} style={{ fontSize: 10.5, color: '#E07060' }}>Name required</span>
+                          )}
+                        </div>
+                      );
+                    })() : (
+                      <h4 style={headingBaseStyle}>{label}</h4>
                     )}
                   </span>
                 );
@@ -1370,6 +1429,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                 <Segmented
                   value={theme || 'dark'}
                   onChange={(v) => onThemeChange?.(v)}
+                  groupLabel="Theme"
                   options={[
                     {
                       value: 'light',
@@ -1615,6 +1675,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                 <Segmented
                   value={settings.memoryMode ?? 'autopilot'}
                   onChange={(v) => setSetting('memoryMode', v)}
+                  groupLabel="Memory mode"
                   options={[
                     { value: 'autopilot', label: 'Autopilot', title: 'Anton updates long-term memory automatically.' },
                     { value: 'copilot',   label: 'Copilot',   title: 'Anton suggests memory updates for you to confirm.' },
@@ -1648,6 +1709,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                 <Segmented
                   value={settings.uiUpdateMode ?? 'manual'}
                   onChange={(v) => setSetting('uiUpdateMode', v)}
+                  groupLabel="UI update mode"
                   options={[
                     { value: 'auto',   label: 'Auto',   title: 'Download and apply UI updates automatically.' },
                     { value: 'manual', label: 'Manual', title: 'Only apply UI updates when triggered manually.' },
@@ -1670,17 +1732,22 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
           backdropFilter: 'blur(var(--surface-glass-blur))',
           borderTop: '1px solid var(--border-subtle)',
         }}>
-          <div style={{
-            flex: 1, fontSize: 13, fontWeight: 500,
-            color: 'var(--text-muted)',
-            display: 'inline-flex', alignItems: 'center', gap: 6,
-          }}>
-            {testing && (<span className="spinner" style={{ width: 12, height: 12 }} />)}
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            style={{
+              flex: 1, fontSize: 13, fontWeight: 500,
+              color: 'var(--text-muted)',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {testing && (<span aria-hidden="true" className="spinner" style={{ width: 12, height: 12 }} />)}
             {!testing && tested && configReady && (
-              <span style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
+              <span aria-hidden="true" style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
             )}
             {!testing && saved && !tested && (
-              <span style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
+              <span aria-hidden="true" style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
             )}
             <span>
               {testing
