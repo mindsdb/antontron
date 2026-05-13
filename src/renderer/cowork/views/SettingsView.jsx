@@ -260,7 +260,7 @@ function Toggle({ value, onChange, title, ariaLabel }) {
   );
 }
 
-function TextInput({ value, onChange, placeholder, title }) {
+function TextInput({ value, onChange, placeholder, title, ariaLabel }) {
   return (
     <input
       className="field-input"
@@ -268,6 +268,7 @@ function TextInput({ value, onChange, placeholder, title }) {
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       title={title}
+      aria-label={ariaLabel}
     />
   );
 }
@@ -276,7 +277,7 @@ function TextInput({ value, onChange, placeholder, title }) {
 // field that empties the value — pairs with the trash icon on the API
 // key fields so the whole Credentials card uses one clear gesture.
 // Save settings still has to be clicked to commit the deletion to env.
-function ClearableTextInput({ value, onChange, placeholder }) {
+function ClearableTextInput({ value, onChange, placeholder, ariaLabel }) {
   const v = value ?? '';
   const hasValue = v.length > 0;
   return (
@@ -286,6 +287,7 @@ function ClearableTextInput({ value, onChange, placeholder }) {
         value={v}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        aria-label={ariaLabel}
         style={hasValue ? { paddingRight: 36 } : undefined}
       />
       {hasValue && (
@@ -395,17 +397,25 @@ function ApiKeyInput({ value, onChange, placeholder, disabled, revealName }) {
   };
   const btnStyleActive = { ...btnStyle, color: 'var(--text-strong)', background: 'var(--surface-2, rgba(255,255,255,0.04))' };
 
+  // When the field is holding the server sentinel and the user hasn't
+  // toggled reveal, render the input as empty + a long bullet placeholder.
+  // The literal "***" rendered as type=password is only 3 dots wide, which
+  // looks like an almost-empty field rather than "a stored key is here."
+  // Typing replaces the (empty) value cleanly — no asterisk contamination.
+  const showSentinelAsMask = !show && v === '***';
+
   return (
     <div style={{ position: 'relative' }}>
       <input
         className="field-input mono"
         type={show ? 'text' : 'password'}
-        value={v}
+        value={showSentinelAsMask ? '' : v}
         onChange={(e) => onInput(e.target.value)}
-        placeholder={placeholder || '••••••••••••••••••'}
+        placeholder={showSentinelAsMask ? '••••••••••••••••' : (placeholder || '••••••••••••••••••')}
         disabled={disabled}
         autoComplete="off"
         spellCheck={false}
+        aria-label={revealName ? `${revealName} API key` : 'API key'}
         style={{ paddingRight: 108 }}
       />
       <div style={{
@@ -729,6 +739,20 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providers.length, providers.some((p) => p.type === 'minds-cloud')]);
 
+  // Auto-dismiss the status banner ~3s after a clean success. Failures
+  // stay sticky so the user actually sees what's broken. Cancelled on
+  // re-test by the dependency change.
+  useEffect(() => {
+    if (!bannerVisible || testing || !tested) return;
+    const activeStatuses = Array.from(activeProviderTypes)
+      .map((t) => (settings.providerStatus || {})[t] || 'untested');
+    const allActiveOk = activeStatuses.length > 0 && activeStatuses.every((s) => s === 'ok');
+    if (!(configReady && allActiveOk)) return;
+    const t = setTimeout(() => setBannerVisible(false), 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bannerVisible, testing, tested, configReady, settings.providerStatus]);
+
   const updateProviderField = (type, key, value) => {
     setLlmDirty(true);
     updateProviders(providers.map((p) => (p.type === type ? { ...p, [key]: value } : p)));
@@ -1010,10 +1034,13 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   : status === 'fail' ? '#E07060'
                   : status === 'testing' ? '#E5B57A'
                   : 'rgba(127,127,127,0.6)';
+                // Glow for active states (ok/fail/testing); untested rows get
+                // a subtle 1px ring instead so the dot still reads as an
+                // intentional indicator rather than a blob of grey.
                 const dotGlow = status === 'ok' ? '0 0 6px rgba(124,196,182,0.7)'
                   : status === 'fail' ? '0 0 6px rgba(224,112,96,0.6)'
                   : status === 'testing' ? '0 0 6px rgba(229,181,122,0.7)'
-                  : 'none';
+                  : 'inset 0 0 0 1px rgba(255,255,255,0.08), 0 0 0 1px var(--border-subtle)';
                 const dotTitle = status === 'ok' ? `Last test passed${detail ? ` (${detail})` : ''}`
                   : status === 'fail' ? `Last test failed${detail ? `: ${detail}` : ''}`
                   : status === 'testing' ? 'Testing…'
@@ -1024,7 +1051,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     aria-label={dotTitle}
                     style={{
                       display: 'inline-block',
-                      width: 9, height: 9, borderRadius: 999,
+                      width: 10, height: 10, borderRadius: 999,
                       background: dotColor,
                       boxShadow: dotGlow,
                       flexShrink: 0,
@@ -1043,6 +1070,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                           onChange={(e) => updateProviderField('openai-compatible', 'name', e.target.value)}
                           placeholder="Custom provider name"
                           title="Display name for this custom provider — shown in the model dropdowns below."
+                          aria-label="Custom provider name"
                           style={{
                             width: 220, fontSize: 13.5, fontWeight: 600,
                             borderColor: !(p.name || '').trim() ? 'rgba(224,112,96,0.55)' : undefined,
@@ -1068,13 +1096,15 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   }}>
                     <div>
                       {titleNode}
-                      {p.type === 'minds-cloud' && (
+                      {PROVIDER_TYPE_DESC[p.type] && (
                         <div style={{
                           fontSize: 12, color: 'var(--text-muted)',
                           marginTop: 6, maxWidth: 380, lineHeight: 1.45,
                         }}>
-                          <div>Router to all major LLMs.</div>
-                          <div>Required to publish artifacts to the web.</div>
+                          <div>{PROVIDER_TYPE_DESC[p.type]}</div>
+                          {p.type === 'minds-cloud' && (
+                            <div>Required to publish artifacts to the web.</div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1095,6 +1125,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                           value={p.baseUrl ?? ''}
                           onChange={(v) => updateProviderField('openai-compatible', 'baseUrl', v)}
                           placeholder="https://example.com/v1"
+                          ariaLabel="Base URL"
                         />
                       )}
                       {GET_KEY_URL[p.type] && (
@@ -1166,13 +1197,14 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   title={availableTypesForAdd.length === 0 ? 'All provider types are already configured' : 'Add another provider'}
                   style={{
                     position: 'absolute', top: 14, left: 0,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
                     opacity: addPickerOpen ? 0 : (availableTypesForAdd.length === 0 ? 0.45 : 1),
                     transform: addPickerOpen ? 'translateY(6px)' : 'translateY(0)',
                     transition: 'opacity 200ms ease, transform 200ms ease',
                     pointerEvents: addPickerOpen ? 'none' : (availableTypesForAdd.length === 0 ? 'none' : 'auto'),
                     cursor: availableTypesForAdd.length === 0 ? 'not-allowed' : 'pointer',
                   }}
-                >+ Add provider</button>
+                >{Ico.plus(13)} Add provider</button>
 
                 {/* Open: Choose Provider: <chip> <chip> · Cancel.
                     Fades + slides up from below as it appears. */}
@@ -1197,18 +1229,18 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                       style={{ fontSize: 12.5, padding: '4px 10px', fontWeight: 400 }}
                     >{typeLabels[t] || t}</button>
                   ))}
-                  <span style={{ color: 'var(--text-muted)', padding: '0 4px' }}>·</span>
                   <button
                     type="button"
                     onClick={() => setAddPickerOpen(false)}
                     title="Hide the provider picker."
+                    aria-label="Close provider picker"
                     style={{
-                      fontSize: 12.5, padding: '4px 8px',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 26, height: 26, marginLeft: 4, borderRadius: 6,
                       background: 'transparent', border: 0,
                       color: 'var(--text-muted)', cursor: 'pointer',
-                      fontWeight: 400,
                     }}
-                  >Cancel</button>
+                  >{Ico.close(13)}</button>
                 </div>
               </div>
             </CollapsibleGroup>
@@ -1339,8 +1371,18 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   value={theme || 'dark'}
                   onChange={(v) => onThemeChange?.(v)}
                   options={[
-                    { value: 'light', label: 'Light', title: 'Use the light theme.' },
-                    { value: 'dark',  label: 'Dark',  title: 'Use the dark theme.' },
+                    {
+                      value: 'light',
+                      label: (<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{Ico.sun(13)} Light</span>),
+                      ariaLabel: 'Light theme',
+                      title: 'Use the light theme.',
+                    },
+                    {
+                      value: 'dark',
+                      label: (<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{Ico.moon(13)} Dark</span>),
+                      ariaLabel: 'Dark theme',
+                      title: 'Use the dark theme.',
+                    },
                   ]}
                 />
               </Section>
@@ -1349,6 +1391,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   value={settings.greeting}
                   onChange={(v) => setSetting('greeting', v)}
                   title="Shown above the task input when you start a new task."
+                  ariaLabel="Greeting text"
                 />
               </Section>
               <div className="settings-hide-mobile">
@@ -1627,16 +1670,29 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
           backdropFilter: 'blur(var(--surface-glass-blur))',
           borderTop: '1px solid var(--border-subtle)',
         }}>
-          <div style={{ flex: 1, fontSize: 12.5, color: 'var(--text-muted)' }}>
-            {testing
-              ? 'Testing configuration…'
-              : tested
-                ? (configReady ? 'Test passed — provider, model, and credentials look good.' : (configError || 'Test reported a problem.'))
-                : saved
-                  ? 'Settings saved.'
-                  : configError
-                    ? configError
-                    : 'Changes apply on save.'}
+          <div style={{
+            flex: 1, fontSize: 13, fontWeight: 500,
+            color: 'var(--text-muted)',
+            display: 'inline-flex', alignItems: 'center', gap: 6,
+          }}>
+            {testing && (<span className="spinner" style={{ width: 12, height: 12 }} />)}
+            {!testing && tested && configReady && (
+              <span style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
+            )}
+            {!testing && saved && !tested && (
+              <span style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
+            )}
+            <span>
+              {testing
+                ? 'Testing configuration…'
+                : tested
+                  ? (configReady ? 'Test passed — provider, model, and credentials look good.' : (configError || 'Test reported a problem.'))
+                  : saved
+                    ? 'Settings saved.'
+                    : configError
+                      ? configError
+                      : 'Changes apply on save.'}
+            </span>
           </div>
           <button
             className="btn-secondary"
@@ -1654,7 +1710,8 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               : 'Save changes and re-run provider tests.'
             }
             style={{
-              minWidth: 132,
+              width: 140,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               opacity: (!settingsDirty || testing || missingCustomNames) ? 0.55 : 1,
               cursor: (!settingsDirty || testing || missingCustomNames) ? 'default' : 'pointer',
             }}
