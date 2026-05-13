@@ -32,9 +32,9 @@
       {
         "id": "api-key",
         "label": "API Key",
-        "description": "Paste an API key from the AccuWeather Developer Portal. Takes about 30 seconds \u2014 no OAuth flow required.",
+        "description": "Paste an API key from the AccuWeather Developer Portal. Takes about 30 seconds — no OAuth flow required.",
         "recommended": true,
-        "how_to": "## Get your AccuWeather API key\n\n1. Go to [developer.accuweather.com](https://developer.accuweather.com) and sign in (or create a free account).\n2. Click **My Apps** in the top navigation bar.\n3. Click **Add a New App**. Give it a name (e.g. `Anton`) and select the APIs you need (at minimum **Core Weather**).\n4. Click **Create App**. The app card will display your **API Key** immediately.\n5. Copy the key and paste it into the **API Key** field below.\n\n## Notes\n\n- Free-tier keys are limited to 50 calls/day. If you need more, upgrade your plan under **My Account \u2192 Subscriptions**.\n- New keys are usually active within a few minutes but can take up to 10 minutes to propagate.\n- Keep your API key private \u2014 anyone with it can consume your quota.\n- If you suspect exposure, delete the app in My Apps and create a new one.",
+        "how_to": "## Get your AccuWeather API key\n\n1. Go to [developer.accuweather.com](https://developer.accuweather.com) and sign in (or create a free account).\n2. Click **My Apps** in the top navigation bar.\n3. Click **Add a New App**. Give it a name (e.g. `Anton`) and select the APIs you need (at minimum **Core Weather**).\n4. Click **Create App**. The app card will display your **API Key** immediately.\n5. Copy the key and paste it into the **API Key** field below.\n\n## Notes\n\n- Free-tier keys are limited to 50 calls/day. If you need more, upgrade your plan under **My Account → Subscriptions**.\n- New keys are usually active within a few minutes but can take up to 10 minutes to propagate.\n- Keep your API key private — anyone with it can consume your quota.\n- If you suspect exposure, delete the app in My Apps and create a new one.",
         "help_url": "https://developer.accuweather.com/getting-started",
         "fields": [
           {
@@ -44,7 +44,7 @@
             "required": true,
             "secret": true,
             "placeholder": "abcdef1234567890abcdef1234567890",
-            "description": "Found in developer.accuweather.com \u2192 My Apps \u2192 your app card."
+            "description": "Found in developer.accuweather.com → My Apps → your app card."
           },
           {
             "name": "base_url",
@@ -107,16 +107,18 @@
             "options": [
               {
                 "value": "imperial",
-                "label": "Imperial (\u00b0F, mph)"
+                "label": "Imperial (°F, mph)"
               },
               {
                 "value": "metric",
-                "label": "Metric (\u00b0C, km/h)"
+                "label": "Metric (°C, km/h)"
               }
             ]
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/accuweather.svg"
+  },
+  "logo_url": "logos/accuweather.svg"
 }

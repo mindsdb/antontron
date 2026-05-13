@@ -39,7 +39,7 @@
         "label": "OTLP / HTTP",
         "description": "Export telemetry over OTLP HTTP (port 4318). Paste your collector URL and an optional bearer token or custom headers. Works with any OTLP-compatible backend.",
         "recommended": true,
-        "how_to": "## Connect via OTLP / HTTP\n\nOTLP HTTP is the simplest export path \u2014 no gRPC library required, works through most proxies and firewalls.\n\n### Steps\n\n1. Find your collector's OTLP HTTP address. The default port is **4318**. Example: `http://localhost:4318` or `https://ingest.example.com:4318`.\n2. If your collector or SaaS backend requires authentication, locate the bearer token or API key in your backend's dashboard (e.g. Grafana Cloud \u2192 My Account \u2192 API Keys, Honeycomb \u2192 Team Settings \u2192 API Keys).\n3. Paste the base URL (without `/v1/traces`) into **Endpoint URL** below.\n4. If a bearer token is required, paste it into **Bearer token**. Anton will add `Authorization: Bearer <token>` to every request.\n5. For non-standard auth (e.g. `x-honeycomb-team` headers), add them as a JSON object in **Extra headers**.\n6. Leave **Insecure (skip TLS)** checked only for localhost development collectors.\n\n### Notes\n\n- Anton appends the signal paths automatically (`/v1/traces`, `/v1/metrics`, `/v1/logs`).\n- If your collector runs behind a reverse proxy with a self-signed cert, either install the cert or use the gRPC method with `insecure` mode.\n- For managed backends (Honeycomb, Lightstep, Grafana Cloud, etc.) the endpoint and token are shown in their ingestion settings page.",
+        "how_to": "## Connect via OTLP / HTTP\n\nOTLP HTTP is the simplest export path — no gRPC library required, works through most proxies and firewalls.\n\n### Steps\n\n1. Find your collector's OTLP HTTP address. The default port is **4318**. Example: `http://localhost:4318` or `https://ingest.example.com:4318`.\n2. If your collector or SaaS backend requires authentication, locate the bearer token or API key in your backend's dashboard (e.g. Grafana Cloud → My Account → API Keys, Honeycomb → Team Settings → API Keys).\n3. Paste the base URL (without `/v1/traces`) into **Endpoint URL** below.\n4. If a bearer token is required, paste it into **Bearer token**. Anton will add `Authorization: Bearer <token>` to every request.\n5. For non-standard auth (e.g. `x-honeycomb-team` headers), add them as a JSON object in **Extra headers**.\n6. Leave **Insecure (skip TLS)** checked only for localhost development collectors.\n\n### Notes\n\n- Anton appends the signal paths automatically (`/v1/traces`, `/v1/metrics`, `/v1/logs`).\n- If your collector runs behind a reverse proxy with a self-signed cert, either install the cert or use the gRPC method with `insecure` mode.\n- For managed backends (Honeycomb, Lightstep, Grafana Cloud, etc.) the endpoint and token are shown in their ingestion settings page.",
         "help_url": "https://opentelemetry.io/docs/specs/otlp/#otlphttp",
         "fields": [
           {
@@ -48,7 +48,7 @@
             "type": "url",
             "required": true,
             "placeholder": "https://ingest.example.com:4318",
-            "description": "Base URL of your OTLP HTTP receiver. Do not include /v1/traces \u2014 Anton appends signal paths automatically."
+            "description": "Base URL of your OTLP HTTP receiver. Do not include /v1/traces — Anton appends signal paths automatically."
           },
           {
             "name": "bearer_token",
@@ -74,7 +74,7 @@
             "type": "boolean",
             "required": false,
             "default": "false",
-            "description": "Disable TLS certificate verification. Use only for local development collectors \u2014 never in production."
+            "description": "Disable TLS certificate verification. Use only for local development collectors — never in production."
           },
           {
             "name": "timeout_seconds",
@@ -92,7 +92,7 @@
         "label": "OTLP / gRPC",
         "description": "Export telemetry over OTLP gRPC (port 4317). Higher throughput than HTTP; preferred for high-volume or low-latency pipelines.",
         "recommended": false,
-        "how_to": "## Connect via OTLP / gRPC\n\nOTLP gRPC uses port 4317 by default and streams telemetry with lower overhead than HTTP. Choose this when throughput matters or your collector is co-located.\n\n### Steps\n\n1. Find your collector's gRPC address. Default port is **4317**. Format: `host:4317` (no `http://` or `https://` prefix for gRPC).\n2. If authentication is required, get your bearer token or API key from your backend's settings.\n3. Paste the endpoint into **gRPC endpoint** below (e.g. `collector.internal:4317` or `ingest.example.com:4317`).\n4. If a bearer token is needed, paste it into **Bearer token**.\n5. For additional metadata headers (e.g. `x-honeycomb-team`), add them as a JSON object in **Extra headers (metadata)**.\n6. Check **Insecure mode** only for plaintext gRPC on localhost \u2014 production collectors should use TLS.\n\n### Notes\n\n- Unlike HTTP, the gRPC endpoint should NOT include a scheme prefix (`http://` / `https://`). TLS is negotiated via the insecure flag.\n- Some managed SaaS backends (e.g. Grafana Cloud) expose gRPC at a different hostname than their HTTP endpoint \u2014 check their docs.\n- If your collector is behind a load balancer, ensure it supports HTTP/2 end-to-end for gRPC to work correctly.",
+        "how_to": "## Connect via OTLP / gRPC\n\nOTLP gRPC uses port 4317 by default and streams telemetry with lower overhead than HTTP. Choose this when throughput matters or your collector is co-located.\n\n### Steps\n\n1. Find your collector's gRPC address. Default port is **4317**. Format: `host:4317` (no `http://` or `https://` prefix for gRPC).\n2. If authentication is required, get your bearer token or API key from your backend's settings.\n3. Paste the endpoint into **gRPC endpoint** below (e.g. `collector.internal:4317` or `ingest.example.com:4317`).\n4. If a bearer token is needed, paste it into **Bearer token**.\n5. For additional metadata headers (e.g. `x-honeycomb-team`), add them as a JSON object in **Extra headers (metadata)**.\n6. Check **Insecure mode** only for plaintext gRPC on localhost — production collectors should use TLS.\n\n### Notes\n\n- Unlike HTTP, the gRPC endpoint should NOT include a scheme prefix (`http://` / `https://`). TLS is negotiated via the insecure flag.\n- Some managed SaaS backends (e.g. Grafana Cloud) expose gRPC at a different hostname than their HTTP endpoint — check their docs.\n- If your collector is behind a load balancer, ensure it supports HTTP/2 end-to-end for gRPC to work correctly.",
         "help_url": "https://opentelemetry.io/docs/specs/otlp/#otlpgrpc",
         "fields": [
           {
@@ -101,7 +101,7 @@
             "type": "text",
             "required": true,
             "placeholder": "collector.internal:4317",
-            "description": "Host and port of your OTLP gRPC receiver. Do not include http:// or https:// \u2014 TLS is controlled by the insecure flag below."
+            "description": "Host and port of your OTLP gRPC receiver. Do not include http:// or https:// — TLS is controlled by the insecure flag below."
           },
           {
             "name": "bearer_token",
@@ -127,7 +127,7 @@
             "type": "boolean",
             "required": false,
             "default": "false",
-            "description": "Send gRPC traffic without TLS. Enable only for local collectors \u2014 never expose plaintext gRPC over a public network."
+            "description": "Send gRPC traffic without TLS. Enable only for local collectors — never expose plaintext gRPC over a public network."
           },
           {
             "name": "timeout_seconds",
@@ -140,6 +140,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/otel_collector.svg"
+  },
+  "logo_url": "logos/otel_collector.svg"
 }

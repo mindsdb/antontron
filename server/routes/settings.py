@@ -6,12 +6,14 @@ the translation layer and the single place that handles legacy env fallbacks.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+import httpx
+from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
 from .cowork_state import update_state, load_state
@@ -39,8 +41,53 @@ UI_DEFAULTS = {
     "defaultModel": "",
     "autoPin": True,
     "showDots": True,
+    "showCounters": True,
     "accentVariant": "aqua",
 }
+
+# Multi-provider config. Each provider has its own credentials and lives
+# in state.preferences.providers. Env vars in ~/.anton/.env are derived
+# from this list on every save so anton-core's existing ANTON_* contract
+# is unchanged. One provider per type; exactly one isDefault.
+PROVIDER_TYPES = ("minds-cloud", "anthropic", "openai", "gemini", "openai-compatible")
+
+PROVIDER_TYPE_LABELS = {
+    "minds-cloud":       "MindsHub",
+    "anthropic":         "Anthropic",
+    "openai":            "OpenAI",
+    "gemini":            "Gemini",
+    "openai-compatible": "OpenAI-compatible",
+}
+
+# Server-owned so the UI doesn't drift from what each backend actually
+# accepts. Empty list = user must supply (openai-compatible).
+RECOMMENDED_MODELS: dict[str, list[str]] = {
+    # mdb.ai's router currently only accepts the `_reason_` / `_code_`
+    # sentinel pair — every other model name returns
+    # "Mind 'X' not found" (HTTP 500). The earlier expansion
+    # (latest:sonnet, latest:gpt, gpt-low, …) was rolled back after
+    # an end-to-end test against the live router.
+    "minds-cloud":       ["_reason_", "_code_"],
+    "anthropic":         ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"],
+    "openai":            ["gpt-5.4", "gpt-5.4-mini", "o3", "o4-mini"],
+    "gemini":            ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-flash-preview"],
+    "openai-compatible": [],
+}
+
+# Default planning + coding model per type. Used when modelMode == 'default'.
+RECOMMENDED_PAIR = {
+    "minds-cloud":       ("_reason_", "_code_"),
+    "anthropic":         ("claude-sonnet-4-6", "claude-haiku-4-5-20251001"),
+    "openai":            ("gpt-5.4", "gpt-5.4-mini"),
+    "gemini":            ("gemini-2.5-pro", "gemini-2.5-flash"),
+    "openai-compatible": ("", ""),
+}
+
+GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+MINDS_API_PATH_SUFFIX = "/api/v1"
+
+OPENAI_FAMILY = ("openai", "gemini", "openai-compatible", "minds-cloud")
 
 
 def _read_dotenv(path: Path) -> dict[str, str]:
@@ -203,45 +250,431 @@ def _ui_settings() -> dict[str, Any]:
     merged = dict(UI_DEFAULTS)
     merged.update({key: value for key, value in prefs.items() if key in UI_DEFAULTS})
 
+    # `defaultModel` is no longer a user-editable preference — the
+    # planning role's model (projected onto ANTON_PLANNING_MODEL on
+    # every save) is the single source of truth for "what the renderer
+    # should send as the active model". Reading state.preferences for
+    # this field caused a long-standing bug: a stale `defaultModel`
+    # (e.g. `gpt-5.4` from an earlier OpenAI experiment) silently
+    # overrode the active env model, the renderer sent it on every
+    # chat, and mdb.ai 500'd with "Mind 'gpt-5.4' not found". Now we
+    # always derive from env and aggressively clean up legacy values.
     env_planning_model = _get_env("ANTON_PLANNING_MODEL", "claude-sonnet-4-6")
-    env_planning_provider = _get_env("ANTON_PLANNING_PROVIDER", "anthropic")
-
-    # Drop a stale Minds sentinel the moment the active provider can't
-    # resolve it. Falls through to the env's planning model, which is
-    # the source of truth for "what model will the request actually
-    # talk to." Without this guard the cowork UI keeps showing
-    # `_reason_` indefinitely after a provider switch.
-    saved_default = merged.get("defaultModel") or ""
-    if _is_minds_sentinel(saved_default) and env_planning_provider != "openai-compatible":
-        # Persist the cleanup so state.json reflects reality and we
-        # don't keep doing this masking work on every request. Best-
-        # effort — a write failure only means we'll re-mask next time.
+    if "defaultModel" in prefs:
         try:
-            def _drop_default_model(state: dict) -> None:
-                prefs = state.get("preferences")
-                if isinstance(prefs, dict):
-                    prefs.pop("defaultModel", None)
-            update_state(_drop_default_model)
+            def _drop_legacy_default_model(state: dict) -> None:
+                p = state.get("preferences")
+                if isinstance(p, dict):
+                    p.pop("defaultModel", None)
+            update_state(_drop_legacy_default_model)
             logger.info(
-                "Dropped stale Minds sentinel %r from cowork preferences "
-                "(active planning_provider=%r).",
-                saved_default, env_planning_provider,
+                "Dropped legacy state.preferences.defaultModel=%r (now derived from env).",
+                prefs.get("defaultModel"),
             )
         except Exception as e:
             logger.debug("Could not persist defaultModel cleanup: %s", e)
-        saved_default = ""
-
-    if not saved_default:
-        saved_default = env_planning_model
-    merged["defaultModel"] = saved_default
+    merged["defaultModel"] = env_planning_model
 
     return merged
+
+
+# ───────────────────────── Providers state model ─────────────────────────
+#
+# Single source of truth: state.preferences.providers (list, one per type)
+# plus state.preferences.modelMode ("default" | "custom") plus
+# state.preferences.modelOverrides ({planning|coding: {providerType, model}}).
+#
+# ~/.anton/.env stays the contract Anton core reads from — every save derives
+# ANTON_* values from the providers list so anton-core needs no changes.
+
+def _empty_provider(ptype: str) -> dict[str, Any]:
+    base = {"type": ptype, "apiKey": "", "isDefault": False}
+    if ptype == "openai-compatible":
+        base["baseUrl"] = ""
+        base["name"] = ""
+    if ptype == "minds-cloud":
+        base.update({
+            "mindsUrl": "https://mdb.ai",
+            "mindsMindName": "",
+            "mindsDatasource": "",
+            "mindsDatasourceEngine": "",
+            "mindsSslVerify": True,
+        })
+    return base
+
+
+def _providers_from_env() -> list[dict[str, Any]]:
+    """Migration: read the legacy single-provider env state and return a
+    providers list (zero or one entries). Called when state.preferences
+    has no `providers` key yet."""
+    provider = _get_env("ANTON_PLANNING_PROVIDER", "")
+    base_url = (_get_env("ANTON_OPENAI_BASE_URL") or "").rstrip("/")
+    minds_url = (_get_env("ANTON_MINDS_URL") or "").rstrip("/")
+    anthropic_key = _get_env("ANTON_ANTHROPIC_API_KEY")
+    openai_key = _get_env("ANTON_OPENAI_API_KEY")
+    minds_key = _get_env("ANTON_MINDS_API_KEY")
+
+    result: list[dict[str, Any]] = []
+
+    if anthropic_key:
+        e = _empty_provider("anthropic")
+        e["apiKey"] = anthropic_key
+        result.append(e)
+
+    if minds_key:
+        e = _empty_provider("minds-cloud")
+        e["apiKey"] = minds_key
+        if minds_url:
+            e["mindsUrl"] = minds_url
+        e["mindsMindName"] = _get_env("ANTON_MINDS_MIND_NAME", "")
+        e["mindsDatasource"] = _get_env("ANTON_MINDS_DATASOURCE", "")
+        e["mindsDatasourceEngine"] = _get_env("ANTON_MINDS_DATASOURCE_ENGINE", "")
+        e["mindsSslVerify"] = _bool_env("ANTON_MINDS_SSL_VERIFY", True)
+        result.append(e)
+
+    # OPENAI slot can be driven by openai, gemini, openai-compatible, or
+    # by minds-cloud (which derives the slot from the minds key/url).
+    # Distinguish based on the saved base URL — but skip if minds-cloud
+    # already covered it (same key + url-matches-minds).
+    if provider == "openai" and openai_key:
+        e = _empty_provider("openai")
+        e["apiKey"] = openai_key
+        result.append(e)
+    elif provider == "openai-compatible" and openai_key:
+        if base_url.startswith("https://generativelanguage.googleapis.com/"):
+            e = _empty_provider("gemini")
+            e["apiKey"] = openai_key
+            result.append(e)
+        elif minds_url and base_url.startswith(minds_url):
+            # Already covered by minds-cloud entry above. Skip.
+            pass
+        elif base_url and base_url != OPENAI_BASE_URL.rstrip("/"):
+            e = _empty_provider("openai-compatible")
+            e["apiKey"] = openai_key
+            e["baseUrl"] = base_url
+            result.append(e)
+        elif not any(p["type"] == "openai" for p in result):
+            # Bare "openai-compatible" with the OpenAI public URL → treat as openai.
+            e = _empty_provider("openai")
+            e["apiKey"] = openai_key
+            result.append(e)
+
+    # Default = the provider currently driving the planning role.
+    planning_anton_provider = provider or ("anthropic" if anthropic_key else "")
+    preferred_default = None
+    if planning_anton_provider == "anthropic":
+        preferred_default = "anthropic"
+    elif planning_anton_provider == "openai":
+        preferred_default = "openai"
+    elif planning_anton_provider == "openai-compatible":
+        if base_url.startswith("https://generativelanguage.googleapis.com/"):
+            preferred_default = "gemini"
+        elif minds_url and base_url.startswith(minds_url):
+            preferred_default = "minds-cloud"
+        elif base_url:
+            preferred_default = "openai-compatible"
+
+    for p in result:
+        if p["type"] == preferred_default:
+            p["isDefault"] = True
+            break
+    else:
+        if result:
+            result[0]["isDefault"] = True
+
+    return result
+
+
+def _normalize_provider(p: Any) -> Optional[dict[str, Any]]:
+    """Coerce a single provider dict to a known-shape entry, dropping
+    unknown types and unexpected fields."""
+    if not isinstance(p, dict):
+        return None
+    ptype = p.get("type")
+    if ptype not in PROVIDER_TYPES:
+        return None
+    out = _empty_provider(ptype)
+    api_key = p.get("apiKey")
+    if isinstance(api_key, str):
+        out["apiKey"] = api_key
+    out["isDefault"] = bool(p.get("isDefault"))
+    if ptype == "openai-compatible":
+        if isinstance(p.get("baseUrl"), str):
+            out["baseUrl"] = p["baseUrl"].strip()
+        if isinstance(p.get("name"), str):
+            out["name"] = p["name"].strip()
+    if ptype == "minds-cloud":
+        for key in ("mindsUrl", "mindsMindName", "mindsDatasource", "mindsDatasourceEngine"):
+            v = p.get(key)
+            if isinstance(v, str):
+                out[key] = v.strip()
+        if "mindsSslVerify" in p:
+            out["mindsSslVerify"] = bool(p["mindsSslVerify"])
+    return out
+
+
+def _dedupe_by_type(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One instance per type. Later entries win (so a PATCH overrides)."""
+    by_type: dict[str, dict[str, Any]] = {}
+    for p in providers:
+        by_type[p["type"]] = p
+    return list(by_type.values())
+
+
+def _apply_default_invariant(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Exactly one entry has isDefault=True. If none, first wins. If
+    multiple, the first wins."""
+    if not providers:
+        return providers
+    chosen_idx = next((i for i, p in enumerate(providers) if p.get("isDefault")), 0)
+    for i, p in enumerate(providers):
+        p["isDefault"] = (i == chosen_idx)
+    return providers
+
+
+def _masked_providers(providers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """GET projection — replace stored apiKey with '***' sentinel."""
+    out = []
+    for p in providers:
+        copy = dict(p)
+        copy["apiKey"] = "***" if p.get("apiKey") else ""
+        out.append(copy)
+    return out
+
+
+def _merge_providers_patch(
+    stored: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge an incoming providers list with the stored one. An apiKey
+    of '***' means 'preserve the existing secret'; a non-sentinel value
+    overrides it. Entries not in `incoming` are removed."""
+    stored_by_type = {p["type"]: p for p in stored}
+    merged: list[dict[str, Any]] = []
+    for raw in incoming:
+        p = _normalize_provider(raw)
+        if p is None:
+            continue
+        if p["apiKey"] == "***":
+            prev = stored_by_type.get(p["type"], {})
+            p["apiKey"] = prev.get("apiKey", "")
+        merged.append(p)
+    return _apply_default_invariant(_dedupe_by_type(merged))
+
+
+def _load_providers() -> list[dict[str, Any]]:
+    """Read providers from state, migrating from env on first read."""
+    prefs = load_state().get("preferences", {})
+    if not isinstance(prefs, dict):
+        prefs = {}
+    raw = prefs.get("providers")
+    if isinstance(raw, list) and raw:
+        normalized = [_normalize_provider(p) for p in raw]
+        cleaned = [p for p in normalized if p is not None]
+        if cleaned:
+            return _apply_default_invariant(_dedupe_by_type(cleaned))
+    migrated = _providers_from_env()
+    if migrated:
+        try:
+            update_state(lambda s: s.setdefault("preferences", {}).update({"providers": migrated}))
+        except Exception as e:
+            logger.debug("Could not persist migrated providers: %s", e)
+    return migrated
+
+
+def _default_provider(providers: list[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    """MindsHub is the implicit fallback for any role that hasn't been
+    explicitly assigned — it's the only provider users can't delete,
+    so it's also the only one we can safely depend on. Falls back to
+    the first registered provider if MindsHub is somehow missing."""
+    minds = next((p for p in providers if p["type"] == "minds-cloud"), None)
+    if minds:
+        return minds
+    return providers[0] if providers else None
+
+
+def _provider_by_type(providers: list[dict[str, Any]], ptype: Optional[str]) -> Optional[dict[str, Any]]:
+    if not ptype:
+        return None
+    return next((p for p in providers if p["type"] == ptype), None)
+
+
+def _role_anton_provider(provider_type: str) -> str:
+    """Map a UI provider type to anton-core's planning_provider value
+    (anton-core only knows anthropic / openai / openai-compatible)."""
+    if provider_type == "anthropic":
+        return "anthropic"
+    if provider_type == "openai":
+        return "openai"
+    return "openai-compatible"
+
+
+def _base_url_for(provider: dict[str, Any]) -> str:
+    if provider["type"] == "gemini":
+        return GEMINI_BASE_URL
+    if provider["type"] == "minds-cloud":
+        url = (provider.get("mindsUrl") or "https://mdb.ai").rstrip("/")
+        return f"{url}{MINDS_API_PATH_SUFFIX}"
+    if provider["type"] == "openai-compatible":
+        return provider.get("baseUrl", "") or ""
+    if provider["type"] == "openai":
+        return OPENAI_BASE_URL
+    return ""
+
+
+def _resolve_role(
+    providers: list[dict[str, Any]],
+    model_mode: str,
+    overrides: dict[str, Any],
+    role: str,
+    default_provider: Optional[dict[str, Any]],
+) -> tuple[Optional[dict[str, Any]], str]:
+    """Return (provider_entry, model_id) driving the given role."""
+    if model_mode == "custom" and isinstance(overrides, dict):
+        o = overrides.get(role) or {}
+        ptype = o.get("providerType")
+        target = _provider_by_type(providers, ptype)
+        model = (o.get("model") or "").strip()
+        if target and model:
+            return target, model
+    # Default mode (or custom with missing override) → default provider's
+    # recommended pair.
+    if not default_provider:
+        return None, ""
+    pair = RECOMMENDED_PAIR.get(default_provider["type"], ("", ""))
+    return default_provider, pair[0 if role == "planning" else 1]
+
+
+def _env_from_providers(
+    providers: list[dict[str, Any]],
+    model_mode: str,
+    overrides: dict[str, Any],
+) -> tuple[dict[str, str], list[str]]:
+    """Compute the env-var writes/deletes that project a providers list
+    + role assignments onto Anton's canonical ANTON_* surface."""
+    writes: dict[str, str] = {}
+    deletes: list[str] = []
+
+    by_type = {p["type"]: p for p in providers}
+
+    # Per-provider credential slots. Each registered provider keeps its
+    # auth on disk so users can switch back without re-entering.
+    if "anthropic" in by_type and by_type["anthropic"].get("apiKey"):
+        writes["ANTON_ANTHROPIC_API_KEY"] = by_type["anthropic"]["apiKey"]
+    else:
+        deletes.append("ANTON_ANTHROPIC_API_KEY")
+
+    if "minds-cloud" in by_type:
+        m = by_type["minds-cloud"]
+        if m.get("apiKey"):
+            writes["ANTON_MINDS_API_KEY"] = m["apiKey"]
+        else:
+            deletes.append("ANTON_MINDS_API_KEY")
+        writes["ANTON_MINDS_URL"] = (m.get("mindsUrl") or "https://mdb.ai").rstrip("/")
+        for key, env in (
+            ("mindsMindName", "ANTON_MINDS_MIND_NAME"),
+            ("mindsDatasource", "ANTON_MINDS_DATASOURCE"),
+            ("mindsDatasourceEngine", "ANTON_MINDS_DATASOURCE_ENGINE"),
+        ):
+            v = m.get(key)
+            if v:
+                writes[env] = v
+            else:
+                deletes.append(env)
+        writes["ANTON_MINDS_SSL_VERIFY"] = "true" if m.get("mindsSslVerify", True) else "false"
+    else:
+        deletes.extend([
+            "ANTON_MINDS_API_KEY", "ANTON_MINDS_URL",
+            "ANTON_MINDS_MIND_NAME", "ANTON_MINDS_DATASOURCE",
+            "ANTON_MINDS_DATASOURCE_ENGINE", "ANTON_MINDS_SSL_VERIFY",
+        ])
+
+    default_p = _default_provider(providers)
+    planning_p, planning_model = _resolve_role(providers, model_mode, overrides, "planning", default_p)
+    coding_p, coding_model     = _resolve_role(providers, model_mode, overrides, "coding",   default_p)
+
+    if planning_p:
+        writes["ANTON_PLANNING_PROVIDER"] = _role_anton_provider(planning_p["type"])
+        writes["ANTON_PLANNING_MODEL"]    = planning_model
+    if coding_p:
+        writes["ANTON_CODING_PROVIDER"] = _role_anton_provider(coding_p["type"])
+        writes["ANTON_CODING_MODEL"]    = coding_model
+
+    # OPENAI slot — only the role currently using an openai-family provider
+    # drives this. Planning wins if both roles use that family but disagree
+    # (constraint surfaced to the UI: in custom mode, conflicting openai
+    # base URLs across roles aren't supportable).
+    openai_driver = None
+    for role_p in (planning_p, coding_p):
+        if role_p and role_p["type"] in OPENAI_FAMILY:
+            openai_driver = role_p
+            break
+    if openai_driver and openai_driver.get("apiKey"):
+        writes["ANTON_OPENAI_API_KEY"]  = openai_driver["apiKey"]
+        base = _base_url_for(openai_driver)
+        if base:
+            writes["ANTON_OPENAI_BASE_URL"] = base
+        else:
+            deletes.append("ANTON_OPENAI_BASE_URL")
+    else:
+        deletes.extend(["ANTON_OPENAI_API_KEY", "ANTON_OPENAI_BASE_URL"])
+
+    # Avoid writing+deleting the same key in the same pass.
+    write_keys = set(writes)
+    deletes = [k for k in deletes if k not in write_keys]
+    return writes, deletes
+
+
+def _load_model_config() -> dict[str, Any]:
+    """state.preferences.modelMode + modelOverrides, with defaults."""
+    prefs = load_state().get("preferences", {})
+    if not isinstance(prefs, dict):
+        prefs = {}
+    mode = prefs.get("modelMode")
+    if mode not in ("default", "custom"):
+        mode = "default"
+    overrides = prefs.get("modelOverrides") or {}
+    if not isinstance(overrides, dict):
+        overrides = {}
+    return {"modelMode": mode, "modelOverrides": overrides}
+
+
+def _normalize_overrides(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    out: dict[str, Any] = {}
+    for role in ("planning", "coding"):
+        v = value.get(role)
+        if not isinstance(v, dict):
+            continue
+        ptype = v.get("providerType")
+        model = v.get("model")
+        if ptype in PROVIDER_TYPES and isinstance(model, str):
+            out[role] = {"providerType": ptype, "model": model.strip()}
+    return out
+
+
+REVEALABLE_KEYS = {
+    "anthropic": "ANTON_ANTHROPIC_API_KEY",
+    "openai":    "ANTON_OPENAI_API_KEY",
+    "minds":     "ANTON_MINDS_API_KEY",
+}
+
+
+@router.get("/reveal-key/{name}")
+async def reveal_key(name: str):
+    env_key = REVEALABLE_KEYS.get(name.lower())
+    if env_key is None:
+        raise HTTPException(status_code=404, detail="Unknown key name")
+    return {"value": _get_env(env_key)}
 
 
 @router.get("")
 async def get_settings():
     status = get_config_status()
     ui = _ui_settings()
+    providers = _load_providers()
+    model_cfg = _load_model_config()
     return {
         "harnessProvider": _get_env("COWORK_HARNESS_PROVIDER", "anton"),
         "hermesApiBaseUrl": _get_env("COWORK_HERMES_API_BASE_URL", "http://127.0.0.1:8642"),
@@ -273,8 +706,18 @@ async def get_settings():
         "defaultModel":  ui["defaultModel"] or status["model"],
         "autoPin":       ui["autoPin"],
         "showDots":      ui["showDots"],
+        "showCounters":  ui["showCounters"],
         "accentVariant": ui["accentVariant"],
         "uiUpdateMode":  _get_env("UI_UPDATE_MODE", "manual"),
+        # Multi-provider surface (canonical going forward)
+        "providers":     _masked_providers(providers),
+        "modelMode":     model_cfg["modelMode"],
+        "modelOverrides": model_cfg["modelOverrides"],
+        "providerTypes":  list(PROVIDER_TYPES),
+        "providerTypeLabels": PROVIDER_TYPE_LABELS,
+        "recommendedModels": RECOMMENDED_MODELS,
+        "recommendedPair":   {k: list(v) for k, v in RECOMMENDED_PAIR.items()},
+        "providerStatus": (load_state().get("preferences", {}) or {}).get("providerStatus") or {},
     }
 
 
@@ -288,6 +731,7 @@ class SettingsPatch(BaseModel):
     defaultModel:         Optional[str] = None
     autoPin:              Optional[bool] = None
     showDots:             Optional[bool] = None
+    showCounters:         Optional[bool] = None
     accentVariant:        Optional[str] = None
     planningProvider:     Optional[str] = None
     planningModel:        Optional[str] = None
@@ -308,6 +752,13 @@ class SettingsPatch(BaseModel):
     episodicMemory:       Optional[bool] = None
     proactiveDashboards:  Optional[bool] = None
     uiUpdateMode:         Optional[str] = None
+    # Multi-provider patch surface. When `providers` is provided, the
+    # legacy single-provider fields above are ignored and env vars get
+    # derived from the list instead.
+    providers:            Optional[list[dict[str, Any]]] = None
+    modelMode:            Optional[str] = None
+    modelOverrides:       Optional[dict[str, Any]] = None
+    providerStatus:       Optional[dict[str, str]] = None
 
 
 @router.put("")
@@ -320,14 +771,80 @@ async def update_settings(patch: SettingsPatch):
         pref_writes["greeting"] = patch.greeting
     if patch.tone is not None:
         pref_writes["tone"] = patch.tone
-    if patch.defaultModel is not None:
-        pref_writes["defaultModel"] = patch.defaultModel
+    # `defaultModel` is derived from ANTON_PLANNING_MODEL on every read
+    # (see _ui_settings); ignore inbound writes so a renderer round-
+    # trip can't re-seed the legacy preference.
+    _ = patch.defaultModel  # accepted but discarded
     if patch.autoPin is not None:
         pref_writes["autoPin"] = patch.autoPin
     if patch.showDots is not None:
         pref_writes["showDots"] = patch.showDots
+    if patch.showCounters is not None:
+        pref_writes["showCounters"] = patch.showCounters
     if patch.accentVariant is not None:
         pref_writes["accentVariant"] = patch.accentVariant
+    if patch.providerStatus is not None:
+        # Sanitize — only accept the three known states per type.
+        clean = {}
+        for k, v in patch.providerStatus.items():
+            if isinstance(k, str) and v in ("ok", "fail", "untested"):
+                clean[k] = v
+        pref_writes["providerStatus"] = clean
+
+    # When the new providers surface is part of the patch, it is the
+    # canonical source for all credentials / provider / model env vars.
+    # The legacy single-provider fields are ignored on this path so a
+    # naive client can't half-write conflicting state.
+    using_providers_patch = patch.providers is not None
+
+    if using_providers_patch:
+        stored = _load_providers()
+        merged = _merge_providers_patch(stored, patch.providers or [])
+        # modelMode / modelOverrides defaults — if not in patch, keep the
+        # currently stored values so callers can patch them independently.
+        existing_cfg = _load_model_config()
+        model_mode = patch.modelMode if patch.modelMode in ("default", "custom") else existing_cfg["modelMode"]
+        overrides_in = patch.modelOverrides if patch.modelOverrides is not None else existing_cfg["modelOverrides"]
+        overrides = _normalize_overrides(overrides_in)
+
+        prov_writes, prov_deletes = _env_from_providers(merged, model_mode, overrides)
+        writes.update(prov_writes)
+        delete_keys.extend(prov_deletes)
+
+        pref_writes["providers"] = merged
+        pref_writes["modelMode"] = model_mode
+        pref_writes["modelOverrides"] = overrides
+    else:
+        _stage_string_env(patch.planningProvider, "ANTON_PLANNING_PROVIDER", writes, delete_keys)
+        _stage_string_env(patch.planningModel, "ANTON_PLANNING_MODEL", writes, delete_keys)
+        # defaultModel is derived from env on every read; do not mirror
+        # planningModel into the legacy preference here.
+        _stage_string_env(patch.codingProvider, "ANTON_CODING_PROVIDER", writes, delete_keys)
+        _stage_string_env(patch.codingModel, "ANTON_CODING_MODEL", writes, delete_keys)
+        _stage_string_env(patch.openaiBaseUrl, "ANTON_OPENAI_BASE_URL", writes, delete_keys)
+        _stage_string_env(patch.mindsUrl, "ANTON_MINDS_URL", writes, delete_keys)
+        _stage_string_env(patch.mindsMindName, "ANTON_MINDS_MIND_NAME", writes, delete_keys)
+        _stage_string_env(patch.mindsDatasource, "ANTON_MINDS_DATASOURCE", writes, delete_keys)
+        _stage_string_env(patch.mindsDatasourceEngine, "ANTON_MINDS_DATASOURCE_ENGINE", writes, delete_keys)
+        if patch.mindsSslVerify is not None:
+            writes["ANTON_MINDS_SSL_VERIFY"] = str(patch.mindsSslVerify).lower()
+
+        # API keys — write if provided and not the masked sentinel
+        if patch.anthropicApiKey is not None and patch.anthropicApiKey != "***":
+            if patch.anthropicApiKey.strip():
+                writes["ANTON_ANTHROPIC_API_KEY"] = patch.anthropicApiKey.strip()
+            else:
+                delete_keys.append("ANTON_ANTHROPIC_API_KEY")
+        if patch.openaiApiKey is not None and patch.openaiApiKey != "***":
+            if patch.openaiApiKey.strip():
+                writes["ANTON_OPENAI_API_KEY"] = patch.openaiApiKey.strip()
+            else:
+                delete_keys.append("ANTON_OPENAI_API_KEY")
+        if patch.mindsApiKey is not None and patch.mindsApiKey != "***":
+            if patch.mindsApiKey.strip():
+                writes["ANTON_MINDS_API_KEY"] = patch.mindsApiKey.strip()
+            else:
+                delete_keys.append("ANTON_MINDS_API_KEY")
 
     if patch.harnessProvider is not None:
         harness = patch.harnessProvider.strip().lower()
@@ -335,18 +852,7 @@ async def update_settings(patch: SettingsPatch):
     _stage_string_env(patch.hermesApiBaseUrl, "COWORK_HERMES_API_BASE_URL", writes, delete_keys)
     if patch.hermesAutoStart is not None:
         writes["COWORK_HERMES_AUTO_START"] = str(patch.hermesAutoStart).lower()
-    _stage_string_env(patch.planningProvider, "ANTON_PLANNING_PROVIDER", writes, delete_keys)
-    _stage_string_env(patch.planningModel, "ANTON_PLANNING_MODEL", writes, delete_keys)
-    if patch.planningModel is not None and patch.planningModel.strip() and patch.defaultModel is None:
-        pref_writes["defaultModel"] = patch.planningModel
-    _stage_string_env(patch.codingProvider, "ANTON_CODING_PROVIDER", writes, delete_keys)
-    _stage_string_env(patch.codingModel, "ANTON_CODING_MODEL", writes, delete_keys)
-    _stage_string_env(patch.openaiBaseUrl, "ANTON_OPENAI_BASE_URL", writes, delete_keys)
     _stage_string_env(patch.memoryMode, "ANTON_MEMORY_MODE", writes, delete_keys)
-    _stage_string_env(patch.mindsUrl, "ANTON_MINDS_URL", writes, delete_keys)
-    _stage_string_env(patch.mindsMindName, "ANTON_MINDS_MIND_NAME", writes, delete_keys)
-    _stage_string_env(patch.mindsDatasource, "ANTON_MINDS_DATASOURCE", writes, delete_keys)
-    _stage_string_env(patch.mindsDatasourceEngine, "ANTON_MINDS_DATASOURCE_ENGINE", writes, delete_keys)
     _stage_string_env(patch.publishUrl, "ANTON_PUBLISH_URL", writes, delete_keys)
     if patch.memoryEnabled is not None:
         writes["ANTON_MEMORY_ENABLED"] = str(patch.memoryEnabled).lower()
@@ -354,26 +860,8 @@ async def update_settings(patch: SettingsPatch):
         writes["ANTON_EPISODIC_MEMORY"] = str(patch.episodicMemory).lower()
     if patch.proactiveDashboards is not None:
         writes["ANTON_PROACTIVE_DASHBOARDS"] = str(patch.proactiveDashboards).lower()
-    if patch.mindsSslVerify is not None:
-        writes["ANTON_MINDS_SSL_VERIFY"] = str(patch.mindsSslVerify).lower()
     _stage_string_env(patch.uiUpdateMode, "UI_UPDATE_MODE", writes, delete_keys)
 
-    # API keys — write if provided and not the masked sentinel
-    if patch.anthropicApiKey is not None and patch.anthropicApiKey != "***":
-        if patch.anthropicApiKey.strip():
-            writes["ANTON_ANTHROPIC_API_KEY"] = patch.anthropicApiKey.strip()
-        else:
-            delete_keys.append("ANTON_ANTHROPIC_API_KEY")
-    if patch.openaiApiKey is not None and patch.openaiApiKey != "***":
-        if patch.openaiApiKey.strip():
-            writes["ANTON_OPENAI_API_KEY"] = patch.openaiApiKey.strip()
-        else:
-            delete_keys.append("ANTON_OPENAI_API_KEY")
-    if patch.mindsApiKey is not None and patch.mindsApiKey != "***":
-        if patch.mindsApiKey.strip():
-            writes["ANTON_MINDS_API_KEY"] = patch.mindsApiKey.strip()
-        else:
-            delete_keys.append("ANTON_MINDS_API_KEY")
     if patch.hermesApiKey is not None and patch.hermesApiKey != "***":
         if patch.hermesApiKey.strip():
             writes["COWORK_HERMES_API_KEY"] = patch.hermesApiKey.strip()
@@ -392,12 +880,79 @@ async def update_settings(patch: SettingsPatch):
             logger.warning("Failed to write settings: %s", e)
             raise HTTPException(status_code=500, detail="Settings could not be saved.") from e
 
+    # The providers-patch path already projects state deterministically;
+    # legacy-path heuristics below would risk un-doing those writes.
+    if using_providers_patch:
+        if pref_writes:
+            try:
+                update_state(lambda state: state.setdefault("preferences", {}).update(pref_writes))
+            except Exception as e:
+                logger.warning("Failed to write local preferences: %s", e)
+                raise HTTPException(status_code=500, detail="Local preferences could not be saved.") from e
+        _evict_chat_sessions()
+        status = get_config_status()
+        return {
+            "status": "ok",
+            "updated": list(writes.keys()) + [f"deleted:{key}" for key in delete_keys] + [f"ui:{key}" for key in pref_writes],
+            "configReady": status["config_ready"],
+            "configError": status["config_error"],
+        }
+
+    # Post-write hygiene: the save handler intentionally skips "***"
+    # sentinel patches to preserve stored keys, which means a cross-
+    # provider switch can leave a key from the *previous* provider
+    # sitting in ANTON_OPENAI_API_KEY and silently fail auth against
+    # the new endpoint. Catch the two unambiguous cases:
+    #
+    #   1. Active state = Minds Cloud, but ANTON_OPENAI_API_KEY holds a
+    #      non-Minds value → router auth will 401 against mdb.ai.
+    #   2. Active state = OpenAI / non-Minds compatible, but
+    #      ANTON_OPENAI_API_KEY holds an `mdb_…` Minds key → will 401
+    #      against api.openai.com (or any non-Minds host).
+    #
+    # In both cases we *delete* the stale key. AntonSettings.model_post_init
+    # then derives openai auth from minds_api_key for case 1, and case 2
+    # prompts the user to paste the right OpenAI key.
+    provider_now = _get_env("ANTON_PLANNING_PROVIDER")
+    minds_url_now = (_get_env("ANTON_MINDS_URL") or "").rstrip("/")
+    minds_key_now = _get_env("ANTON_MINDS_API_KEY")
+    openai_base_now = (_get_env("ANTON_OPENAI_BASE_URL") or "").rstrip("/")
+    openai_key_now = _get_env("ANTON_OPENAI_API_KEY")
+
+    is_minds_cloud_now = bool(
+        provider_now == "openai-compatible"
+        and minds_url_now
+        and openai_base_now.startswith(minds_url_now)
+    )
+
+    stale_to_clear: list[str] = []
+    if is_minds_cloud_now:
+        if openai_key_now and openai_key_now != minds_key_now:
+            stale_to_clear.append("ANTON_OPENAI_API_KEY")
+    elif provider_now in ("openai", "openai-compatible"):
+        if openai_key_now.startswith("mdb_"):
+            stale_to_clear.append("ANTON_OPENAI_API_KEY")
+
+    if stale_to_clear:
+        try:
+            _write_dotenv(GLOBAL_ENV_PATH, {}, tuple(stale_to_clear))
+            for key in stale_to_clear:
+                os.environ.pop(key, None)
+            logger.info(
+                "Cleared stale credential(s) after preset switch (provider=%s, minds_cloud=%s): %s",
+                provider_now, is_minds_cloud_now, stale_to_clear,
+            )
+        except Exception as e:
+            logger.warning("Failed to clear stale credentials: %s", e)
+
     if pref_writes:
         try:
             update_state(lambda state: state.setdefault("preferences", {}).update(pref_writes))
         except Exception as e:
             logger.warning("Failed to write local preferences: %s", e)
             raise HTTPException(status_code=500, detail="Local preferences could not be saved.") from e
+
+    _evict_chat_sessions()
 
     status = get_config_status()
     return {
@@ -406,6 +961,128 @@ async def update_settings(patch: SettingsPatch):
         "configReady": status["config_ready"],
         "configError": status["config_error"],
     }
+
+
+def _evict_chat_sessions() -> None:
+    """Drop the in-memory ChatSession pool so the next turn rebuilds
+    against the freshly-saved provider/model/env. Best-effort — import
+    lazily so this module stays importable from contexts that haven't
+    spun up the conversation manager yet."""
+    try:
+        from server.anton_api import conversation_manager as cm
+        cm._live.clear()
+    except Exception as e:
+        logger.debug("Could not evict chat sessions after settings save: %s", e)
+
+
+async def _ping_provider(p: dict[str, Any]) -> tuple[str, str]:
+    """Lightweight auth check for a single provider. Returns
+    (status, detail) where status is 'ok' or 'fail' and detail is a
+    short human-readable reason on failure (HTTP code, transport error,
+    or 'no apiKey')."""
+    ptype = p.get("type")
+    key = (p.get("apiKey") or "").strip()
+    timeout = httpx.Timeout(12.0)
+
+    async def _check(url: str, headers: dict[str, str]) -> tuple[str, str]:
+        async with httpx.AsyncClient(timeout=timeout, follow_redirects=True) as client:
+            r = await client.get(url, headers=headers)
+            if r.status_code < 400:
+                return "ok", f"HTTP {r.status_code}"
+            return "fail", f"HTTP {r.status_code}"
+
+    try:
+        if ptype == "anthropic":
+            if not key:
+                return "fail", "missing API key"
+            return await _check(
+                "https://api.anthropic.com/v1/models",
+                {"x-api-key": key, "anthropic-version": "2023-06-01"},
+            )
+        if ptype == "openai":
+            if not key:
+                return "fail", "missing API key"
+            return await _check(
+                "https://api.openai.com/v1/models",
+                {"Authorization": f"Bearer {key}"},
+            )
+        if ptype == "gemini":
+            if not key:
+                return "fail", "missing API key"
+            return await _check(
+                "https://generativelanguage.googleapis.com/v1beta/openai/models",
+                {"Authorization": f"Bearer {key}"},
+            )
+        if ptype == "openai-compatible":
+            base = (p.get("baseUrl") or "").rstrip("/")
+            if not base:
+                return "fail", "missing base URL"
+            headers = {"Authorization": f"Bearer {key}"} if key else {}
+            return await _check(f"{base}/models", headers)
+        if ptype == "minds-cloud":
+            if not key:
+                return "fail", "missing API key"
+            base = (p.get("mindsUrl") or "https://mdb.ai").rstrip("/")
+            # mdb.ai exposes `/api/v1/minds/` as the auth-checked list
+            # endpoint (the OpenAI-compatible `/models` route 401s even
+            # for valid keys). This matches the URL used by the Electron
+            # main process's validateMinds helper.
+            return await _check(
+                f"{base}/api/v1/minds/",
+                {"Authorization": f"Bearer {key}"},
+            )
+    except httpx.HTTPError as e:
+        return "fail", f"{type(e).__name__}: {e}"
+    except Exception as e:
+        logger.warning("Provider %s ping crashed: %s", ptype, e)
+        return "fail", f"{type(e).__name__}: {e}"
+    return "fail", "unknown provider type"
+
+
+class TestProvidersPatch(BaseModel):
+    providers: Optional[list[dict[str, Any]]] = None
+
+
+@router.post("/test-providers")
+async def test_providers(patch: TestProvidersPatch | None = None):
+    """Ping each provider and persist a per-type status map so the UI
+    can render a green/red dot that survives a reload.
+
+    Accepts an optional `providers` list in the request body so the UI
+    can test current un-saved state (e.g. right after the user types a
+    key but before clicking Save). '***' apiKey sentinels are merged
+    with stored values."""
+    stored = _load_providers()
+    if patch and patch.providers is not None:
+        merged = _merge_providers_patch(stored, patch.providers)
+    else:
+        merged = stored
+
+    # Ping all providers in parallel so total wait time is roughly the
+    # slowest single provider's response, not the sum.
+    results = await asyncio.gather(*[_ping_provider(p) for p in merged], return_exceptions=True)
+    statuses: dict[str, str] = {}
+    details: dict[str, str] = {}
+    for p, r in zip(merged, results):
+        if isinstance(r, Exception):
+            statuses[p["type"]] = "fail"
+            details[p["type"]] = f"{type(r).__name__}: {r}"
+        else:
+            statuses[p["type"]], details[p["type"]] = r
+
+    try:
+        def _merge_statuses(state):
+            prefs = state.setdefault("preferences", {})
+            existing = prefs.get("providerStatus")
+            if not isinstance(existing, dict):
+                existing = {}
+            existing.update(statuses)
+            prefs["providerStatus"] = existing
+        update_state(_merge_statuses)
+    except Exception as e:
+        logger.debug("Could not persist providerStatus: %s", e)
+
+    return {"providerStatus": statuses, "providerStatusDetails": details}
 
 
 @router.post("/validate")

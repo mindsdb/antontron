@@ -1,8 +1,22 @@
 {
   "id": "gmail",
   "label": "Gmail",
-  "aliases": ["google mail", "googlemail", "g-mail", "google email"],
-  "keywords": ["email", "messaging", "google", "inbox", "mail", "smtp", "imap", "workspace"],
+  "aliases": [
+    "google mail",
+    "googlemail",
+    "g-mail",
+    "google email"
+  ],
+  "keywords": [
+    "email",
+    "messaging",
+    "google",
+    "inbox",
+    "mail",
+    "smtp",
+    "imap",
+    "workspace"
+  ],
   "description": "Read, search, and send messages from a Gmail or Google Workspace account.",
   "category": "communication",
   "logo": "mail",
@@ -112,6 +126,9 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/gmail.svg"
+  },
+  "logo_url": "logos/gmail.svg",
+  "featured": true
 }

@@ -641,6 +641,28 @@ export async function validateSettings() {
   return req('/settings/validate', { method: 'POST', body: JSON.stringify({}) });
 }
 
+export async function testProviders(providers) {
+  const body = Array.isArray(providers) ? { providers } : {};
+  try {
+    return await req('/settings/test-providers', { method: 'POST', body: JSON.stringify(body) });
+  } catch (err) {
+    return { providerStatus: {}, providerStatusDetails: {}, error: err?.message || 'Test failed' };
+  }
+}
+
+// Fetch the real (unmasked) value of a stored API key — drives the eye
+// icon "reveal" in Settings. The GET /settings endpoint returns "***"
+// for stored keys; this endpoint returns the actual stored value so the
+// user can verify which key is configured.
+export async function revealSettingKey(name) {
+  try {
+    const res = await req(`/settings/reveal-key/${encodeURIComponent(name)}`);
+    return res?.value || '';
+  } catch {
+    return '';
+  }
+}
+
 export async function fetchIntegrations() {
   try {
     return await req('/integrations');
@@ -1175,6 +1197,7 @@ export const MOCK_DATA = {
     defaultModel: 'claude-sonnet-4-6',
     autoPin: true,
     showDots: true,
+    showCounters: true,
     accentVariant: 'aqua',
     planningProvider: 'anthropic',
     planningModel: 'claude-sonnet-4-6',
@@ -1186,6 +1209,20 @@ export const MOCK_DATA = {
     proactiveDashboards: false,
     anthropicApiKey: '',
     openaiApiKey: '',
+    providers: [],
+    modelMode: 'default',
+    modelOverrides: {},
+    providerTypes: ['minds-cloud', 'anthropic', 'openai', 'gemini', 'openai-compatible'],
+    providerTypeLabels: {
+      'minds-cloud': 'MindsHub',
+      anthropic: 'Anthropic',
+      openai: 'OpenAI',
+      gemini: 'Gemini',
+      'openai-compatible': 'OpenAI-compatible',
+    },
+    recommendedModels: {},
+    recommendedPair: {},
+    providerStatus: {},
   },
 
   integrations: [

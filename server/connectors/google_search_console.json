@@ -21,7 +21,7 @@
     "performance",
     "indexing"
   ],
-  "description": "Pull SEO performance data \u2014 clicks, impressions, queries, and index coverage \u2014 from Google Search Console into Anton.",
+  "description": "Pull SEO performance data — clicks, impressions, queries, and index coverage — from Google Search Console into Anton.",
   "category": "analytics",
   "logo": "search",
   "logo_color": "#4285F4",
@@ -35,7 +35,7 @@
       {
         "id": "oauth-byok",
         "label": "Sign in with Google (OAuth 2.0)",
-        "description": "Connect via OAuth 2.0 using your own Google Cloud OAuth client. Anton opens a browser consent screen \u2014 no passwords stored, revocable at any time from your Google Account.",
+        "description": "Connect via OAuth 2.0 using your own Google Cloud OAuth client. Anton opens a browser consent screen — no passwords stored, revocable at any time from your Google Account.",
         "recommended": true,
         "submit_action": "oauth_launch",
         "oauth": {
@@ -50,7 +50,7 @@
             "prompt": "consent"
           }
         },
-        "how_to": "## Sign in with Google (OAuth 2.0 \u2014 Bring Your Own Client)\n\nAnton doesn't ship a hosted OAuth client for Google Search Console yet, so you'll create one in Google Cloud Console in about 3 minutes.\n\n### 1. Enable the API\n\n1. Open [Google Cloud Console](https://console.cloud.google.com/) and pick or create a project.\n2. Go to **APIs & Services \u2192 Library**, search for **Google Search Console API**, and click **Enable**.\n\n### 2. Configure the OAuth consent screen\n\n1. Go to **APIs & Services \u2192 OAuth consent screen**.\n2. Choose **External** (or **Internal** if this is a Workspace org) and click **Create**.\n3. Fill in app name (e.g. `Anton`) and your email, then save.\n4. Under **Scopes**, add `webmasters.readonly` and `userinfo.email`.\n5. Under **Test users**, add the Google account you'll authorize with.\n\n### 3. Create an OAuth client ID\n\n1. Go to **APIs & Services \u2192 Credentials \u2192 Create credentials \u2192 OAuth client ID**.\n2. Choose **Desktop app** as the application type.\n3. Copy the **Client ID** and **Client secret** \u2014 paste them into the fields below.\n\n### 4. Authorize\n\nClick **Submit**. Anton opens your browser to Google's consent screen. Sign in with the account that has Search Console access, review the permissions (`Read your Search Console data` and `See your email address`), and click **Continue**.\n\n### Notes\n\n- The account must be a verified owner or full user of the property in Search Console.\n- To revoke access later, visit [Third-party apps with account access](https://myaccount.google.com/permissions) and remove the entry.\n- If your consent screen is in **Testing** status, tokens expire after 7 days \u2014 publish the app to remove that limit.",
+        "how_to": "## Sign in with Google (OAuth 2.0 — Bring Your Own Client)\n\nAnton doesn't ship a hosted OAuth client for Google Search Console yet, so you'll create one in Google Cloud Console in about 3 minutes.\n\n### 1. Enable the API\n\n1. Open [Google Cloud Console](https://console.cloud.google.com/) and pick or create a project.\n2. Go to **APIs & Services → Library**, search for **Google Search Console API**, and click **Enable**.\n\n### 2. Configure the OAuth consent screen\n\n1. Go to **APIs & Services → OAuth consent screen**.\n2. Choose **External** (or **Internal** if this is a Workspace org) and click **Create**.\n3. Fill in app name (e.g. `Anton`) and your email, then save.\n4. Under **Scopes**, add `webmasters.readonly` and `userinfo.email`.\n5. Under **Test users**, add the Google account you'll authorize with.\n\n### 3. Create an OAuth client ID\n\n1. Go to **APIs & Services → Credentials → Create credentials → OAuth client ID**.\n2. Choose **Desktop app** as the application type.\n3. Copy the **Client ID** and **Client secret** — paste them into the fields below.\n\n### 4. Authorize\n\nClick **Submit**. Anton opens your browser to Google's consent screen. Sign in with the account that has Search Console access, review the permissions (`Read your Search Console data` and `See your email address`), and click **Continue**.\n\n### Notes\n\n- The account must be a verified owner or full user of the property in Search Console.\n- To revoke access later, visit [Third-party apps with account access](https://myaccount.google.com/permissions) and remove the entry.\n- If your consent screen is in **Testing** status, tokens expire after 7 days — publish the app to remove that limit.",
         "help_url": "https://developers.google.com/webmaster-tools/v1/how-tos/authorizing",
         "fields": [
           {
@@ -59,7 +59,7 @@
             "type": "text",
             "required": true,
             "placeholder": "123456789012-abcdef.apps.googleusercontent.com",
-            "description": "From Google Cloud Console \u2192 APIs & Services \u2192 Credentials. Use a Desktop app OAuth client."
+            "description": "From Google Cloud Console → APIs & Services → Credentials. Use a Desktop app OAuth client."
           },
           {
             "name": "client_secret",
@@ -67,7 +67,7 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "description": "Paired with the client ID \u2014 copied from the same credential row in Cloud Console."
+            "description": "Paired with the client ID — copied from the same credential row in Cloud Console."
           }
         ]
       },
@@ -76,7 +76,7 @@
         "label": "Service Account",
         "description": "Use a Google service account JSON key for server-to-server access. Ideal for automated pipelines where interactive login isn't possible.",
         "recommended": false,
-        "how_to": "## Service Account Access\n\nUse this method for automated or headless setups. The service account must be granted access to the Search Console property by a verified owner.\n\n### 1. Create a service account\n\n1. Open [Google Cloud Console](https://console.cloud.google.com/) \u2192 **IAM & Admin \u2192 Service Accounts \u2192 Create service account**.\n2. Give it a name like `anton-search-console` and click **Done**.\n3. Open the account, go to the **Keys** tab, and click **Add key \u2192 Create new key \u2192 JSON**. Download the file.\n\n### 2. Enable the API\n\n1. Go to **APIs & Services \u2192 Library**, search for **Google Search Console API**, and click **Enable**.\n\n### 3. Grant the service account access in Search Console\n\n1. Open [Google Search Console](https://search.google.com/search-console).\n2. Select the property you want Anton to access.\n3. Go to **Settings \u2192 Users and permissions \u2192 Add user**.\n4. Enter the service account's email address (ends in `.iam.gserviceaccount.com`) and set permission to **Full**.\n\n### 4. Paste the key\n\nCopy the entire contents of the downloaded JSON key file and paste it into **Service Account JSON** below.\n\n### Notes\n\n- The service account email must be added to each Search Console property individually.\n- Rotate keys in Cloud Console if the key is ever exposed. Re-paste the new JSON in Anton to reconnect.",
+        "how_to": "## Service Account Access\n\nUse this method for automated or headless setups. The service account must be granted access to the Search Console property by a verified owner.\n\n### 1. Create a service account\n\n1. Open [Google Cloud Console](https://console.cloud.google.com/) → **IAM & Admin → Service Accounts → Create service account**.\n2. Give it a name like `anton-search-console` and click **Done**.\n3. Open the account, go to the **Keys** tab, and click **Add key → Create new key → JSON**. Download the file.\n\n### 2. Enable the API\n\n1. Go to **APIs & Services → Library**, search for **Google Search Console API**, and click **Enable**.\n\n### 3. Grant the service account access in Search Console\n\n1. Open [Google Search Console](https://search.google.com/search-console).\n2. Select the property you want Anton to access.\n3. Go to **Settings → Users and permissions → Add user**.\n4. Enter the service account's email address (ends in `.iam.gserviceaccount.com`) and set permission to **Full**.\n\n### 4. Paste the key\n\nCopy the entire contents of the downloaded JSON key file and paste it into **Service Account JSON** below.\n\n### Notes\n\n- The service account email must be added to each Search Console property individually.\n- Rotate keys in Cloud Console if the key is ever exposed. Re-paste the new JSON in Anton to reconnect.",
         "help_url": "https://developers.google.com/webmaster-tools/v1/how-tos/authorizing#service-account",
         "fields": [
           {
@@ -97,6 +97,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/google_search_console.svg"
+  },
+  "logo_url": "logos/google_search_console.svg"
 }

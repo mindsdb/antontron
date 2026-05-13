@@ -1016,8 +1016,15 @@ async def _build_chat_session(
     workspace.apply_env_to_process()
 
     anton_dir = base / ".anton"
-    artifacts_dir = Path(getattr(settings, "artifacts_dir", None) or settings.output_dir)
-    context_dir = Path(settings.context_dir)
+    def _settings_path(value: object, fallback: Path) -> Path:
+        raw = str(value or "").strip()
+        if not raw:
+            return fallback
+        path = Path(raw).expanduser()
+        return path if path.is_absolute() else base / path
+
+    artifacts_dir = anton_dir / "artifacts"
+    context_dir = _settings_path(getattr(settings, "context_dir", None), anton_dir / "context")
     episodes_dir = anton_dir / "episodes"
     project_memory_dir = anton_dir / "memory"
     for directory in (artifacts_dir, context_dir, episodes_dir, project_memory_dir):

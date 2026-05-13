@@ -6,6 +6,8 @@
 
 # Anton Desktop
 
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/mindsdb/cowork)
+
 The official Electron desktop app for **[Anton](https://github.com/mindsdb/anton)** — MindsDB's autonomous AI coworker. Cross-platform (macOS + Windows), auto-installs Anton on first run, and provides a chat-based cowork UI backed by a FastAPI sidecar, with Minds integration.
 
 ---

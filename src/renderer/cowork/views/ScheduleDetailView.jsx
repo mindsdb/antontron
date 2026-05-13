@@ -378,7 +378,7 @@ export default function ScheduleDetailView({
     }}>
       {/* Breadcrumb header — matches ProjectsView typography exactly
           so drilldown surfaces feel like one family. */}
-      <div style={{
+      <div className="sched-crumb" style={{
         padding: '14px 28px 8px',
         display: 'flex', alignItems: 'center', gap: 4,
       }}>
@@ -392,7 +392,7 @@ export default function ScheduleDetailView({
         }}>{task.title || 'Untitled schedule'}</span>
       </div>
 
-      <div style={{ padding: '6px 28px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="sched-body" style={{ padding: '6px 28px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {error && (
           <div style={{
@@ -404,14 +404,14 @@ export default function ScheduleDetailView({
         )}
 
         {/* Hero card — title, status, run-now, enable toggle, next-run */}
-        <div style={{
+        <div className="sched-hero" style={{
           padding: '18px 22px',
           background: 'var(--surface)',
           border: '1px solid var(--line)',
           borderRadius: 14,
           display: 'flex', flexDirection: 'column', gap: 14,
         }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div className="sched-hero-top" style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{
                 fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600,
@@ -428,7 +428,7 @@ export default function ScheduleDetailView({
                 </span>
               </div>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <div className="sched-hero-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
               <EnableToggle
                 enabled={task.enabled}
                 busy={busy}
@@ -509,14 +509,14 @@ export default function ScheduleDetailView({
         </div>
 
         {/* Health card. */}
-        <div style={{
+        <div className="sched-health" style={{
           padding: '18px 22px',
           background: 'var(--surface)',
           border: '1px solid var(--line)',
           borderRadius: 14,
           display: 'flex', flexDirection: 'column', gap: 14,
         }}>
-          <div style={{
+          <div className="sched-health-top" style={{
             display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
             gap: 12,
           }}>
@@ -530,7 +530,7 @@ export default function ScheduleDetailView({
                 marginTop: 2,
               }}>Last {Math.min(stats.total, 30)} runs · success rate, duration, error frequency.</div>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14 }}>
+            <div className="sched-health-metrics" style={{ display: 'inline-flex', alignItems: 'center', gap: 14 }}>
               <Metric label="Total runs" value={stats.total} />
               <Metric
                 label="Success rate"

@@ -15,6 +15,7 @@ import { WorkingFolderBox, ContextBox, ScheduledBox } from '../components/rail';
 import { TaskList } from '../components/task';
 import { ProjectCard } from '../components/project/ProjectCard';
 import NewProjectModal from '../components/project/NewProjectModal';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 import {
   PageHeader,
   FilterRow,
@@ -140,7 +141,7 @@ function activitySummaryFor(project, tasks) {
 // type, height, padding and accent-glow consistent across pages.
 function NewProjectButton({ onClick }) {
   return (
-    <button type="button" className="btn-primary" onClick={onClick}>
+    <button type="button" className="btn-primary proj-new-action" onClick={onClick}>
       {Ico.plus(14)} New project
     </button>
   );
@@ -824,7 +825,7 @@ function ProjectDetail({
   };
 
   return (
-    <div style={{
+    <div className="project-detail-root" style={{
       flex: 1, minHeight: 0,
       display: 'grid',
       gridTemplateColumns: railOpen ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr) 0px',
@@ -845,6 +846,7 @@ function ProjectDetail({
         {/* Floating expand-rail button (mirrors ChatView). */}
         <button
           type="button"
+          className="project-detail-rail-toggle"
           onClick={() => setRailOpen(true)}
           title="Expand panel"
           aria-label="Expand panel"
@@ -923,12 +925,31 @@ function ProjectDetail({
                   }}
                 />
               ) : (
-                <span title={project.name} style={{
-                  fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
-                  letterSpacing: '0.04em', color: 'var(--ink)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  minWidth: 0, flex: '0 1 auto',
-                }}>{project.name}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={project.name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (menuRect) { setMenuRect(null); return; }
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setMenuRect(rect);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setMenuRect((cur) => (cur ? null : rect));
+                    }
+                  }}
+                  style={{
+                    fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+                    letterSpacing: '0.04em', color: 'var(--ink)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    minWidth: 0, flex: '0 1 auto',
+                    cursor: 'pointer',
+                  }}
+                >{project.name}</span>
               )}
               {!editing && (
                 <button
@@ -1016,7 +1037,7 @@ function ProjectDetail({
         </div>
       </div>
 
-      <aside style={{
+      <aside className="project-detail-rail" style={{
         background: 'transparent',
         padding: '14px 14px 22px',
         visibility: railOpen ? 'visible' : 'hidden',
@@ -1027,12 +1048,13 @@ function ProjectDetail({
         minWidth: 0,
         WebkitAppRegion: 'no-drag',
       }}>
-        <div style={{
+        <div className="project-detail-rail-toggle-row" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           flexShrink: 0,
         }}>
           <button
             type="button"
+            className="project-detail-rail-toggle"
             onClick={() => setRailOpen(false)}
             title="Collapse panel"
             aria-label="Collapse panel"
@@ -1083,9 +1105,14 @@ export default function ProjectsView({
   onOpenSchedule,
 }) {
   const { pinned, togglePin } = usePinnedProjects();
+  const { isMobile } = useBreakpoint();
   const [view, setView] = useState(() =>
     localStorage.getItem('anton:projects-view') === 'list' ? 'list' : 'grid'
   );
+  // List rows use a 5-column grid that breaks at phone widths. Force
+  // grid mode on mobile so the toggle isn't needed; the user's
+  // persisted desktop preference is preserved when they go back wide.
+  const effectiveView = isMobile ? 'grid' : view;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('recent');
   const [menuFor, setMenuFor] = useState(null); // { project, rect }
@@ -1116,6 +1143,16 @@ export default function ProjectsView({
   const handleNewProject = () => {
     setCreating(true);
   };
+
+  // External open trigger — fired by the mobile FAB menu's "New
+  // project" option. The modal lives inside ProjectsView, so the FAB
+  // navigates to this route and dispatches the event once we're
+  // mounted (App.jsx handles the timing).
+  useEffect(() => {
+    const onOpen = () => setCreating(true);
+    window.addEventListener('anton:open-new-project', onOpen);
+    return () => window.removeEventListener('anton:open-new-project', onOpen);
+  }, []);
   const handleCreateProject = async (name) => {
     if (onCreateProject) await onCreateProject({ name });
     else await createProjectApi(name);
@@ -1258,7 +1295,7 @@ export default function ProjectsView({
           />
         }
         sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
-        view={<ViewToggle value={view} onChange={setView} />}
+        view={<span className="proj-view-toggle"><ViewToggle value={view} onChange={setView} /></span>}
         counts={
           <ProjectsCounts
             search={search}
@@ -1279,7 +1316,7 @@ export default function ProjectsView({
         </div>
       ) : projects.length === 0 ? (
         <EmptyState onNewProject={handleNewProject} />
-      ) : view === 'grid' ? (
+      ) : effectiveView === 'grid' ? (
         <div style={{
           padding: '6px 32px 60px',
           display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14,

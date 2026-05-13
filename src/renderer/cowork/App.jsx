@@ -6,6 +6,7 @@ import { pickConnectWelcome } from './lib/connectWelcomes';
 // provider setup. The cowork app is mounted by CoworkApp.tsx only after
 // those gates pass, so AppCore renders unconditionally here.
 import Sidebar from './components/Sidebar';
+import MobileShell from './components/MobileShell';
 import { ConfirmModal } from './components/ConfirmModal';
 import HomeView from './views/HomeView';
 import ChatView from './views/ChatView';
@@ -533,6 +534,7 @@ function AppCore() {
     defaultModel: 'claude-sonnet-4-6',
     autoPin: true,
     showDots: true,
+    showCounters: true,
     accentVariant: 'aqua',
   });
 
@@ -642,7 +644,7 @@ function AppCore() {
   // the user can navigate via it directly. Locking outside chat
   // means the collapse affordance is hidden in those views too.
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
-  const { isNarrow } = useBreakpoint();
+  const { isMobile, isNarrow } = useBreakpoint();
   // On narrow screens (< 900px), sidebar is a slide-over overlay — track open state separately.
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   // Routes where the user can collapse the sidebar. Currently:
@@ -726,6 +728,15 @@ function AppCore() {
       window.gravityField.setTheme(theme);
     }
   }, [theme]);
+
+  // Mirror the Dot grid setting to a body class so the gravity-field
+  // canvas can be hidden via CSS. `display: none` also lets the
+  // canvas's requestAnimationFrame loop idle when the user has
+  // turned the pattern off — no draw cost while invisible.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.body.classList.toggle('gf-dots-off', settings.showDots === false);
+  }, [settings.showDots]);
 
   const [route, setRoute] = useState('home');         // home | task | projects | scheduled | schedule-detail | artifacts | dispatch | customize | settings
   // Keep a ref of the live route so the keydown listener (bound
@@ -895,6 +906,13 @@ function AppCore() {
   useEffect(() => {
     if (bootConfigRedirectFiredRef.current) return;
     if (!serverOnline) return;
+    // Web sessions (mobile or desktop browser) always land on the
+    // new-task composer regardless of config state. The auto-redirect
+    // to Settings is Electron-only — there a missing provider means
+    // the install can't reach any LLM at all. In the hosted web
+    // shell, config is centralized server-side, so first-paint
+    // shouldn't shove the user into a configuration screen.
+    if (host.isWeb) return;
     if (health.config_ready === false) {
       bootConfigRedirectFiredRef.current = true;
       setRoute('settings');
@@ -2306,8 +2324,9 @@ function AppCore() {
       // intercept drag on their own surface.
       WebkitAppRegion: 'drag',
     }}>
-      {/* Mobile backdrop — dims content behind the open drawer */}
-      {isNarrow && (
+      {/* Mobile backdrop — dims content behind the open drawer. Suppressed
+          on isMobile widths where MobileShell renders its own scrim. */}
+      {isNarrow && !isMobile && (
         <div
           onClick={() => setMobileSidebarOpen(false)}
           style={{
@@ -2324,9 +2343,10 @@ function AppCore() {
 
       {/*
         Floating hamburger — on desktop: visible when sidebar is collapsed
-        (chat route only). On mobile: always visible when the drawer is closed.
-        Always mounted so it can fade in/out instead of popping.
+        (chat route only). On narrow desktop: opens the slide-over sidebar.
+        Suppressed entirely on isMobile — MobileShell has its own hamburger.
       */}
+      {!isMobile && (
       <button
         onClick={() => isNarrow ? setMobileSidebarOpen(true) : setSidebarCollapsed(false)}
         title="Open sidebar"
@@ -2352,12 +2372,16 @@ function AppCore() {
       >
         {Ico.sidebarExpandRight(15)}
       </button>
+      )}
 
       {/*
-        Sidebar — on mobile it's a fixed overlay drawer; on desktop it's
-        a normal flex item. `display: contents` makes the wrapper transparent
-        to the flex layout so Sidebar participates as a direct flex child.
+        Sidebar — on narrow desktop it's a fixed overlay drawer; on desktop
+        it's a normal flex item. `display: contents` makes the wrapper
+        transparent to the flex layout so Sidebar participates as a direct
+        flex child. Suppressed entirely on isMobile — MobileShell replaces
+        the desktop sidebar with a mobile-native drawer.
       */}
+      {!isMobile && (
       <div
         className={isNarrow ? 'sidebar-overlay-wrap' : undefined}
         style={isNarrow ? {
@@ -2406,6 +2430,7 @@ function AppCore() {
           }}
           serverBusy={serverBusy}
           serverBusyKind={serverBusyKind}
+          showCounters={settings.showCounters !== false}
           updateAvailable={updateStatus?.phase === 'available' ? { version: updateStatus.version } : null}
           onApplyUpdate={handleApplyUpdate}
           onShowServerHelp={() => setServerHelpOpen(true)}
@@ -2441,7 +2466,10 @@ function AppCore() {
           }}
         />
       </div>
+      )}
 
+      {(() => {
+      const mainEl = (
       <main style={{
         flex: 1, minWidth: 0, minHeight: 0,
         display: 'flex', flexDirection: 'column',
@@ -2594,14 +2622,24 @@ function AppCore() {
             onResume={handleResumeSchedule}
             onRunNow={handleRunScheduleNow}
             onOpenRunSession={(sessionId) => {
-              // Best-effort: jump to the conversation if it's in our
-              // task list; otherwise no-op so we don't navigate away
-              // to a blank page.
-              const t = tasks.find((x) => x.id === sessionId);
-              if (t) {
-                setActiveTaskId(t.id);
-                setRoute('task');
-              }
+              if (!sessionId) return;
+              // Scheduled runs create real conversations on the
+              // server, but they may not be in our local recents list
+              // yet (e.g. the run fired while we were on another
+              // device or before this session's last fetch). Refresh
+              // tasks in parallel so currentTask resolves once the
+              // server response lands, and route immediately so the
+              // user sees the navigation happen.
+              fetchSessions().then((data) => {
+                if (Array.isArray(data)) {
+                  setTasks((prev) =>
+                    mergeTasksFromServer(data, prev)
+                      .filter((t) => !deletedTaskIdsRef.current.has(t.id))
+                  );
+                }
+              }).catch(() => {});
+              setActiveTaskId(sessionId);
+              setRoute('task');
             }}
           />
         )}
@@ -2674,6 +2712,60 @@ function AppCore() {
           />
         )}
       </main>
+      );
+      return isMobile ? (
+        <MobileShell
+          route={route}
+          currentTask={currentTask}
+          selectedProject={selectedProject}
+          tasks={tasks}
+          projects={projects}
+          scheduled={scheduled}
+          artifacts={artifacts}
+          onNavigate={navigate}
+          onSelectTask={selectTask}
+          onSelectProject={(p) => {
+            // Drawer → project tap with tasks: show the project's task
+            // list (ProjectsView in detail mode). MobileShell only
+            // dispatches here when there ARE tasks; the empty-project
+            // case routes through onNewTaskInProject instead. On a
+            // mobile viewport, project-detail's rail (Working folder,
+            // Context, Scheduled) stacks below the task list — see
+            // the @media block in globals.css.
+            if (p) setSelectedProject(p);
+            setRoute('projects');
+          }}
+          onNewTaskInProject={(p) => {
+            // Empty project → drop the user into the composer with
+            // this project preselected. HomeView's first send creates
+            // the task on the server with projectName attached.
+            if (p) setSelectedProject(p);
+            setActiveTaskId(null);
+            setRoute('home');
+          }}
+          onOpenSchedule={(scheduleId) => {
+            setSelectedScheduleId(scheduleId);
+            setRoute('schedule-detail');
+          }}
+          onNewTask={newTask}
+          onNewProject={() => {
+            // Mobile FAB → "New project". The modal lives inside
+            // ProjectsView, so navigate there first (clearing any
+            // selected project so we land on the grid, not detail),
+            // then dispatch the event ProjectsView listens for. The
+            // small delay lets React commit ProjectsView's mount
+            // before the listener attaches.
+            setSelectedProject(null);
+            setRoute('projects');
+            setTimeout(() => {
+              window.dispatchEvent(new CustomEvent('anton:open-new-project'));
+            }, 60);
+          }}
+        >
+          {mainEl}
+        </MobileShell>
+      ) : mainEl;
+      })()}
       <SearchModal
         open={searchOpen}
         onClose={() => setSearchOpen(false)}

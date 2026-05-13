@@ -564,6 +564,32 @@ button.meta-pill:hover { background: var(--surface-0); border-color: var(--borde
   animation: fadein-down .14s ease-out;
 }
 
+/* Connectors row inside the attach (+) menu — smooth expand/collapse */
+.menu-connectors-accordion {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.24s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.menu-connectors-accordion.is-open {
+  grid-template-rows: 1fr;
+}
+.menu-connectors-accordion__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+.menu-connectors-accordion__scroll {
+  max-height: 220px;
+  overflow-y: auto;
+  border-top: 1px solid var(--border-0);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu-connectors-accordion {
+    transition: none;
+  }
+}
+
 /* ─── Customize ───────────────────────────────────────────────────────────── */
 .customize-view {
   flex: 1;
@@ -2725,6 +2751,38 @@ body[data-theme="dark"] .orbit-morph[data-state="done"] {
 }
 .toggle.on .toggle-thumb { left: 18px; }
 
+/* ─── Settings "Set" badge pulse ─────────────────────────────────────────
+   Drives the soft glow on credential rows that are stored AND on the
+   active provider's hot path. Pulses the box-shadow halo only — the
+   pill itself stays still, so the effect reads as breathing rather
+   than flicker. */
+@keyframes set-badge-pulse {
+  0%, 100% {
+    box-shadow:
+      0 0 0 1px rgba(124,196,182,0.20),
+      0 0 10px rgba(124,196,182,0.32),
+      0 0 22px rgba(93,146,135,0.18);
+  }
+  50% {
+    box-shadow:
+      0 0 0 1px rgba(124,196,182,0.30),
+      0 0 18px rgba(124,196,182,0.55),
+      0 0 34px rgba(93,146,135,0.32);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Honour OS-level reduced-motion. Hold the mid-pulse state so the
+     badge still reads as "active" without animating. */
+  @keyframes set-badge-pulse {
+    0%, 100% {
+      box-shadow:
+        0 0 0 1px rgba(124,196,182,0.25),
+        0 0 14px rgba(124,196,182,0.45),
+        0 0 28px rgba(93,146,135,0.25);
+    }
+  }
+}
+
 /* ─── Coming soon banner ─────────────────────────────────────────────────── */
 .coming-soon-banner {
   display: flex; align-items: center; gap: 10px;
@@ -3485,14 +3543,17 @@ body[data-theme="dark"] .chat-shell .chat-composer-dock > div {
   position: relative;
 }
 
-/* Floating composer override — promotes the composer-wrap visual to match
-   docs/design-guidelines/chat.html (18px radius, deep shadow, much shorter
-   single-line input, borderless tool icons). */
+/* Floating composer override — chat shell (18px radius, compact field).
+   Toolbar + / Send insets and control sizes match the default composer
+   (home, project prompt) so controls land in the same place inside the card. */
 .chat-floating-composer .composer-wrap {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 18px;
-  padding: 14px 16px 12px;
+  /* 10px horizontal + textarea side padding = same 18px text inset as
+     .composer-textarea on home; toolbar is flush on the bottom so the card
+     doesn't pick up a double band (toolbar pb + wrap pb). */
+  padding: 14px 10px 12px;
   /* Subtle all-around lift — replaces the heavier downward shadow we
      used to pair with the bottom gradient mask. With the mask gone, a
      soft even glow reads as "floating panel" without darkening the
@@ -3505,16 +3566,21 @@ body[data-theme="dark"] .chat-shell .chat-composer-dock > div {
   font-family: var(--font-body);
   font-size: 14px;
   line-height: 1.45;
-  padding: 2px 2px 12px;
+  /* 10px (wrap) + 8px = 18px body inset — matches home .composer-textarea */
+  /* Tighter bottom than default textarea: toolbar supplies top spacing so we
+     don't stack 12px + 10px and leave a tall band under the input line. */
+  padding: 2px 8px 6px;
   min-height: 22px;
 }
 .chat-floating-composer .composer-toolbar {
-  padding: 0;
-  gap: 4px;
+  /* Horizontal inset comes from .composer-wrap; no bottom padding — wrap's
+     padding-bottom gives the only inset below + / Send (matches pre-alignment). */
+  padding: 6px 0 0;
+  gap: 6px;
 }
 .chat-floating-composer .composer-icon,
 .chat-floating-composer .composer-mic {
-  width: 30px; height: 30px; border-radius: 8px;
+  width: 32px; height: 32px; border-radius: 8px;
   border: 0; background: transparent;
   color: var(--ink-2);
 }
@@ -3550,3 +3616,658 @@ body[data-theme="dark"] .chat-floating-composer .composer-wrap {
     0 8px 32px rgba(15, 16, 17, 0.10),
     0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
 }
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Mobile shell
+   Active only when the cowork SPA renders inside MobileShell (viewport
+   width < 640px). Reuses the app's design tokens so light/dark both
+   work without a separate palette.
+   ───────────────────────────────────────────────────────────────────── */
+
+.mshell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text-default);
+  font-family: var(--font-sans);
+  /* Honor iOS safe areas at the device edges. */
+  padding-top: env(safe-area-inset-top, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  padding-left: env(safe-area-inset-left, 0);
+  padding-right: env(safe-area-inset-right, 0);
+}
+
+.mshell__top {
+  flex: 0 0 auto;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border-subtle);
+  position: relative;
+  z-index: 2;
+}
+
+.mshell__title {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  padding: 0 4px;
+}
+
+.mshell__action {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-default);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease;
+}
+.mshell__action:active { background: var(--surface-2); }
+
+/* Mirrors the hamburger's 40px footprint on the right side so the
+   title stays optically centered now that the top-bar "+" is gone. */
+.mshell__top-spacer { display: inline-block; width: 40px; height: 40px; }
+
+/* Hamburger button — three bars that animate into an X when open. */
+.mshell__hamburger {
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms ease;
+}
+.mshell__hamburger:active { background: var(--surface-2); }
+.mshell__hamburger span {
+  display: block;
+  width: 20px;
+  height: 2px;
+  background: var(--text-default);
+  border-radius: 2px;
+  transform-origin: center;
+  transition:
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 220ms ease,
+    width 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mshell__hamburger.is-open span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+  width: 22px;
+}
+.mshell__hamburger.is-open span:nth-child(2) {
+  opacity: 0;
+  transform: scaleX(0);
+}
+.mshell__hamburger.is-open span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+  width: 22px;
+}
+
+.mshell__body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+  background: var(--bg);
+}
+/* Reset the global drag region inside the mobile body so the OS doesn't
+   try to drag the window on touch (Electron only — harmless on web). */
+.mshell__body, .mshell__body * { -webkit-app-region: no-drag; }
+
+.mshell__scrim {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.42);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 50;
+  transition: opacity 280ms cubic-bezier(0.32, 0.72, 0, 1);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.mshell__scrim.is-open { opacity: 1; pointer-events: auto; }
+
+.mshell__drawer {
+  position: fixed;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: min(86vw, 340px);
+  background: var(--surface);
+  border-right: 1px solid var(--border-subtle);
+  box-shadow: 4px 0 28px rgba(0, 0, 0, 0.22);
+  transform: translateX(-105%);
+  transition: transform 360ms cubic-bezier(0.22, 1, 0.36, 1);
+  z-index: 51;
+  display: flex;
+  flex-direction: column;
+  padding-top: env(safe-area-inset-top, 0);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+}
+.mshell__drawer.is-open { transform: translateX(0); }
+
+.mshell__drawer-head {
+  flex: 0 0 auto;
+  height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 12px 0 18px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+/* Matches .anton-sidebar__wordmark (the desktop sidebar's ANTON
+   brand): font-display, uppercase, the same letter-spacing — so the
+   mobile drawer shares the same brand typography. Size bumped from
+   the sidebar's 11px since the drawer header has more vertical room. */
+.mshell__drawer-title {
+  font-family: var(--font-display);
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--ink);
+}
+body[data-theme="dark"] .mshell__drawer-title {
+  text-shadow: 0 0 14px var(--accent-glow);
+}
+.mshell__close {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: transparent;
+  border: none;
+  color: var(--text-muted);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.mshell__close:active { background: var(--surface-2); }
+
+.mshell__drawer-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 8px 8px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* Rows — used for nav entries, accordion items, drawer top buttons. */
+.mshell-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-default);
+  padding: 12px 12px;
+  border-radius: 12px;
+  cursor: pointer;
+  font: inherit;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 140ms ease;
+  min-height: 48px;
+}
+.mshell-row:active { background: var(--surface-2); }
+.mshell-row.is-active { background: var(--accent-bg); color: var(--text-strong); }
+.mshell-row--top { padding: 14px 12px; }
+.mshell-row__text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.mshell-row__primary {
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--text-strong);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mshell-row__secondary {
+  font-size: 12px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.mshell-row__badge {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mshell-row__chev {
+  color: var(--text-faint);
+  display: inline-flex;
+  align-items: center;
+}
+
+/* Accordion section. The chevron rotates 90° down when expanded. */
+.mshell-accordion {
+  border-bottom: 1px solid var(--border-subtle);
+}
+.mshell-accordion:last-of-type { border-bottom: none; }
+.mshell-accordion__head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  background: transparent;
+  border: none;
+  padding: 14px 12px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-strong);
+  -webkit-tap-highlight-color: transparent;
+  border-radius: 12px;
+  transition: background-color 140ms ease;
+}
+.mshell-accordion__head:active { background: var(--surface-2); }
+.mshell-accordion__label {
+  flex: 1;
+  text-align: left;
+  font-size: 15px;
+  font-weight: 600;
+}
+.mshell-accordion__count {
+  min-width: 22px;
+  height: 22px;
+  padding: 0 7px;
+  border-radius: 11px;
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mshell-accordion__chev {
+  display: inline-flex;
+  color: var(--text-muted);
+  transform: rotate(0deg);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mshell-accordion__chev.is-open { transform: rotate(90deg); }
+.mshell-accordion__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 320ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mshell-accordion__body.is-open { grid-template-rows: 1fr; }
+.mshell-accordion__inner {
+  overflow: hidden;
+  min-height: 0;
+}
+.mshell-accordion__inner > .mshell-row {
+  padding-left: 22px;
+  min-height: 44px;
+}
+
+.mshell-empty {
+  padding: 12px 22px 16px;
+  font-size: 13px;
+  color: var(--text-faint);
+}
+.mshell-divider {
+  height: 1px;
+  background: var(--border-subtle);
+  margin: 10px 12px;
+}
+
+/* FAB — anchored bottom-right inside the mobile body. Sits above the
+   home-indicator on iOS via env(safe-area-inset-bottom). */
+.mshell__fab {
+  position: absolute;
+  right: 18px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0));
+  width: 56px;
+  height: 56px;
+  border-radius: 28px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow:
+    0 6px 18px rgba(0, 0, 0, 0.22),
+    0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+  -webkit-tap-highlight-color: transparent;
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1), background-color 160ms ease;
+  z-index: 5;
+}
+.mshell__fab:active {
+  transform: scale(0.94);
+  background: var(--accent-2);
+}
+/* When the FAB menu is open, rotate the "+" 45° so it reads as a
+   close affordance. Reused press-state scale runs on top via :active. */
+.mshell__fab.is-open {
+  transform: rotate(45deg);
+  background: var(--accent-2);
+}
+
+/* Tap-outside scrim. Transparent — its only job is to catch taps
+   that should dismiss the FAB menu. Sits below the menu (z 4) so
+   the menu's tap targets stay live. */
+.mshell__fab-scrim {
+  position: fixed;
+  inset: 0;
+  background: transparent;
+  z-index: 4;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms ease;
+}
+.mshell__fab-scrim.is-open { opacity: 1; pointer-events: auto; }
+
+/* Popover anchored to bottom-right above the FAB. Sized to its
+   content; slides up + fades in. Pointer-events suppressed when
+   collapsed so it doesn't block content underneath. */
+.mshell__fab-menu {
+  position: absolute;
+  right: 18px;
+  bottom: calc(86px + env(safe-area-inset-bottom, 0));
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.22),
+    0 1px 0 rgba(255, 255, 255, 0.02) inset;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  z-index: 6;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(8px) scale(0.96);
+  transform-origin: 100% 100%;
+  transition:
+    opacity 200ms cubic-bezier(0.32, 0.72, 0, 1),
+    transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.mshell__fab-menu.is-open {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateY(0) scale(1);
+}
+.mshell__fab-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: transparent;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font: inherit;
+  color: var(--text-default);
+  text-align: left;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 140ms ease;
+  min-height: 44px;
+}
+.mshell__fab-menu-item:active { background: var(--surface-2); }
+.mshell__fab-menu-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+.mshell__fab-menu-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.mshell__fab-menu-primary {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-strong);
+}
+.mshell__fab-menu-secondary {
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+/* When mobile shell is active, hide the desktop floating theme toggle —
+   the drawer carries the Settings entry. Mobile shell renders only at
+   < 640px, where the desktop floating toggle would overlap the FAB. */
+@media (max-width: 639.98px) {
+  .floating-theme-toggle { display: none; }
+
+  /* Project detail (ProjectsView in detail mode) — desktop puts the
+     rail (Working folder + Context + Scheduled) in a 320px right
+     column. On a phone-width viewport, collapse to a single column
+     and drop the rail entirely — composer + task list only. Inline
+     style attributes in ProjectsView.jsx force the desktop grid, so
+     these overrides use !important. */
+  .project-detail-root {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: 1fr !important;
+  }
+  .project-detail-rail { display: none !important; }
+  .project-detail-rail-toggle,
+  .project-detail-rail-toggle-row { display: none !important; }
+
+  /* Settings — Section is `1fr 320px` (description | control) on
+     desktop. Stack on phone so the control column doesn't get pushed
+     off-screen. Tighter outer padding too — 28px gutters waste a lot
+     of horizontal space at 375px wide. */
+  .settings-section {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  .settings-scroll {
+    padding: 16px 14px calc(96px + env(safe-area-inset-bottom, 0)) !important;
+  }
+  /* Provider rows have their own 3-column inline grid (title |
+     api-key/url inputs | remove-button) that doesn't share the
+     Section component. Stack so the API key field gets the full
+     screen width; remove-button slides down to the end. */
+  .settings-provider-row {
+    grid-template-columns: 1fr !important;
+    gap: 10px !important;
+  }
+  .settings-provider-row > div:last-child {
+    justify-self: end;
+  }
+  /* Desktop-only Settings sections (animated background, nav-panel
+     counters) — no value on a phone. */
+  .settings-hide-mobile { display: none !important; }
+
+  /* Schedule detail (a scheduled task's full page) — desktop crams
+     three actions (Enable / Edit / Run now) plus a long title into
+     one row, and the Health card puts three metric tiles inline
+     with the description. Both go to two-row stacked layouts on a
+     phone. Outer gutters tighten too. */
+  .sched-crumb {
+    padding: 12px 14px 6px !important;
+  }
+  .sched-body {
+    padding: 4px 14px calc(96px + env(safe-area-inset-bottom, 0)) !important;
+  }
+  .sched-hero,
+  .sched-health {
+    padding: 14px 14px !important;
+    border-radius: 12px !important;
+  }
+  /* Hero top row: title block on top, action toolbar wraps to next
+     line so each control gets a proper tap target instead of being
+     squeezed against the title. */
+  .sched-hero-top {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .sched-hero-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .sched-hero-actions > * { flex: 0 0 auto; }
+  /* Run now is the primary action — let it grow to fill the row's
+     remaining width so it reads as the dominant CTA. */
+  .sched-hero-actions > .btn-primary { flex: 1 1 auto; justify-content: center; }
+
+  /* Health top row: description on top, metric tiles on their own
+     row with even spacing. */
+  .sched-health-top {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .sched-health-metrics {
+    display: flex !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+  }
+  .sched-health-metrics > * { flex: 1 1 0; min-width: 0; }
+
+  /* Memories / Skills library / Connect Apps publish — all use
+     fixed-width sidebars (300px or 360px) in a 2-col grid. Collapse
+     to single column on phone; the list stacks above the detail. */
+  .util-split,
+  .util-publish {
+    grid-template-columns: 1fr !important;
+    padding: 16px 14px calc(96px + env(safe-area-inset-bottom, 0)) !important;
+    gap: 14px !important;
+  }
+  /* The Skills view's sidebar uses a hard right border that reads as
+     a visible divider after stacking — soften it on phone. */
+  .util-split > div:first-child {
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  /* The mobile FAB menu is the single create entry on phone — hide
+     the in-page "+ New project" header button and the trailing
+     dashed tile in the projects grid so we don't show three "+"
+     affordances stacked on one screen. */
+  .proj-new-action,
+  .proj-new-tile { display: none !important; }
+
+  /* Grid/list view toggle — list mode breaks at phone widths
+     (5-column row), and the toggle takes up header space we don't
+     have. Force grid (see effectiveView in ProjectsView) and hide
+     the switch. */
+  .proj-view-toggle { display: none !important; }
+
+  /* Chat right-hand rail — only hide the FLOATING expand button on
+     mobile (.chat-rail-toggle). The CLOSE button inside the rail
+     (.chat-rail-close) stays visible so the user can dismiss the
+     fullscreen form panel. The mobile shell's hamburger drawer
+     covers the same surfaces that the expand button used to. */
+  .chat-rail-toggle { display: none !important; }
+
+  /* Make the rail overlay truly fullscreen on mobile so the data-
+     vault form fills the viewport instead of being a 320px-wide
+     slide-over. Inline styles supply the slide transform via
+     transform: translateX; we only override the static frame here. */
+  .chat-rail-aside {
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    padding-top: calc(env(safe-area-inset-top, 0) + 8px) !important;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0) + 14px) !important;
+  }
+
+  /* Home view (new task) — desktop has the orb sit inline to the
+     left of the greeting (negative margin pulls it outside the text
+     column). On phone widths, stack the orb on top of the greeting
+     and centre everything. Disable the horizontal travel transform
+     too so the orb stays centred through every boot phase. */
+  .home-greeting-row {
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    text-align: center !important;
+    gap: 14px !important;
+    font-size: 26px !important;
+  }
+  .home-orb {
+    margin-left: 0 !important;
+    transform: none !important;
+  }
+
+  /* Scratchpad modal — go fullscreen so a 94vw card with rounded
+     corners doesn't waste space inside a fixed scrim at phone widths. */
+  .scratchpad-modal {
+    width: 100vw !important;
+    height: 100vh !important;
+    height: 100dvh !important;
+    max-width: none !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+  }
+  /* Tighter horizontal padding so each cell's output/code can use
+     the full screen width. Was pl-6 pr-6 (24px) — overkill on phone. */
+  .scratchpad-cell {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+  /* Collapse the auto | 1fr grid (step-badge | content) into a
+     single column. The step badge stacks on its own row above the
+     description; output and code blocks then occupy the full width
+     instead of being indented under the badge column. */
+  .scratchpad-cell-grid {
+    grid-template-columns: 1fr !important;
+    column-gap: 0 !important;
+    row-gap: 4px !important;
+  }
+}
+

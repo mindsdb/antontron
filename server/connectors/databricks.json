@@ -33,9 +33,9 @@
       {
         "id": "personal-access-token",
         "label": "Personal Access Token",
-        "description": "Paste your Databricks workspace URL, a personal access token (starts with dapi\u2026), and the HTTP path of your SQL warehouse. Quickest way to connect \u2014 no OAuth app setup required.",
+        "description": "Paste your Databricks workspace URL, a personal access token (starts with dapi…), and the HTTP path of your SQL warehouse. Quickest way to connect — no OAuth app setup required.",
         "recommended": true,
-        "how_to": "## Connect with a Personal Access Token\n\nDatabricks personal access tokens (PATs) start with `dapi` and are the simplest way to authenticate programmatically.\n\n### 1 \u2014 Find your workspace URL\n\n1. Log in to your Databricks workspace.\n2. Copy the URL from your browser address bar up to and including `.azuredatabricks.net`, `.gcp.databricks.com`, or `.databricks.com` \u2014 for example: `https://adb-1234567890123456.7.azuredatabricks.net`.\n\n### 2 \u2014 Generate a personal access token\n\n1. In your Databricks workspace, click your avatar (top-right) \u2192 **Settings**.\n2. Navigate to **Developer \u2192 Access tokens \u2192 Manage**.\n3. Click **Generate new token**, add a comment like `Anton`, and choose a lifetime (or leave blank for no expiry).\n4. Copy the token \u2014 it starts with `dapi` and is shown **only once**.\n\n### 3 \u2014 Find the SQL warehouse HTTP path\n\n1. In the left sidebar, go to **SQL Warehouses** (or **Compute \u2192 SQL Warehouses**).\n2. Click your warehouse \u2192 **Connection details** tab.\n3. Copy the **HTTP Path** \u2014 it looks like `/sql/1.0/warehouses/abc123def456`.\n\n### Notes\n\n- Store the token securely \u2014 if lost, generate a new one and update this connector.\n- Workspace admins can revoke tokens under **Admin Console \u2192 Access control \u2192 Personal access tokens**.\n- If your workspace uses IP allowlisting, ensure Anton's host is permitted.",
+        "how_to": "## Connect with a Personal Access Token\n\nDatabricks personal access tokens (PATs) start with `dapi` and are the simplest way to authenticate programmatically.\n\n### 1 — Find your workspace URL\n\n1. Log in to your Databricks workspace.\n2. Copy the URL from your browser address bar up to and including `.azuredatabricks.net`, `.gcp.databricks.com`, or `.databricks.com` — for example: `https://adb-1234567890123456.7.azuredatabricks.net`.\n\n### 2 — Generate a personal access token\n\n1. In your Databricks workspace, click your avatar (top-right) → **Settings**.\n2. Navigate to **Developer → Access tokens → Manage**.\n3. Click **Generate new token**, add a comment like `Anton`, and choose a lifetime (or leave blank for no expiry).\n4. Copy the token — it starts with `dapi` and is shown **only once**.\n\n### 3 — Find the SQL warehouse HTTP path\n\n1. In the left sidebar, go to **SQL Warehouses** (or **Compute → SQL Warehouses**).\n2. Click your warehouse → **Connection details** tab.\n3. Copy the **HTTP Path** — it looks like `/sql/1.0/warehouses/abc123def456`.\n\n### Notes\n\n- Store the token securely — if lost, generate a new one and update this connector.\n- Workspace admins can revoke tokens under **Admin Console → Access control → Personal access tokens**.\n- If your workspace uses IP allowlisting, ensure Anton's host is permitted.",
         "help_url": "https://docs.databricks.com/en/dev-tools/auth/pat.html",
         "fields": [
           {
@@ -52,8 +52,8 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "placeholder": "dapi\u2026",
-            "description": "Starts with dapi. Generated under Settings \u2192 Developer \u2192 Access tokens. Shown only once \u2014 store it safely."
+            "placeholder": "dapi…",
+            "description": "Starts with dapi. Generated under Settings → Developer → Access tokens. Shown only once — store it safely."
           },
           {
             "name": "http_path",
@@ -61,7 +61,7 @@
             "type": "text",
             "required": true,
             "placeholder": "/sql/1.0/warehouses/abc123def456",
-            "description": "Found in your SQL Warehouse \u2192 Connection details tab. Identifies which warehouse Anton queries."
+            "description": "Found in your SQL Warehouse → Connection details tab. Identifies which warehouse Anton queries."
           },
           {
             "name": "catalog",
@@ -86,7 +86,7 @@
         "label": "Service Principal (OAuth M2M)",
         "description": "Use a Databricks-managed service principal with OAuth machine-to-machine credentials. Better for shared team environments or CI pipelines where a personal token is inappropriate.",
         "recommended": false,
-        "how_to": "## Connect with a Service Principal (OAuth M2M)\n\nDatabricks supports OAuth 2.0 machine-to-machine (M2M) flows via service principals. This avoids tying access to an individual user account.\n\n### 1 \u2014 Create a service principal\n\n1. In your Databricks workspace, go to **Settings \u2192 Identity & access \u2192 Service principals \u2192 Add service principal**.\n2. Give it a name like `Anton` and click **Add**.\n3. Note the **Application (client) ID** shown on the details page.\n\n### 2 \u2014 Generate an OAuth secret\n\n1. Open the service principal \u2192 **Secrets tab \u2192 Generate secret**.\n2. Copy the **Secret** value \u2014 it is shown only once.\n\n### 3 \u2014 Grant permissions\n\n1. Assign the service principal to your SQL warehouse: **SQL Warehouses \u2192 your warehouse \u2192 Permissions \u2192 Add** the service principal with at least **Can use** privilege.\n2. In Unity Catalog, grant the service principal the necessary catalog/schema/table privileges.\n\n### 4 \u2014 Find your workspace URL and HTTP path\n\nSame as the Personal Access Token method \u2014 see the SQL Warehouse \u2192 Connection details tab for the HTTP path.\n\n### Notes\n\n- The OAuth token endpoint is `https://<workspace-url>/oidc/v1/token`.\n- Service principal secrets can be rotated without impacting other users.\n- Workspace admins can manage service principals under **Admin Console \u2192 Service principals**.",
+        "how_to": "## Connect with a Service Principal (OAuth M2M)\n\nDatabricks supports OAuth 2.0 machine-to-machine (M2M) flows via service principals. This avoids tying access to an individual user account.\n\n### 1 — Create a service principal\n\n1. In your Databricks workspace, go to **Settings → Identity & access → Service principals → Add service principal**.\n2. Give it a name like `Anton` and click **Add**.\n3. Note the **Application (client) ID** shown on the details page.\n\n### 2 — Generate an OAuth secret\n\n1. Open the service principal → **Secrets tab → Generate secret**.\n2. Copy the **Secret** value — it is shown only once.\n\n### 3 — Grant permissions\n\n1. Assign the service principal to your SQL warehouse: **SQL Warehouses → your warehouse → Permissions → Add** the service principal with at least **Can use** privilege.\n2. In Unity Catalog, grant the service principal the necessary catalog/schema/table privileges.\n\n### 4 — Find your workspace URL and HTTP path\n\nSame as the Personal Access Token method — see the SQL Warehouse → Connection details tab for the HTTP path.\n\n### Notes\n\n- The OAuth token endpoint is `https://<workspace-url>/oidc/v1/token`.\n- Service principal secrets can be rotated without impacting other users.\n- Workspace admins can manage service principals under **Admin Console → Service principals**.",
         "help_url": "https://docs.databricks.com/en/dev-tools/auth/oauth-m2m.html",
         "fields": [
           {
@@ -111,7 +111,7 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "placeholder": "dose\u2026",
+            "placeholder": "dose…",
             "description": "OAuth secret generated under the service principal's Secrets tab. Shown only once."
           },
           {
@@ -120,7 +120,7 @@
             "type": "text",
             "required": true,
             "placeholder": "/sql/1.0/warehouses/abc123def456",
-            "description": "Found in your SQL Warehouse \u2192 Connection details tab."
+            "description": "Found in your SQL Warehouse → Connection details tab."
           },
           {
             "name": "catalog",
@@ -140,6 +140,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/databricks.svg"
+  },
+  "logo_url": "logos/databricks.svg"
 }
