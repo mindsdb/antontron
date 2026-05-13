@@ -470,7 +470,7 @@ function ApiKeyInput({ value, onChange, placeholder, disabled, revealName }) {
           aria-label="Clear key"
           style={hasValue ? btnStyle : { ...btnStyle, opacity: 0.35, cursor: 'not-allowed' }}
         >
-          {Ico.trash(13)}
+          {Ico.close(13)}
         </button>
       </div>
     </div>
