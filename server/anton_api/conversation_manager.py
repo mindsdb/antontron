@@ -1023,7 +1023,7 @@ async def _build_chat_session(
         path = Path(raw).expanduser()
         return path if path.is_absolute() else base / path
 
-    artifacts_dir = _settings_path(getattr(settings, "artifacts_dir", None), base / "artifacts")
+    artifacts_dir = anton_dir / "artifacts"
     context_dir = _settings_path(getattr(settings, "context_dir", None), anton_dir / "context")
     episodes_dir = anton_dir / "episodes"
     project_memory_dir = anton_dir / "memory"
