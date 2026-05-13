@@ -2540,6 +2540,7 @@ function AppCore() {
             selectedProject={selectedProject}
             tasks={tasks}
             scheduled={scheduled}
+            scheduleRunsIndex={scheduleRunsIndex}
             models={modelOptions}
             onSelectProject={(p) => setSelectedProject(p)}
             onCreateProject={handleCreateProject}

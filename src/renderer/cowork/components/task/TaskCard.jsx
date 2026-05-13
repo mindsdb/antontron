@@ -133,6 +133,21 @@ export function TaskCard({
             }}>
               {task.title || 'Untitled'}
             </span>
+            {task._scheduleGroup && (
+              <span
+                title={`Schedule with ${task._scheduleGroup.runs} run${task._scheduleGroup.runs === 1 ? '' : 's'}`}
+                style={{
+                  fontFamily: FONT_BODY,
+                  fontSize: 10.5, fontWeight: 700, letterSpacing: '0.04em',
+                  textTransform: 'uppercase',
+                  color: 'var(--accent, #7CC4B6)',
+                  background: 'rgba(124,196,182,0.14)',
+                  border: '1px solid rgba(124,196,182,0.40)',
+                  padding: '1px 7px', borderRadius: 999,
+                  flexShrink: 0,
+                }}
+              >Schedule · {task._scheduleGroup.runs}</span>
+            )}
           </span>
           {subtitle && (
             <span style={{

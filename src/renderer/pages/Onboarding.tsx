@@ -28,6 +28,32 @@ const MINDS_REGISTER_URL = 'https://mdb.ai/auth/realms/mindsdb/protocol/openid-c
 
 const CUSTOM_MODEL = '__custom__';
 
+function StepIndicator({ step }: { step: 1 | 2 }) {
+  const dot = (n: 1 | 2) => ({
+    width: 22, height: 22, borderRadius: 999,
+    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+    fontSize: 11, fontWeight: 700,
+    color: step === n ? 'var(--text-strong)' : 'var(--text-muted)',
+    background: step === n ? 'rgba(124,196,182,0.18)' : 'transparent',
+    border: `1px solid ${step === n ? 'rgba(124,196,182,0.55)' : 'var(--border-subtle)'}`,
+  });
+  const bar = {
+    flex: 1, height: 1, background: 'var(--border-subtle)',
+    margin: '0 8px',
+  } as const;
+  return (
+    <div style={{
+      display: 'flex', alignItems: 'center', gap: 6,
+      width: 200, margin: '0 auto 20px',
+      fontFamily: 'var(--font-mono)',
+    }}>
+      <span style={dot(1)}>1</span>
+      <span style={bar} />
+      <span style={dot(2)}>2</span>
+    </div>
+  );
+}
+
 export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [provider, setProvider] = useState<Provider>('minds');
   const [byokProvider, setByokProvider] = useState<ByokProvider>('anthropic');
@@ -39,6 +65,10 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
   const [customBaseUrl, setCustomBaseUrl] = useState('');
   const [phase, setPhase] = useState<Phase>('choose');
   const [errorMsg, setErrorMsg] = useState('');
+  // True when the user clicked "Skip MindsHub" on step 1, so step 2
+  // shows a different lead-in note than the "Minds key valid, no LLM
+  // credits" path.
+  const [skippedMinds, setSkippedMinds] = useState(false);
 
   const models = byokProvider === 'anthropic'
     ? ANTHROPIC_MODELS
@@ -251,8 +281,15 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     setTimeout(onComplete, 800);
   };
 
-  // Minds-no-llm phase: show LLM provider selection
-  if (phase === 'minds-no-llm' || (phase === 'validating' && provider === 'minds' && apiKey)) {
+  // Step 2: BYOK LLM provider selection. Covers two entry points —
+  //   1) `minds-no-llm` after a Minds validation succeeded but no LLM
+  //      credits, or after the user clicked Skip MindsHub.
+  //   2) validating phase while the user is on step 2 (so the
+  //      spinner shows in the step-2 layout instead of falling
+  //      through to step 1).
+  if (phase === 'minds-no-llm'
+      || (phase === 'validating' && provider === 'byok')
+      || (phase === 'validating' && provider === 'minds' && apiKey)) {
     const showLlmForm = phase === 'minds-no-llm';
     return (
       <div className="onboard-content-inner">
@@ -267,11 +304,33 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
 
         {showLlmForm && (
           <>
+            <StepIndicator step={2} />
             <div className="onboard-heading">Choose your LLM provider</div>
 
             <div className="onboard-notice">
-              Your Minds Cloud API key is valid and saved for publishing and data connectors. However, you don't seem to have LLM credits. You can top up your balance or select an LLM provider of your choice.
+              {skippedMinds
+                ? 'You skipped MindsHub. Pick an LLM provider for Anton to use. (You can add MindsHub later from Settings → Providers — it\'s required to publish artifacts to the web.)'
+                : 'Your MindsHub API key is valid and saved for publishing and data connectors. However, you don\'t seem to have LLM credits. You can top up your balance or select an LLM provider of your choice.'}
             </div>
+
+            <button
+              type="button"
+              className="onboard-link"
+              onClick={() => {
+                // Back to step 1: reset to the Minds-first state.
+                setProvider('minds');
+                setPhase('choose');
+                setSkippedMinds(false);
+                setErrorMsg('');
+                setLlmApiKey('');
+              }}
+              style={{
+                background: 'transparent', border: 0, padding: 0,
+                fontSize: 12.5, color: 'var(--text-muted)',
+                cursor: 'pointer', marginBottom: 12,
+                textAlign: 'left',
+              }}
+            >&larr; Back to MindsHub setup</button>
 
             <div className="onboard-fields">
               <div className="onboard-field">
@@ -372,18 +431,24 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
     );
   }
 
+  // Step 1: MindsHub setup. The previous combined "Choose your setup"
+  // screen has been split — BYOK lives in step 2 (the existing
+  // minds-no-llm branch). A "Skip MindsHub" link jumps straight to it.
   return (
     <div className="onboard-content-inner">
-      <div className="onboard-heading">Choose your setup</div>
+      <StepIndicator step={1} />
+      <div className="onboard-heading">Connect MindsHub</div>
+      <div className="onboard-notice" style={{ marginBottom: 16 }}>
+        MindsHub routes your requests to the best LLM, ships secure data
+        connectors, and lets Anton publish artifacts to the web. Skip
+        this step if you'd rather bring your own LLM provider key.
+      </div>
 
-      {/* Provider cards */}
-      <div className="provider-cards">
-        <button
-          className={`provider-card ${provider === 'minds' ? 'selected' : ''}`}
-          onClick={() => { setProvider('minds'); setPhase('choose'); setErrorMsg(''); setApiKey(''); }}
-        >
+      {/* Single recommended provider card (no chooser anymore). */}
+      <div className="provider-cards" style={{ gridTemplateColumns: '1fr' }}>
+        <div className="provider-card selected" style={{ cursor: 'default' }}>
           <span className="recommended-pill">recommended</span>
-          <div className="provider-card-name">Minds Cloud</div>
+          <div className="provider-card-name">MindsHub</div>
           <div className="provider-card-desc">Managed by MindsDB</div>
           <ul className="provider-card-benefits">
             <li>Smart model routing</li>
@@ -396,24 +461,12 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
           >
             Get your first month free &rarr;
           </span>
-        </button>
-        <button
-          className={`provider-card ${provider === 'byok' ? 'selected' : ''}`}
-          onClick={() => { setProvider('byok'); setPhase('choose'); setErrorMsg(''); setApiKey(''); }}
-        >
-          <div className="provider-card-name">Skip Minds Cloud</div>
-          <div className="provider-card-desc">Bring your own LLM provider key</div>
-          <div className="byok-icon-area">
-            <svg className="byok-key-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4" />
-            </svg>
-          </div>
-        </button>
+        </div>
       </div>
 
       {/* Input fields */}
       <div className="onboard-fields">
-        {provider === 'byok' && (
+        {false && provider === 'byok' && (
           <div className="onboard-field">
             <label className="onboard-label">Select a provider</label>
             <div className="byok-provider-row">
@@ -556,6 +609,28 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
         >
           {phase === 'validating' ? 'CONNECTING...' : 'CONNECT'}
         </button>
+      )}
+
+      {/* Skip MindsHub → jump straight to step 2 (BYOK). */}
+      {phase !== 'success' && phase !== 'validating' && (
+        <button
+          type="button"
+          className="onboard-link"
+          onClick={() => {
+            setProvider('byok');
+            setApiKey('');
+            setErrorMsg('');
+            setSkippedMinds(true);
+            setPhase('minds-no-llm');
+          }}
+          style={{
+            background: 'transparent', border: 0, padding: 0,
+            marginTop: 14,
+            fontSize: 12.5, color: 'var(--text-muted)',
+            cursor: 'pointer',
+            alignSelf: 'center',
+          }}
+        >Skip MindsHub &rarr; bring my own LLM provider</button>
       )}
     </div>
   );

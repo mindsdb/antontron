@@ -28,6 +28,7 @@ import {
   useCollectionShortcut,
 } from '../components/collection';
 import { host } from '../../platform/host';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
@@ -1009,9 +1010,14 @@ function Toast({ kind, message, onClose }) {
 export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, projects = [], onOpenProject }) {
   const [list, setList] = useState(initial);
   const [viewer, setViewer] = useState(null);
+  const { isMobile } = useBreakpoint();
   const [view, setView] = useState(() =>
     localStorage.getItem('anton:artifacts-view') === 'list' ? 'list' : 'grid'
   );
+  // List rows break at phone widths (5-column grid). Force grid on
+  // mobile so the toggle isn't needed; the user's persisted desktop
+  // preference is left untouched.
+  const effectiveView = isMobile ? 'grid' : view;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('published');
   // Per-artifact-path "in flight" set so multiple cards can publish
@@ -1228,7 +1234,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
             />
           }
           sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
-          view={<ViewToggle value={view} onChange={setView} />}
+          view={<span className="artifacts-view-toggle"><ViewToggle value={view} onChange={setView} /></span>}
           counts={
             <ArtifactsCounts
               search={search}
@@ -1242,8 +1248,8 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
 
       {total === 0 ? (
         <EmptyState />
-      ) : view === 'grid' ? (
-        <div style={{
+      ) : effectiveView === 'grid' ? (
+        <div className="artifacts-grid" style={{
           padding: '6px 32px 60px',
           // Same grid geometry as ProjectsView so cards line up at
           // the same density across pages.
