@@ -14,10 +14,15 @@ from pathlib import Path
 
 GLOBAL_ENV_PATH = Path.home() / ".anton" / ".env"
 DEFAULT_HERMES_BASE_URL = "http://127.0.0.1:8642"
+DEFAULT_NANOCLAW_BASE_URL = "http://127.0.0.1:8643"
 HARNESS_ENV_KEY = "COWORK_HARNESS_PROVIDER"
 HERMES_BASE_URL_ENV_KEY = "COWORK_HERMES_API_BASE_URL"
 HERMES_API_KEY_ENV_KEY = "COWORK_HERMES_API_KEY"
 HERMES_AUTO_START_ENV_KEY = "COWORK_HERMES_AUTO_START"
+NANOCLAW_BASE_URL_ENV_KEY = "COWORK_NANOCLAW_GATEWAY_URL"
+NANOCLAW_API_KEY_ENV_KEY = "COWORK_NANOCLAW_GATEWAY_KEY"
+NANOCLAW_AGENT_GROUP_ENV_KEY = "COWORK_NANOCLAW_AGENT_GROUP_ID"
+NANOCLAW_AUTO_START_ENV_KEY = "COWORK_NANOCLAW_AUTO_START"
 
 
 def read_dotenv(path: Path = GLOBAL_ENV_PATH) -> dict[str, str]:
@@ -47,6 +52,8 @@ def normalize_harness_id(value: str | None) -> str:
     raw = (value or "anton").strip().lower()
     if raw in {"hermes", "hermes-agent", "hermes_agent"}:
         return "hermes"
+    if raw in {"nanoclaw", "nano-claw", "nano_claw"}:
+        return "nanoclaw"
     return "anton"
 
 
@@ -69,4 +76,22 @@ def hermes_api_key() -> str:
 
 def hermes_auto_start() -> bool:
     value = get_env(HERMES_AUTO_START_ENV_KEY, "true").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def nanoclaw_base_url() -> str:
+    raw = get_env(NANOCLAW_BASE_URL_ENV_KEY) or DEFAULT_NANOCLAW_BASE_URL
+    return raw.rstrip("/")
+
+
+def nanoclaw_api_key() -> str:
+    return get_env(NANOCLAW_API_KEY_ENV_KEY)
+
+
+def nanoclaw_agent_group_id() -> str:
+    return get_env(NANOCLAW_AGENT_GROUP_ENV_KEY)
+
+
+def nanoclaw_auto_start() -> bool:
+    value = get_env(NANOCLAW_AUTO_START_ENV_KEY, "true").strip().lower()
     return value in {"1", "true", "yes", "on"}

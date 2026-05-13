@@ -31,6 +31,7 @@ PROVIDER_LABELS = {
     "openai": "OpenAI",
     "openai-compatible": "OpenAI-compatible",
     "hermes": "Hermes Agent",
+    "nanoclaw": "NanoClaw",
 }
 
 UI_DEFAULTS = {
@@ -154,6 +155,18 @@ def get_config_status() -> dict[str, Any]:
             "harness_provider": "hermes",
             "migrated": migrated,
         }
+    if harness_provider in {"nanoclaw", "nano-claw", "nano_claw"}:
+        nc_agent = _get_env("COWORK_NANOCLAW_AGENT_GROUP_ID")
+        ready = bool(nc_agent)
+        return {
+            "config_ready": ready,
+            "config_error": "" if ready else "Select a NanoClaw agent group in Settings → Harness.",
+            "provider": "nanoclaw",
+            "model": "nanoclaw",
+            "provider_label": PROVIDER_LABELS["nanoclaw"],
+            "harness_provider": "nanoclaw",
+            "migrated": migrated,
+        }
 
     provider = _get_env("ANTON_PLANNING_PROVIDER", "anthropic")
     model = _get_env("ANTON_PLANNING_MODEL", "claude-sonnet-4-6")
@@ -247,6 +260,10 @@ async def get_settings():
         "hermesApiBaseUrl": _get_env("COWORK_HERMES_API_BASE_URL", "http://127.0.0.1:8642"),
         "hermesApiKey":     _masked("COWORK_HERMES_API_KEY"),
         "hermesAutoStart":  _bool_env("COWORK_HERMES_AUTO_START", True),
+        "nanoclawGatewayUrl":   _get_env("COWORK_NANOCLAW_GATEWAY_URL", "http://127.0.0.1:8643"),
+        "nanoclawGatewayKey":   _masked("COWORK_NANOCLAW_GATEWAY_KEY"),
+        "nanoclawAgentGroupId": _get_env("COWORK_NANOCLAW_AGENT_GROUP_ID", ""),
+        "nanoclawAutoStart":    _bool_env("COWORK_NANOCLAW_AUTO_START", True),
         "planningProvider": _get_env("ANTON_PLANNING_PROVIDER", "anthropic"),
         "planningModel":    _get_env("ANTON_PLANNING_MODEL", "claude-sonnet-4-6"),
         "codingProvider":   _get_env("ANTON_CODING_PROVIDER", "anthropic"),
@@ -283,6 +300,10 @@ class SettingsPatch(BaseModel):
     hermesApiBaseUrl:     Optional[str] = None
     hermesApiKey:         Optional[str] = None
     hermesAutoStart:      Optional[bool] = None
+    nanoclawGatewayUrl:   Optional[str] = None
+    nanoclawGatewayKey:   Optional[str] = None
+    nanoclawAgentGroupId: Optional[str] = None
+    nanoclawAutoStart:    Optional[bool] = None
     greeting:             Optional[str] = None
     tone:                 Optional[str] = None
     defaultModel:         Optional[str] = None
@@ -331,10 +352,19 @@ async def update_settings(patch: SettingsPatch):
 
     if patch.harnessProvider is not None:
         harness = patch.harnessProvider.strip().lower()
-        writes["COWORK_HARNESS_PROVIDER"] = "hermes" if harness in {"hermes", "hermes-agent", "hermes_agent"} else "anton"
+        if harness in {"hermes", "hermes-agent", "hermes_agent"}:
+            writes["COWORK_HARNESS_PROVIDER"] = "hermes"
+        elif harness in {"nanoclaw", "nano-claw", "nano_claw"}:
+            writes["COWORK_HARNESS_PROVIDER"] = "nanoclaw"
+        else:
+            writes["COWORK_HARNESS_PROVIDER"] = "anton"
     _stage_string_env(patch.hermesApiBaseUrl, "COWORK_HERMES_API_BASE_URL", writes, delete_keys)
     if patch.hermesAutoStart is not None:
         writes["COWORK_HERMES_AUTO_START"] = str(patch.hermesAutoStart).lower()
+    _stage_string_env(patch.nanoclawGatewayUrl, "COWORK_NANOCLAW_GATEWAY_URL", writes, delete_keys)
+    _stage_string_env(patch.nanoclawAgentGroupId, "COWORK_NANOCLAW_AGENT_GROUP_ID", writes, delete_keys)
+    if patch.nanoclawAutoStart is not None:
+        writes["COWORK_NANOCLAW_AUTO_START"] = str(patch.nanoclawAutoStart).lower()
     _stage_string_env(patch.planningProvider, "ANTON_PLANNING_PROVIDER", writes, delete_keys)
     _stage_string_env(patch.planningModel, "ANTON_PLANNING_MODEL", writes, delete_keys)
     if patch.planningModel is not None and patch.planningModel.strip() and patch.defaultModel is None:
@@ -379,6 +409,11 @@ async def update_settings(patch: SettingsPatch):
             writes["COWORK_HERMES_API_KEY"] = patch.hermesApiKey.strip()
         else:
             delete_keys.append("COWORK_HERMES_API_KEY")
+    if patch.nanoclawGatewayKey is not None and patch.nanoclawGatewayKey != "***":
+        if patch.nanoclawGatewayKey.strip():
+            writes["COWORK_NANOCLAW_GATEWAY_KEY"] = patch.nanoclawGatewayKey.strip()
+        else:
+            delete_keys.append("COWORK_NANOCLAW_GATEWAY_KEY")
 
     if writes or delete_keys:
         try:

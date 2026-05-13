@@ -192,7 +192,10 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
   const configReady = validation?.configReady ?? settings.configReady;
   const configError = validation?.configError || settings.configError;
   const harnessProvider = settings.harnessProvider || 'anton';
-  const harnessLabel = harnessProvider === 'hermes' ? 'Hermes Agent' : 'Anton';
+  const harnessLabel =
+    harnessProvider === 'hermes' ? 'Hermes Agent' :
+    harnessProvider === 'nanoclaw' ? 'NanoClaw' :
+    'Anton';
 
   const save = async () => {
     try {
@@ -305,29 +308,65 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   options={[
                     { value: 'anton', label: 'Anton' },
                     { value: 'hermes', label: 'Hermes' },
+                    { value: 'nanoclaw', label: 'NanoClaw' },
                   ]}
                 />
               </Section>
-              <Section title="Hermes auto-start" subtitle="Start Hermes Agent locally when the backend starts and Hermes is selected.">
-                <Toggle
-                  value={settings.hermesAutoStart ?? true}
-                  onChange={(v) => setSetting('hermesAutoStart', v)}
-                />
-              </Section>
-              <Section title="Hermes API URL" subtitle="Cowork adopts this gateway if it is already running.">
-                <TextInput
-                  value={settings.hermesApiBaseUrl ?? 'http://127.0.0.1:8642'}
-                  onChange={(v) => setSetting('hermesApiBaseUrl', v)}
-                  placeholder="http://127.0.0.1:8642"
-                />
-              </Section>
-              <Section title="Hermes API key" subtitle="Optional bearer token when the Hermes gateway requires one.">
-                <ApiKeyInput
-                  value={settings.hermesApiKey ?? ''}
-                  onChange={(v) => setSetting('hermesApiKey', v)}
-                  placeholder="optional"
-                />
-              </Section>
+              {harnessProvider === 'hermes' && (
+                <>
+                  <Section title="Hermes auto-start" subtitle="Start Hermes Agent locally when the backend starts and Hermes is selected.">
+                    <Toggle
+                      value={settings.hermesAutoStart ?? true}
+                      onChange={(v) => setSetting('hermesAutoStart', v)}
+                    />
+                  </Section>
+                  <Section title="Hermes API URL" subtitle="Cowork adopts this gateway if it is already running.">
+                    <TextInput
+                      value={settings.hermesApiBaseUrl ?? 'http://127.0.0.1:8642'}
+                      onChange={(v) => setSetting('hermesApiBaseUrl', v)}
+                      placeholder="http://127.0.0.1:8642"
+                    />
+                  </Section>
+                  <Section title="Hermes API key" subtitle="Optional bearer token when the Hermes gateway requires one.">
+                    <ApiKeyInput
+                      value={settings.hermesApiKey ?? ''}
+                      onChange={(v) => setSetting('hermesApiKey', v)}
+                      placeholder="optional"
+                    />
+                  </Section>
+                </>
+              )}
+              {harnessProvider === 'nanoclaw' && (
+                <>
+                  <Section title="NanoClaw auto-start" subtitle="Start NanoClaw locally when the backend starts and NanoClaw is selected. Requires Docker.">
+                    <Toggle
+                      value={settings.nanoclawAutoStart ?? true}
+                      onChange={(v) => setSetting('nanoclawAutoStart', v)}
+                    />
+                  </Section>
+                  <Section title="NanoClaw gateway URL" subtitle="Cowork adopts this gateway if it is already running.">
+                    <TextInput
+                      value={settings.nanoclawGatewayUrl ?? 'http://127.0.0.1:8643'}
+                      onChange={(v) => setSetting('nanoclawGatewayUrl', v)}
+                      placeholder="http://127.0.0.1:8643"
+                    />
+                  </Section>
+                  <Section title="NanoClaw gateway key" subtitle="Optional bearer token when the NanoClaw gateway requires one.">
+                    <ApiKeyInput
+                      value={settings.nanoclawGatewayKey ?? ''}
+                      onChange={(v) => setSetting('nanoclawGatewayKey', v)}
+                      placeholder="optional"
+                    />
+                  </Section>
+                  <Section title="NanoClaw agent group ID" subtitle="Pick which NanoClaw agent group cowork talks to. Defaults to the first available agent group.">
+                    <TextInput
+                      value={settings.nanoclawAgentGroupId ?? ''}
+                      onChange={(v) => setSetting('nanoclawAgentGroupId', v)}
+                      placeholder="ag-..."
+                    />
+                  </Section>
+                </>
+              )}
             </CollapsibleGroup>
 
             <CollapsibleGroup title="Models">

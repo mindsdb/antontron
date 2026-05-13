@@ -62,6 +62,13 @@ function checkConfigured(): { configured: boolean; provider: string } {
   if (harness === 'hermes') {
     return { configured: true, provider: 'hermes' };
   }
+  if (harness === 'nanoclaw') {
+    // NanoClaw is only "configured" once the user has picked an agent group
+    // — without one, /v1/runs has nothing to route to.
+    const vars = readEnvFile();
+    const agentGroupId = process.env.COWORK_NANOCLAW_AGENT_GROUP_ID || vars.COWORK_NANOCLAW_AGENT_GROUP_ID;
+    return { configured: Boolean(agentGroupId), provider: 'nanoclaw' };
+  }
   const vars = readEnvFile();
   if (vars.ANTON_ANTHROPIC_API_KEY) {
     return { configured: true, provider: 'anthropic' };
