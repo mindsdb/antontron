@@ -1290,6 +1290,7 @@ export default function ChatView({
           marginBottom: 25,
           background: 'transparent',
           WebkitAppRegion: 'no-drag',
+          userSelect: 'text',
         }}>
           <div style={{
             maxWidth: 720, margin: '0 auto',
