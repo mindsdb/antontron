@@ -529,6 +529,7 @@ function AppCore() {
     defaultModel: 'claude-sonnet-4-6',
     autoPin: true,
     showDots: true,
+    showCounters: true,
     accentVariant: 'aqua',
   });
 
@@ -722,6 +723,15 @@ function AppCore() {
       window.gravityField.setTheme(theme);
     }
   }, [theme]);
+
+  // Mirror the Dot grid setting to a body class so the gravity-field
+  // canvas can be hidden via CSS. `display: none` also lets the
+  // canvas's requestAnimationFrame loop idle when the user has
+  // turned the pattern off — no draw cost while invisible.
+  useEffect(() => {
+    if (typeof document === 'undefined') return;
+    document.body.classList.toggle('gf-dots-off', settings.showDots === false);
+  }, [settings.showDots]);
 
   const [route, setRoute] = useState('home');         // home | task | projects | scheduled | schedule-detail | artifacts | dispatch | customize | settings
   // Keep a ref of the live route so the keydown listener (bound
@@ -2391,6 +2401,7 @@ function AppCore() {
           }}
           serverBusy={serverBusy}
           serverBusyKind={serverBusyKind}
+          showCounters={settings.showCounters !== false}
           updateAvailable={updateStatus?.phase === 'available' ? { version: updateStatus.version } : null}
           onApplyUpdate={handleApplyUpdate}
           onShowServerHelp={() => setServerHelpOpen(true)}

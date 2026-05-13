@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Ico from '../components/Icons';
-import { validateSettings, revealSettingKey } from '../api';
+import { validateSettings, revealSettingKey, testProviders } from '../api';
 
 // Provider preset → underlying canonical fields. The backend only knows
 // three providers (anthropic / openai / openai-compatible). Gemini and
@@ -511,6 +511,72 @@ function SetBadge({ hasValue, active }) {
   );
 }
 
+// ───────────────────────── Multi-provider helpers ─────────────────────────
+
+const PROVIDER_TYPE_ORDER = ['minds-cloud', 'anthropic', 'openai', 'gemini', 'openai-compatible'];
+
+const PROVIDER_TYPE_DESC = {
+  'minds-cloud': 'Routes via mdb.ai with smart model selection.',
+  anthropic: 'Use Claude models with your Anthropic API key.',
+  openai: 'Use GPT models with your OpenAI API key.',
+  gemini: 'Use Gemini models through Google\'s OpenAI-compatible endpoint.',
+  'openai-compatible': 'Any OpenAI-compatible server (Ollama, vLLM, Together, Groq, etc).',
+};
+
+const GET_KEY_URL = {
+  'minds-cloud': 'https://mdb.ai/apiKeys',
+  anthropic: 'https://console.anthropic.com/settings/keys',
+  openai: 'https://platform.openai.com/api-keys',
+  gemini: 'https://aistudio.google.com/apikey',
+  'openai-compatible': null,
+};
+
+const PROTECTED_PROVIDER_TYPES = new Set(['minds-cloud']);
+
+function makeEmptyProvider(type) {
+  const base = { type, apiKey: '', isDefault: false };
+  if (type === 'openai-compatible') base.baseUrl = '';
+  if (type === 'minds-cloud') {
+    base.mindsUrl = 'https://mdb.ai';
+    base.mindsMindName = '';
+    base.mindsDatasource = '';
+    base.mindsDatasourceEngine = '';
+    base.mindsSslVerify = true;
+  }
+  return base;
+}
+
+function dedupeByType(arr) {
+  const map = {};
+  for (const p of arr) map[p.type] = p;
+  return Object.values(map);
+}
+
+function setOneDefault(arr, type) {
+  return arr.map((p) => ({ ...p, isDefault: p.type === type }));
+}
+
+function ensureDefaultInvariant(arr) {
+  if (!arr.length) return arr;
+  if (arr.some((p) => p.isDefault)) {
+    let found = false;
+    return arr.map((p) => {
+      if (p.isDefault && !found) { found = true; return p; }
+      if (p.isDefault) return { ...p, isDefault: false };
+      return p;
+    });
+  }
+  return arr.map((p, i) => ({ ...p, isDefault: i === 0 }));
+}
+
+const PROVIDER_LABELS_LOCAL = {
+  'minds-cloud': 'MindsHub',
+  anthropic: 'Anthropic',
+  openai: 'OpenAI',
+  gemini: 'Gemini',
+  'openai-compatible': 'OpenAI-compatible',
+};
+
 // Wrapper that dims a Section row when the credential is unused for the
 // active provider. Built on the existing Section grid so layout stays
 // consistent.
@@ -541,15 +607,184 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
   const [validation, setValidation] = useState(null);
   const [testing, setTesting] = useState(false);
   const [tested, setTested] = useState(false);
+  const [addPickerOpen, setAddPickerOpen] = useState(false);
+  const [bannerVisible, setBannerVisible] = useState(false);
+  // Per-role "use a typed model id" flag. Sticky so picking Other…
+  // keeps the text input visible even when the typed value is empty.
+  const [modelInputMode, setModelInputMode] = useState({ planning: false, coding: false });
+  // Tracks whether any LLM-affecting setting changed since the last
+  // successful Save. Used to skip provider tests on a no-op Save so a
+  // user just toggling appearance doesn't pay the network round-trip.
+  const [llmDirty, setLlmDirty] = useState(false);
+  // Snapshot of the last-saved settings JSON. While `settings` matches
+  // this snapshot the Save button reads "Saved" — flips back to "Save
+  // settings" the moment the user changes anything.
+  const [lastSavedJson, setLastSavedJson] = useState(null);
+  const currentJson = JSON.stringify(settings);
+  const settingsDirty = lastSavedJson !== null && currentJson !== lastSavedJson;
+  // Ref-mirror of `settings` so the post-Save snapshot can read the
+  // freshly-refetched value (the closure's `settings` is stale after
+  // the await but the ref tracks every render).
+  const settingsRef = useRef(settings);
+  useEffect(() => { settingsRef.current = settings; });
+
+  // First load: snapshot once `settings` is populated so the resting
+  // state is "Saved" until the user touches anything.
+  useEffect(() => {
+    if (lastSavedJson === null && settings && Object.keys(settings).length > 0) {
+      setLastSavedJson(currentJson);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentJson]);
   const configReady = validation?.configReady ?? settings.configReady;
   const configError = validation?.configError || settings.configError;
 
+  // Providers state — surfaced from the server, edited inline, committed
+  // on Save settings. The save handler routes through the providers path
+  // when `providers` is included on the patch.
+  const providers = Array.isArray(settings.providers) ? settings.providers : [];
+  const modelMode = settings.modelMode === 'custom' ? 'custom' : 'default';
+  const overrides = settings.modelOverrides || {};
+  const recommendedModels = settings.recommendedModels || {};
+  const recommendedPair = settings.recommendedPair || {};
+  const typeLabels = settings.providerTypeLabels || PROVIDER_LABELS_LOCAL;
+
+  const updateProviders = (next) => setSetting('providers', dedupeByType(next));
+  const availableTypesForAdd = PROVIDER_TYPE_ORDER.filter(
+    (t) => !providers.some((p) => p.type === t),
+  );
+
+  // Which provider types actually drive planning + coding right now.
+  // Planning and coding can pick *different* providers, so the active
+  // set is the union of both roles. A role with no explicit override
+  // implicitly falls back to MindsHub (matches the server's
+  // _resolve_role logic) — include that in the set so the test still
+  // pings it. Used by the per-row dot, runProviderTests, and the
+  // banner's effective-ready calculation.
+  const activeProviderTypes = (() => {
+    const types = new Set();
+    if (modelMode === 'custom') {
+      types.add(overrides.planning?.providerType || 'minds-cloud');
+      types.add(overrides.coding?.providerType   || 'minds-cloud');
+    } else {
+      types.add('minds-cloud');
+    }
+    return types;
+  })();
+
+  // Custom providers must carry a non-empty name. Pre-compute so the
+  // Models dropdown can show the name and the Save button knows to
+  // block when any custom row is missing one.
+  const providerDisplayName = (p) => {
+    if (p.type === 'openai-compatible') return (p.name || '').trim() || 'OpenAI-compatible';
+    return typeLabels[p.type] || p.type;
+  };
+  const missingCustomNames = providers.some(
+    (p) => p.type === 'openai-compatible' && !(p.name || '').trim(),
+  );
+
+  // MindsHub is the permanent baseline — always show its row so the
+  // user has a path to a working provider without having to add one.
+  useEffect(() => {
+    if (!providers.some((p) => p.type === 'minds-cloud')) {
+      updateProviders([makeEmptyProvider('minds-cloud'), ...providers]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [providers.length, providers.some((p) => p.type === 'minds-cloud')]);
+
+  const updateProviderField = (type, key, value) => {
+    setLlmDirty(true);
+    updateProviders(providers.map((p) => (p.type === type ? { ...p, [key]: value } : p)));
+  };
+  const addProviderOfType = (type) => {
+    if (providers.some((p) => p.type === type)) return;
+    setLlmDirty(true);
+    updateProviders(providers.concat([makeEmptyProvider(type)]));
+    setAddPickerOpen(false);
+  };
+  const removeProvider = (type) => {
+    // MindsHub stays as a permanent option even when unconfigured —
+    // it's the recommended path and users shouldn't be able to lose it.
+    if (PROTECTED_PROVIDER_TYPES.has(type)) return;
+    setLlmDirty(true);
+    const next = providers.filter((p) => p.type !== type);
+
+    // Role overrides referencing the removed provider get re-pointed
+    // at MindsHub (the implicit fallback) with its recommended pair
+    // for the role.
+    const adjustedOverrides = {};
+    for (const role of ['planning', 'coding']) {
+      const o = overrides[role];
+      if (!o) continue;
+      if (o.providerType === type) {
+        const pair = recommendedPair['minds-cloud'] || ['', ''];
+        const fallback = pair[role === 'planning' ? 0 : 1] || (recommendedModels['minds-cloud']?.[0] || '');
+        adjustedOverrides[role] = { providerType: 'minds-cloud', model: fallback };
+      } else {
+        adjustedOverrides[role] = o;
+      }
+    }
+    setSetting('modelOverrides', adjustedOverrides);
+    updateProviders(next);
+  };
+
+  // Tests only the providers currently driving the planning + coding
+  // roles. Each role contributes its driver (its override, or MindsHub
+  // when there's no override), so if planning picks Anthropic and
+  // coding picks OpenAI, both get pinged. Inactive registered
+  // providers keep their previous status (no point hammering OpenAI
+  // when the user isn't using it). Sends the active providers' live
+  // state so Test works on un-committed edits; the server merges
+  // results into the persisted status map so dots survive a reload.
+  const runProviderTests = async () => {
+    const activeProviders = providers.filter((p) => activeProviderTypes.has(p.type));
+    if (activeProviders.length === 0) return null;
+
+    // Flip only the active providers' dots to the transient
+    // "testing" state — preserve everyone else's persisted color.
+    const pendingStatuses = { ...(settings.providerStatus || {}) };
+    const pendingDetails  = { ...(settings.providerStatusDetails || {}) };
+    for (const p of activeProviders) {
+      pendingStatuses[p.type] = 'testing';
+      delete pendingDetails[p.type];
+    }
+    setSetting('providerStatus', pendingStatuses);
+    setSetting('providerStatusDetails', pendingDetails);
+
+    const result = await testProviders(activeProviders);
+    if (result && result.providerStatus) {
+      setSetting('providerStatus', { ...pendingStatuses, ...result.providerStatus });
+    }
+    if (result && result.providerStatusDetails) {
+      setSetting('providerStatusDetails', { ...pendingDetails, ...result.providerStatusDetails });
+    }
+    return result;
+  };
+
   const save = async () => {
+    // Save runs a validation pass so the banner reflects whether the
+    // new config is usable. Provider tests only fire when the LLM
+    // settings actually changed since the last Save — no point hitting
+    // the network when the user just toggled the dot grid.
+    const shouldTestLlm = llmDirty;
+    setBannerVisible(true);
+    setTesting(true);
+    setTested(false);
     try {
-      const result = await onSave(settings);
+      await onSave(settings);
+      const tasks = [validateSettings()];
+      if (shouldTestLlm) tasks.push(runProviderTests());
+      const [result] = await Promise.all(tasks);
       setValidation(result);
+      setTested(true);
+      if (shouldTestLlm) setLlmDirty(false);
+      // Snapshot the now-current settings so the Save button flips to
+      // "Saved" until the user makes another edit. settingsRef tracks
+      // the latest re-rendered value (the closure's `settings` is the
+      // pre-save copy and stale by now).
+      setLastSavedJson(JSON.stringify(settingsRef.current));
       setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
+      setTimeout(() => setTested(false), 2400);
     } catch (err) {
       setValidation({
         status: 'error',
@@ -557,6 +792,8 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
         configError: err.message || 'Settings could not be saved.',
       });
       setSaved(false);
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -566,10 +803,14 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
   // "Testing…" → "Tested" sequence on the button itself.
   const validate = async () => {
     if (testing) return;
+    setBannerVisible(true);
     setTesting(true);
     setTested(false);
     try {
-      const result = await validateSettings();
+      const [result] = await Promise.all([
+        validateSettings(),
+        runProviderTests(),
+      ]);
       setValidation(result);
       setTested(true);
       setTimeout(() => setTested(false), 2400);
@@ -606,36 +847,444 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               Anton configuration and local desktop preferences.
             </div>
 
-            {/* Status banner — token-driven so it reads in dark + light. */}
-            <div style={{
-              padding: 14, marginBottom: 22,
-              border: `1px solid ${configReady ? 'rgba(93,146,135,0.45)' : 'rgba(211,80,80,0.40)'}`,
-              background: configReady ? 'rgba(93,146,135,0.10)' : 'rgba(211,80,80,0.08)',
-              borderRadius: 10,
-              display: 'flex', alignItems: 'center', gap: 12,
-            }}>
-              <span style={{
-                width: 30, height: 30, borderRadius: 8,
-                display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                color: configReady ? 'var(--sage-500)' : '#E07060',
-                background: configReady ? 'rgba(93,146,135,0.16)' : 'rgba(211,80,80,0.14)',
-              }}>{configReady ? Ico.check(15) : Ico.key(15)}</span>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--text-strong)' }}>
-                  {configReady ? 'Anton is configured' : 'Anton needs configuration'}
+            {/* Status banner — only shown after Save or Test. While
+                `testing` is true the banner enters a neutral "checking"
+                state with a spinner; on success/failure it flips to the
+                configured/needs-config palette and briefly pulses. The
+                X button on the right dismisses the banner; the next
+                Save or Test will re-open it. */}
+            {bannerVisible && (() => {
+              // Banner reflects only the providers actually driving
+              // planning + coding (computed once at the component level).
+              const activeTypes = Array.from(activeProviderTypes);
+              const activeStatuses = activeTypes.map((t) => (settings.providerStatus || {})[t] || 'untested');
+              const anyActiveFail = activeStatuses.some((s) => s === 'fail');
+              const allActiveOk  = activeStatuses.length > 0 && activeStatuses.every((s) => s === 'ok');
+
+              const effectiveReady = configReady && !anyActiveFail;
+
+              const tone = testing
+                ? { border: 'rgba(127,127,127,0.40)', bg: 'rgba(127,127,127,0.10)',
+                    icoFg: 'var(--text-muted)', icoBg: 'rgba(127,127,127,0.16)' }
+                : effectiveReady
+                  ? { border: 'rgba(93,146,135,0.45)', bg: 'rgba(93,146,135,0.10)',
+                      icoFg: 'var(--sage-500)', icoBg: 'rgba(93,146,135,0.16)' }
+                  : { border: 'rgba(211,80,80,0.40)', bg: 'rgba(211,80,80,0.08)',
+                      icoFg: '#E07060', icoBg: 'rgba(211,80,80,0.14)' };
+              const title = testing
+                ? 'Testing configuration…'
+                : anyActiveFail
+                  ? 'Anton needs a valid LLM provider and API key to work'
+                  : tested
+                    ? (effectiveReady ? 'Anton setup correctly' : 'Test failed')
+                    : effectiveReady ? 'Anton setup correctly' : 'Anton needs configuration';
+              const subtitle = testing
+                ? 'Talking to the active provider — hold on.'
+                : anyActiveFail
+                  ? 'The provider driving your planning or coding role failed its last test. Check the red row below.'
+                  : (allActiveOk ? 'Active provider passed the test.' : (configError || 'Provider, model, and credentials are ready.'));
+              const icon = testing
+                ? (<span className="spinner" style={{ width: 15, height: 15 }} />)
+                : effectiveReady ? Ico.check(15) : Ico.key(15);
+              return (
+                <div style={{
+                  padding: 14, marginBottom: 22,
+                  border: `1px solid ${tone.border}`,
+                  background: tone.bg,
+                  borderRadius: 10,
+                  display: 'flex', alignItems: 'center', gap: 12,
+                  animation: tested && !testing ? 'set-badge-pulse 1.6s ease-out 1' : 'none',
+                  transition: 'background .2s ease, border-color .2s ease',
+                }}>
+                  <span style={{
+                    width: 30, height: 30, borderRadius: 8,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                    color: tone.icoFg, background: tone.icoBg,
+                    transition: 'background .2s ease, color .2s ease',
+                  }}>{icon}</span>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13.5, fontWeight: 650, color: 'var(--text-strong)' }}>{title}</div>
+                    <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>{subtitle}</div>
+                  </div>
+                  <button
+                    className="btn-secondary"
+                    onClick={validate}
+                    disabled={testing}
+                    aria-busy={testing}
+                    style={testing ? { opacity: 0.7, cursor: 'progress' } : undefined}
+                  >{testButtonLabel}</button>
+                  <button
+                    type="button"
+                    onClick={() => setBannerVisible(false)}
+                    disabled={testing}
+                    title="Dismiss"
+                    aria-label="Dismiss banner"
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 28, height: 28, borderRadius: 8,
+                      border: 0, background: 'transparent',
+                      color: 'var(--text-muted)',
+                      cursor: testing ? 'not-allowed' : 'pointer',
+                      opacity: testing ? 0.4 : 1,
+                    }}
+                  >{Ico.close(13)}</button>
                 </div>
-                <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 2 }}>
-                  {configError || 'Provider, model, and credentials are ready.'}
+              );
+            })()}
+
+            <CollapsibleGroup title="Providers">
+              {providers.map((p) => {
+                const isActive = activeProviderTypes.has(p.type);
+                const label = typeLabels[p.type] || p.type;
+                const reveal = p.type === 'anthropic' ? 'anthropic'
+                  : p.type === 'minds-cloud' ? 'minds'
+                  : (p.type === 'openai' || p.type === 'gemini' || p.type === 'openai-compatible') ? 'openai'
+                  : null;
+                const rawStatus = (settings.providerStatus || {})[p.type] || 'untested';
+                const status = isActive ? rawStatus : 'untested';
+                const detail = isActive ? ((settings.providerStatusDetails || {})[p.type] || '') : '';
+                const friendlyError = (() => {
+                  if (!detail) return '';
+                  if (detail === 'missing API key') return 'Add an API key on the right.';
+                  if (detail === 'missing base URL') return 'Add a base URL on the right.';
+                  const m = detail.match(/HTTP (\d{3})/);
+                  if (m) {
+                    const code = parseInt(m[1], 10);
+                    if (code === 401) return 'Unauthorized — the API key was rejected.';
+                    if (code === 403) return 'Forbidden — the API key does not have access.';
+                    if (code === 404) return 'Endpoint not found — check the base URL.';
+                    if (code === 429) return 'Rate limited — try again in a moment.';
+                    if (code >= 500) return `Provider is currently unreachable (HTTP ${code}).`;
+                    return `Provider rejected the request (HTTP ${code}).`;
+                  }
+                  if (detail.startsWith('ConnectError') || detail.startsWith('ConnectTimeout')) {
+                    return 'Could not reach the provider — network or DNS problem.';
+                  }
+                  if (detail.startsWith('ReadTimeout') || detail.startsWith('TimeoutException')) {
+                    return 'Provider did not respond in time.';
+                  }
+                  if (detail.startsWith('SSLError') || detail.includes('certificate')) {
+                    return 'TLS / certificate problem reaching the provider.';
+                  }
+                  return detail;
+                })();
+                const dotColor = status === 'ok' ? '#7CC4B6'
+                  : status === 'fail' ? '#E07060'
+                  : status === 'testing' ? '#E5B57A'
+                  : 'rgba(127,127,127,0.6)';
+                const dotGlow = status === 'ok' ? '0 0 6px rgba(124,196,182,0.7)'
+                  : status === 'fail' ? '0 0 6px rgba(224,112,96,0.6)'
+                  : status === 'testing' ? '0 0 6px rgba(229,181,122,0.7)'
+                  : 'none';
+                const dotTitle = status === 'ok' ? `Last test passed${detail ? ` (${detail})` : ''}`
+                  : status === 'fail' ? `Last test failed${detail ? `: ${detail}` : ''}`
+                  : status === 'testing' ? 'Testing…'
+                  : 'Not tested yet';
+                const dot = (
+                  <span
+                    title={dotTitle}
+                    aria-label={dotTitle}
+                    style={{
+                      display: 'inline-block',
+                      width: 9, height: 9, borderRadius: 999,
+                      background: dotColor,
+                      boxShadow: dotGlow,
+                      flexShrink: 0,
+                      animation: status === 'testing' ? 'set-badge-pulse 1.4s ease-in-out infinite' : 'none',
+                    }}
+                  />
+                );
+                const titleNode = (
+                  <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+                    {dot}
+                    {p.type === 'openai-compatible' ? (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                        <input
+                          className="field-input"
+                          value={p.name ?? ''}
+                          onChange={(e) => updateProviderField('openai-compatible', 'name', e.target.value)}
+                          placeholder="Custom provider name"
+                          style={{
+                            width: 220, fontSize: 13.5, fontWeight: 600,
+                            borderColor: !(p.name || '').trim() ? 'rgba(224,112,96,0.55)' : undefined,
+                          }}
+                        />
+                        {!(p.name || '').trim() && (
+                          <span style={{ fontSize: 10.5, color: '#E07060' }}>Name required</span>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{label}</span>
+                    )}
+                  </span>
+                );
+                return (
+                  <div key={p.type} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 380px auto',
+                    gap: 24,
+                    padding: '16px 0',
+                    borderBottom: '1px solid var(--border-subtle)',
+                    alignItems: 'flex-start',
+                  }}>
+                    <div>
+                      {titleNode}
+                      {p.type === 'minds-cloud' && (
+                        <div style={{
+                          fontSize: 12, color: 'var(--text-muted)',
+                          marginTop: 6, maxWidth: 380, lineHeight: 1.45,
+                        }}>
+                          <div>Router to all major LLMs.</div>
+                          <div>Required to publish artifacts to the web.</div>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ display: 'grid', gap: 6 }}>
+                      <ApiKeyInput
+                        value={p.apiKey ?? ''}
+                        onChange={(v) => updateProviderField(p.type, 'apiKey', v)}
+                        placeholder={
+                          p.type === 'anthropic' ? 'sk-ant-••••••••' :
+                          p.type === 'minds-cloud' ? 'mdb_••••••••' :
+                          p.type === 'gemini' ? 'AIza••••••••' :
+                          'sk-••••••••'
+                        }
+                        revealName={reveal}
+                      />
+                      {p.type === 'openai-compatible' && (
+                        <ClearableTextInput
+                          value={p.baseUrl ?? ''}
+                          onChange={(v) => updateProviderField('openai-compatible', 'baseUrl', v)}
+                          placeholder="https://example.com/v1"
+                        />
+                      )}
+                      {GET_KEY_URL[p.type] && (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          Get your API key at{' '}
+                          <a
+                            href={GET_KEY_URL[p.type]}
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            style={{ color: 'var(--accent-500, #7CC4B6)' }}
+                          >{GET_KEY_URL[p.type].replace(/^https?:\/\//, '')} →</a>
+                        </div>
+                      )}
+                      {p.type === 'minds-cloud' && (
+                        <div style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>
+                          Don't have an account?{' '}
+                          <a
+                            href="https://mindshub.ai"
+                            target="_blank"
+                            rel="noreferrer noopener"
+                            style={{ color: 'var(--accent-500, #7CC4B6)' }}
+                          >Sign up at mindshub.ai →</a>
+                        </div>
+                      )}
+                      {status === 'fail' && friendlyError && (
+                        <div style={{
+                          fontSize: 11.5,
+                          color: '#E07060',
+                          display: 'flex', alignItems: 'flex-start', gap: 6,
+                        }}>
+                          <span style={{ flexShrink: 0, marginTop: 1 }}>{Ico.key ? Ico.key(11) : '!'}</span>
+                          <span>{friendlyError}</span>
+                        </div>
+                      )}
+                    </div>
+                    <div style={{ width: 30, height: 30 }}>
+                      {!PROTECTED_PROVIDER_TYPES.has(p.type) && (
+                        <button
+                          type="button"
+                          onClick={() => removeProvider(p.type)}
+                          title="Remove this provider"
+                          style={{
+                            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                            width: 30, height: 30, borderRadius: 8,
+                            background: 'transparent',
+                            border: '1px solid var(--border-subtle)',
+                            color: '#E07060',
+                            cursor: 'pointer',
+                          }}
+                        >{Ico.trash(13)}</button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+              <div style={{
+                position: 'relative',
+                padding: '14px 0 4px',
+                minHeight: 50,
+              }}>
+                {/* Idle: + Add provider button. Fades + slides down when
+                    the picker opens. */}
+                <button
+                  className="btn-secondary"
+                  onClick={() => setAddPickerOpen(true)}
+                  disabled={availableTypesForAdd.length === 0}
+                  title={availableTypesForAdd.length === 0 ? 'All provider types are already configured' : 'Add another provider'}
+                  style={{
+                    position: 'absolute', top: 14, left: 0,
+                    opacity: addPickerOpen ? 0 : (availableTypesForAdd.length === 0 ? 0.45 : 1),
+                    transform: addPickerOpen ? 'translateY(6px)' : 'translateY(0)',
+                    transition: 'opacity 200ms ease, transform 200ms ease',
+                    pointerEvents: addPickerOpen ? 'none' : (availableTypesForAdd.length === 0 ? 'none' : 'auto'),
+                    cursor: availableTypesForAdd.length === 0 ? 'not-allowed' : 'pointer',
+                  }}
+                >+ Add provider</button>
+
+                {/* Open: Choose Provider: <chip> <chip> · Cancel.
+                    Fades + slides up from below as it appears. */}
+                <div style={{
+                  display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center',
+                  opacity: addPickerOpen ? 1 : 0,
+                  transform: addPickerOpen ? 'translateY(0)' : 'translateY(-6px)',
+                  transition: 'opacity 220ms ease, transform 220ms ease',
+                  pointerEvents: addPickerOpen ? 'auto' : 'none',
+                  position: 'absolute', top: 14, left: 0, right: 0,
+                }}>
+                  <strong style={{
+                    fontSize: 12.5, color: 'var(--text-strong)', marginRight: 4,
+                  }}>Choose Provider:</strong>
+                  {availableTypesForAdd.map((t) => (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => addProviderOfType(t)}
+                      className="btn-secondary"
+                      style={{ fontSize: 12.5, padding: '4px 10px', fontWeight: 400 }}
+                    >{typeLabels[t] || t}</button>
+                  ))}
+                  <span style={{ color: 'var(--text-muted)', padding: '0 4px' }}>·</span>
+                  <button
+                    type="button"
+                    onClick={() => setAddPickerOpen(false)}
+                    style={{
+                      fontSize: 12.5, padding: '4px 8px',
+                      background: 'transparent', border: 0,
+                      color: 'var(--text-muted)', cursor: 'pointer',
+                      fontWeight: 400,
+                    }}
+                  >Cancel</button>
                 </div>
               </div>
-              <button
-                className="btn-secondary"
-                onClick={validate}
-                disabled={testing}
-                aria-busy={testing}
-                style={testing ? { opacity: 0.7, cursor: 'progress' } : undefined}
-              >{testButtonLabel}</button>
-            </div>
+            </CollapsibleGroup>
+
+            <CollapsibleGroup title="Agent Models">
+              {(() => {
+                // MindsHub is the implicit fallback for any role that
+                // hasn't been explicitly assigned an override.
+                const defaultProvider = providers.find((p) => p.type === 'minds-cloud') || providers[0];
+                const multipleProviders = providers.length > 1;
+
+                // For each role: render provider selector (when N>1) +
+                // model field. When the user picks a new provider, auto-
+                // fill the role with that provider's recommended default
+                // for the role. Empty overrides fall back to the default
+                // provider's recommended pair.
+                const RoleRow = ({ role, label }) => {
+                  const cur = overrides[role] || {};
+                  const curType = cur.providerType || (defaultProvider?.type || '');
+                  const fallbackPair = recommendedPair[curType] || ['', ''];
+                  const fallbackModel = fallbackPair[role === 'planning' ? 0 : 1] || '';
+                  const curModel = cur.model || fallbackModel;
+                  const provider = providers.find((p) => p.type === curType);
+                  const modelList = recommendedModels[curType] || [];
+
+                  const writeOverride = (next) => {
+                    setLlmDirty(true);
+                    setSetting('modelOverrides', { ...overrides, [role]: next });
+                    setSetting('modelMode', 'custom');
+                  };
+
+                  return (
+                    <Section title={label} subtitle={`Used for ${role === 'planning' ? 'reasoning, orchestration, and responses' : 'scratchpad code generation'}.`}>
+                      <div style={{ display: 'grid', gap: 6 }}>
+                        {multipleProviders && (
+                          <select
+                            className="settings-select"
+                            value={curType}
+                            onChange={(e) => {
+                              const t = e.target.value;
+                              const pair = recommendedPair[t] || ['', ''];
+                              const newModel = pair[role === 'planning' ? 0 : 1] || (recommendedModels[t]?.[0] || '');
+                              setModelInputMode((m) => ({ ...m, [role]: false }));
+                              writeOverride({ providerType: t, model: newModel });
+                            }}
+                            style={{ width: '100%' }}
+                          >
+                            {providers.map((p) => (
+                              <option key={p.type} value={p.type}>{providerDisplayName(p)}</option>
+                            ))}
+                          </select>
+                        )}
+                        {modelList.length > 0 ? (
+                          (() => {
+                            // The "Other…" option lets the user type a
+                            // free-form model id. MindsHub's list is
+                            // comprehensive enough that we hide the
+                            // Other escape hatch there. Sticky flag
+                            // keeps the text input visible after
+                            // selecting Other even when the value is
+                            // still empty.
+                            const allowOther = curType !== 'minds-cloud';
+                            const savedIsCustom = !!curModel && !modelList.includes(curModel);
+                            const inputMode = modelInputMode[role] || savedIsCustom;
+                            const selectValue = inputMode ? '__custom__' : curModel;
+                            return (
+                              <>
+                                <select
+                                  className="settings-select"
+                                  value={selectValue || (modelList[0] || '')}
+                                  onChange={(e) => {
+                                    if (e.target.value === '__custom__') {
+                                      setModelInputMode((m) => ({ ...m, [role]: true }));
+                                      // Keep whatever curModel already
+                                      // had so the user can refine it,
+                                      // instead of blanking it.
+                                      writeOverride({ providerType: curType, model: curModel || '' });
+                                    } else {
+                                      setModelInputMode((m) => ({ ...m, [role]: false }));
+                                      writeOverride({ providerType: curType, model: e.target.value });
+                                    }
+                                  }}
+                                  style={{ width: '100%' }}
+                                >
+                                  {modelList.map((m) => <option key={m} value={m}>{m}</option>)}
+                                  {allowOther && <option value="__custom__">Other…</option>}
+                                </select>
+                                {inputMode && allowOther && (
+                                  <TextInput
+                                    value={curModel}
+                                    onChange={(v) => writeOverride({ providerType: curType, model: v })}
+                                    placeholder="Type a model id"
+                                  />
+                                )}
+                              </>
+                            );
+                          })()
+                        ) : (
+                          <TextInput
+                            value={curModel}
+                            onChange={(v) => writeOverride({ providerType: curType, model: v })}
+                            placeholder="model-id"
+                          />
+                        )}
+                        {!provider && curType && (
+                          <div style={{ fontSize: 11.5, color: '#E07060' }}>This provider is not configured. Add it under Providers above.</div>
+                        )}
+                      </div>
+                    </Section>
+                  );
+                };
+                return (
+                  <>
+                    <RoleRow role="planning" label="Planning model" />
+                    <RoleRow role="coding"   label="Coding model" />
+                  </>
+                );
+              })()}
+            </CollapsibleGroup>
 
             <CollapsibleGroup title="Appearance">
               <Section title="Theme" subtitle="Light or dark — also drives the animated background.">
@@ -651,64 +1300,37 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               <Section title="Greeting" subtitle="The line shown when you start a new task.">
                 <TextInput value={settings.greeting} onChange={(v) => setSetting('greeting', v)} />
               </Section>
-              <Section title="Dot grid" subtitle="Decorative dot pattern on the home screen.">
+              <Section title="Animated background" subtitle="Toggle off if you prefer a flat surface instead of an animated grid.">
                 <Toggle value={settings.showDots} onChange={(v) => setSetting('showDots', v)} />
               </Section>
-              <Section title="Tone" subtitle="How Anton phrases its responses.">
-                <Segmented
-                  value={settings.tone}
-                  onChange={(v) => setSetting('tone', v)}
-                  options={[
-                    { value: 'concise', label: 'Concise' },
-                    { value: 'balanced', label: 'Balanced' },
-                    { value: 'detailed', label: 'Detailed' },
-                  ]}
+              <Section title="Show nav-panel counters" subtitle="Badge counts on Projects / Scheduled / Artifacts / Connected apps, plus the time-since label on each Recent row.">
+                <Toggle
+                  value={settings.showCounters !== false}
+                  onChange={(v) => setSetting('showCounters', v)}
                 />
-              </Section>
-              <Section title="Auto-pin recents" subtitle="Pin tasks you visit more than 3 times.">
-                <Toggle value={settings.autoPin} onChange={(v) => setSetting('autoPin', v)} />
               </Section>
             </CollapsibleGroup>
 
-            {(() => {
-              // Computed once per render — these drive Models + Credentials
-              // visuals (active provider chip, credential badges, quick-picks).
+            {/* Legacy single-provider Models + Credentials block kept
+                here for the transition window while old installs migrate. */}
+            {false && (() => {
               const activePreset = inferProviderPreset(settings);
               const activeLabel = PROVIDER_PRESETS.find((p) => p.value === activePreset)?.label || activePreset;
               const configuredForActive = isProviderConfigured(activePreset, settings);
               const relevance = CREDENTIAL_RELEVANCE[activePreset] || {};
               const quickPicks = PROVIDER_MODELS[activePreset] || [];
-              // Drives the green "Set" badge on each credential row.
               const has = (field) => Boolean(String(settings[field] ?? '').trim());
-
               const ChipRow = ({ items, current, onPick }) => items.length === 0 ? null : (
-                <div style={{
-                  display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8,
-                }}>
-                  {items.map((m) => {
-                    const active = m === current;
-                    return (
-                      <button
-                        key={m}
-                        type="button"
-                        onClick={() => onPick(m)}
-                        style={{
-                          fontFamily: 'var(--font-mono)', fontSize: 11.5,
-                          padding: '3px 8px', borderRadius: 999,
-                          background: active ? 'var(--surface-0)' : 'transparent',
-                          color: active ? 'var(--text-strong)' : 'var(--text-muted)',
-                          border: `1px solid ${active ? 'var(--line-2, var(--border-subtle))' : 'var(--border-subtle)'}`,
-                          cursor: 'pointer',
-                        }}
-                      >{m}</button>
-                    );
-                  })}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 8 }}>
+                  {items.map((m) => (
+                    <button key={m} type="button" onClick={() => onPick(m)}
+                      style={{ fontFamily: 'var(--font-mono)', fontSize: 11.5, padding: '3px 8px', borderRadius: 999, background: 'transparent', color: 'var(--text-muted)', border: '1px solid var(--border-subtle)', cursor: 'pointer' }}>{m}</button>
+                  ))}
                 </div>
               );
-
               return (
                 <>
-                  <CollapsibleGroup title="Models">
+                  <CollapsibleGroup title="Models (legacy)">
                     {/* Provider row + active-state summary. The segmented
                         control spans the full row so the 5 presets fit on
                         one line instead of wrapping. */}
@@ -885,22 +1507,6 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               );
             })()}
 
-            <CollapsibleGroup title="Updates" defaultOpen={false}>
-              <Section
-                title="UI updates"
-                subtitle="How over-the-air UI updates are applied when a new version is published."
-              >
-                <Segmented
-                  value={settings.uiUpdateMode ?? 'manual'}
-                  onChange={(v) => setSetting('uiUpdateMode', v)}
-                  options={[
-                    { value: 'auto', label: 'Auto' },
-                    { value: 'manual', label: 'Manual' },
-                  ]}
-                />
-              </Section>
-            </CollapsibleGroup>
-
             <CollapsibleGroup title="Memory" defaultOpen={false}>
               <Section title="Memory mode" subtitle="How Anton updates its long-term memory.">
                 <Segmented
@@ -918,6 +1524,22 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               </Section>
               <Section title="Proactive dashboards" subtitle="Auto-generate HTML reports from scratchpad output.">
                 <Toggle value={settings.proactiveDashboards ?? false} onChange={(v) => setSetting('proactiveDashboards', v)} />
+              </Section>
+            </CollapsibleGroup>
+
+            <CollapsibleGroup title="Updates" defaultOpen={false}>
+              <Section
+                title="UI updates"
+                subtitle="How over-the-air UI updates are applied when a new version is published."
+              >
+                <Segmented
+                  value={settings.uiUpdateMode ?? 'manual'}
+                  onChange={(v) => setSetting('uiUpdateMode', v)}
+                  options={[
+                    { value: 'auto', label: 'Auto' },
+                    { value: 'manual', label: 'Manual' },
+                  ]}
+                />
               </Section>
             </CollapsibleGroup>
           </div>
@@ -950,9 +1572,19 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
           <button
             className="btn-primary"
             onClick={save}
-            style={{ minWidth: 132 }}
+            disabled={!settingsDirty || testing || missingCustomNames}
+            title={missingCustomNames ? 'Each custom provider needs a name' : undefined}
+            style={{
+              minWidth: 132,
+              opacity: (!settingsDirty || testing || missingCustomNames) ? 0.55 : 1,
+              cursor: (!settingsDirty || testing || missingCustomNames) ? 'default' : 'pointer',
+            }}
           >
-            {saved ? <>{Ico.check(14)} Saved</> : 'Save settings'}
+            {testing
+              ? 'Saving…'
+              : settingsDirty
+                ? 'Save settings'
+                : (<>{Ico.check(14)} Saved</>)}
           </button>
         </div>
       </div>

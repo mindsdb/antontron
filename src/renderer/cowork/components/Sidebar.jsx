@@ -45,7 +45,7 @@ function NavItem({ icon, label, active, onClick, badge, comingSoon, compact }) {
   );
 }
 
-function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelete, onMoveToProject }) {
+function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelete, onMoveToProject, showTimestamp = true }) {
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState(null);
@@ -110,10 +110,10 @@ function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelet
             display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
             fontFamily: 'var(--font-mono)', fontSize: 10,
             color: 'var(--ink-4)', letterSpacing: '0.02em',
-            opacity: showKebab ? 0 : 1,
+            opacity: (showKebab || !showTimestamp) ? 0 : 1,
             transition: 'opacity 120ms ease',
           }}>
-            {timeAgo(task.updatedAt || task.subtitle)}
+            {showTimestamp ? timeAgo(task.updatedAt || task.subtitle) : ''}
           </span>
           <span
             ref={triggerRef}
@@ -195,6 +195,10 @@ export default function Sidebar({
   onShowServerHelp,
   updateAvailable = null, // { version: string } or null
   onApplyUpdate,
+  // Settings → Personalization → Show nav-panel counters. When
+  // false, hide the per-nav badge counts AND the time-since slot
+  // on each Recent row. Default true.
+  showCounters = true,
 }) {
   // Decorate every task with its pinned state. Tasks come from the
   // conversations endpoint which doesn't know about pins (they live
@@ -462,9 +466,9 @@ export default function Sidebar({
 
         {/* Primary nav */}
         <div className="nav-list" style={{ padding: '0 10px', display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <NavItem icon={Ico.folder(15)}  label="Projects"        onClick={() => onNavigate('projects')}  active={activeRoute === 'projects'}  badge={projectsCount  || null} />
-          <NavItem icon={Ico.clock(15)}   label="Scheduled Tasks" onClick={() => onNavigate('scheduled')} active={activeRoute === 'scheduled'} badge={scheduledCount || null} />
-          <NavItem icon={Ico.sparkle(15)} label="Live Artifacts"  onClick={() => onNavigate('artifacts')} active={activeRoute === 'artifacts'} badge={artifactsCount || null} />
+          <NavItem icon={Ico.folder(15)}  label="Projects"        onClick={() => onNavigate('projects')}  active={activeRoute === 'projects'}  badge={showCounters ? (projectsCount  || null) : null} />
+          <NavItem icon={Ico.clock(15)}   label="Scheduled Tasks" onClick={() => onNavigate('scheduled')} active={activeRoute === 'scheduled'} badge={showCounters ? (scheduledCount || null) : null} />
+          <NavItem icon={Ico.sparkle(15)} label="Live Artifacts"  onClick={() => onNavigate('artifacts')} active={activeRoute === 'artifacts'} badge={showCounters ? (artifactsCount || null) : null} />
           {/* Connect Apps and Data — replaces "Customize". Reuses the
               `customize` route key so existing in-flight links still
               work. The page now lists connected apps + datasources in
@@ -477,7 +481,7 @@ export default function Sidebar({
             label={connectorsCount > 0 ? 'Connected Apps' : 'Connect Apps and Data'}
             onClick={() => onNavigate('customize')}
             active={activeRoute === 'customize'}
-            badge={connectorsCount || null}
+            badge={showCounters ? (connectorsCount || null) : null}
           />
         </div>
 
@@ -511,6 +515,7 @@ export default function Sidebar({
                 onRename={onRenameTask}
                 onDelete={onDeleteTask}
                 onMoveToProject={onMoveTaskToProject}
+                showTimestamp={showCounters}
               />
             ))}
           </div>
@@ -587,6 +592,7 @@ export default function Sidebar({
                 onRename={isGroup ? undefined : onRenameTask}
                 onDelete={isGroup ? undefined : onDeleteTask}
                 onMoveToProject={isGroup ? undefined : onMoveTaskToProject}
+                showTimestamp={showCounters}
               />
             );
           })}
