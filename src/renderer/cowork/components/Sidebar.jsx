@@ -248,7 +248,9 @@ export default function Sidebar({
           title: baseTitle,
           subtitle: t.subtitle,
           updatedAt: t.updatedAt,
-          projectName: sched?.project || t.projectName || null,
+          // Orphan schedules (no project) resolve to "general" —
+          // matches the server's _run_schedule fallback.
+          projectName: sched?.project || t.projectName || 'general',
           // Marker fields the click handler / row renderer key off:
           _scheduleGroup: { scheduleId: sid, runs: 1, baseTitle },
         };

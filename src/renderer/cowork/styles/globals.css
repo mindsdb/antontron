@@ -4199,9 +4199,17 @@ body[data-theme="dark"] .mshell__drawer-title {
 
   /* Grid/list view toggle — list mode breaks at phone widths
      (5-column row), and the toggle takes up header space we don't
-     have. Force grid (see effectiveView in ProjectsView) and hide
-     the switch. */
-  .proj-view-toggle { display: none !important; }
+     have. Force grid (see effectiveView in ProjectsView /
+     ArtifactsView) and hide the switch. */
+  .proj-view-toggle,
+  .artifacts-view-toggle { display: none !important; }
+
+  /* Artifacts grid — desktop uses 32px horizontal gutters which
+     waste half the screen on a phone. Tighten to 14px and reserve
+     bottom space for the safe area. */
+  .artifacts-grid {
+    padding: 6px 14px calc(80px + env(safe-area-inset-bottom, 0)) !important;
+  }
 
   /* Chat right-hand rail — only hide the FLOATING expand button on
      mobile (.chat-rail-toggle). The CLOSE button inside the rail
