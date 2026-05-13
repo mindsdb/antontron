@@ -2607,14 +2607,24 @@ function AppCore() {
             onResume={handleResumeSchedule}
             onRunNow={handleRunScheduleNow}
             onOpenRunSession={(sessionId) => {
-              // Best-effort: jump to the conversation if it's in our
-              // task list; otherwise no-op so we don't navigate away
-              // to a blank page.
-              const t = tasks.find((x) => x.id === sessionId);
-              if (t) {
-                setActiveTaskId(t.id);
-                setRoute('task');
-              }
+              if (!sessionId) return;
+              // Scheduled runs create real conversations on the
+              // server, but they may not be in our local recents list
+              // yet (e.g. the run fired while we were on another
+              // device or before this session's last fetch). Refresh
+              // tasks in parallel so currentTask resolves once the
+              // server response lands, and route immediately so the
+              // user sees the navigation happen.
+              fetchSessions().then((data) => {
+                if (Array.isArray(data)) {
+                  setTasks((prev) =>
+                    mergeTasksFromServer(data, prev)
+                      .filter((t) => !deletedTaskIdsRef.current.has(t.id))
+                  );
+                }
+              }).catch(() => {});
+              setActiveTaskId(sessionId);
+              setRoute('task');
             }}
           />
         )}

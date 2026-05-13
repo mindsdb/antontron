@@ -8,7 +8,7 @@
    plus _streaming) and our real Composer + project/model state. Tokens come
    from CSS vars so the panel reads correctly in both light and dark themes. */
 
-import { useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import Ico from '../components/Icons';
 import Composer from '../components/Composer';
 import { OrbitMorph } from '../components/ui';
@@ -845,6 +845,16 @@ export default function ChatView({
     () => false,
   );
 
+  // On narrow viewports the rail is closed by default and the floating
+  // expand button is hidden — open the overlay when a form spec
+  // arrives so the form is reachable. Close it again if the spec
+  // goes away (submit/cancel) so the empty fullscreen aside doesn't
+  // sit on top of the chat as a blank surface.
+  useEffect(() => {
+    if (!isNarrow) return;
+    setRailNarrowOpen(!!formActive);
+  }, [isNarrow, formActive]);
+
   // Hovering the connect-intro chat bubble highlights the form
   // panel on the right rail. Plain local state so we don't need
   // to lift it further; the panel reads via the `highlighted`
@@ -1152,13 +1162,34 @@ export default function ChatView({
                   }}
                 />
               ) : (
-                <span title={task.title} style={{
-                  fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
-                  letterSpacing: '0.04em', color: T.ink,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  overflowWrap: 'anywhere',
-                  minWidth: 0, flex: '0 1 auto',
-                }}>{task.title}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={task.title}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (settingsOpen) { setSettingsOpen(false); return; }
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setSettingsAnchor(rect);
+                    setSettingsOpen(true);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setSettingsAnchor(rect);
+                      setSettingsOpen((v) => !v);
+                    }
+                  }}
+                  style={{
+                    fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+                    letterSpacing: '0.04em', color: T.ink,
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    overflowWrap: 'anywhere',
+                    minWidth: 0, flex: '0 1 auto',
+                    cursor: 'pointer',
+                  }}
+                >{task.title}</span>
               )}
               {task.pinned && !titleEditing && (
                 <span aria-hidden style={{ display: 'inline-flex', flexShrink: 0, color: T.accent }}>
@@ -1311,9 +1342,21 @@ export default function ChatView({
                 // form is currently active there's nothing to do —
                 // the panel is already on the right rail.
                 const cachedSpec = m._form_spec || null;
-                const reopenForm = (cachedSpec && !formActive)
-                  ? () => setDataVaultForm(task?.id, cachedSpec)
-                  : undefined;
+                // Card click reopens the form. Two scenarios:
+                //   • Form spec is gone (user dismissed / submitted) →
+                //     re-publish the cached spec so the panel mounts again.
+                //   • Form is already active but the rail is closed
+                //     (common on phone, where the rail starts hidden) →
+                //     just slide the rail back in.
+                const reopenForm = cachedSpec
+                  ? () => {
+                      if (!formActive) setDataVaultForm(task?.id, cachedSpec);
+                      if (isNarrow) setRailNarrowOpen(true);
+                      else setRailOpen(true);
+                    }
+                  : (isNarrow && formActive
+                      ? () => setRailNarrowOpen(true)
+                      : undefined);
                 return (
                   <ConnectIntroBubble
                     key={i}
@@ -1487,7 +1530,7 @@ export default function ChatView({
           }}
         />
       )}
-      <aside style={isNarrow ? {
+      <aside className="chat-rail-aside" style={isNarrow ? {
         // Narrow: fixed overlay that slides in from the right
         position: 'fixed',
         top: 9, bottom: 9, right: 9,
@@ -1516,14 +1559,18 @@ export default function ChatView({
         minWidth: 0,
         WebkitAppRegion: 'no-drag',
       }}>
-        {/* Rail header bar — collapse button */}
-        <div className="chat-rail-toggle-row" style={{
+        {/* Rail header bar — collapse button. Stays visible on mobile
+            so the user has an explicit way to dismiss the rail (which
+            on phone hosts the data-vault form fullscreen). The
+            FLOATING expand button outside is the one hidden via
+            .chat-rail-toggle in globals.css. */}
+        <div className="chat-rail-close-row" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           flexShrink: 0,
         }}>
           <button
             type="button"
-            className="chat-rail-toggle"
+            className="chat-rail-close"
             onClick={() => isNarrow ? setRailNarrowOpen(false) : setRailOpen(false)}
             title="Collapse panel"
             aria-label="Collapse panel"

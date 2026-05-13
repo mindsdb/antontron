@@ -4126,6 +4126,54 @@ body[data-theme="dark"] .mshell__drawer-title {
      counters) — no value on a phone. */
   .settings-hide-mobile { display: none !important; }
 
+  /* Schedule detail (a scheduled task's full page) — desktop crams
+     three actions (Enable / Edit / Run now) plus a long title into
+     one row, and the Health card puts three metric tiles inline
+     with the description. Both go to two-row stacked layouts on a
+     phone. Outer gutters tighten too. */
+  .sched-crumb {
+    padding: 12px 14px 6px !important;
+  }
+  .sched-body {
+    padding: 4px 14px calc(96px + env(safe-area-inset-bottom, 0)) !important;
+  }
+  .sched-hero,
+  .sched-health {
+    padding: 14px 14px !important;
+    border-radius: 12px !important;
+  }
+  /* Hero top row: title block on top, action toolbar wraps to next
+     line so each control gets a proper tap target instead of being
+     squeezed against the title. */
+  .sched-hero-top {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .sched-hero-actions {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+    width: 100% !important;
+  }
+  .sched-hero-actions > * { flex: 0 0 auto; }
+  /* Run now is the primary action — let it grow to fill the row's
+     remaining width so it reads as the dominant CTA. */
+  .sched-hero-actions > .btn-primary { flex: 1 1 auto; justify-content: center; }
+
+  /* Health top row: description on top, metric tiles on their own
+     row with even spacing. */
+  .sched-health-top {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+  .sched-health-metrics {
+    display: flex !important;
+    justify-content: space-between !important;
+    gap: 8px !important;
+    flex-wrap: wrap !important;
+  }
+  .sched-health-metrics > * { flex: 1 1 0; min-width: 0; }
+
   /* Memories / Skills library / Connect Apps publish — all use
      fixed-width sidebars (300px or 360px) in a 2-col grid. Collapse
      to single column on phone; the list stacks above the detail. */
@@ -4155,12 +4203,27 @@ body[data-theme="dark"] .mshell__drawer-title {
      the switch. */
   .proj-view-toggle { display: none !important; }
 
-  /* Chat right-hand rail — the toggle buttons (expand from collapsed
-     state, collapse from open state) don't make sense at phone widths
-     where the rail is already a slide-over overlay (railNarrowOpen).
-     The mobile shell's hamburger drawer covers the same surfaces. */
-  .chat-rail-toggle,
-  .chat-rail-toggle-row { display: none !important; }
+  /* Chat right-hand rail — only hide the FLOATING expand button on
+     mobile (.chat-rail-toggle). The CLOSE button inside the rail
+     (.chat-rail-close) stays visible so the user can dismiss the
+     fullscreen form panel. The mobile shell's hamburger drawer
+     covers the same surfaces that the expand button used to. */
+  .chat-rail-toggle { display: none !important; }
+
+  /* Make the rail overlay truly fullscreen on mobile so the data-
+     vault form fills the viewport instead of being a 320px-wide
+     slide-over. Inline styles supply the slide transform via
+     transform: translateX; we only override the static frame here. */
+  .chat-rail-aside {
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    border-radius: 0 !important;
+    border-left: none !important;
+    padding-top: calc(env(safe-area-inset-top, 0) + 8px) !important;
+    padding-bottom: calc(env(safe-area-inset-bottom, 0) + 14px) !important;
+  }
 
   /* Home view (new task) — desktop has the orb sit inline to the
      left of the greeting (negative margin pulls it outside the text

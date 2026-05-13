@@ -925,12 +925,31 @@ function ProjectDetail({
                   }}
                 />
               ) : (
-                <span title={project.name} style={{
-                  fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
-                  letterSpacing: '0.04em', color: 'var(--ink)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  minWidth: 0, flex: '0 1 auto',
-                }}>{project.name}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={project.name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (menuRect) { setMenuRect(null); return; }
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setMenuRect(rect);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setMenuRect((cur) => (cur ? null : rect));
+                    }
+                  }}
+                  style={{
+                    fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+                    letterSpacing: '0.04em', color: 'var(--ink)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    minWidth: 0, flex: '0 1 auto',
+                    cursor: 'pointer',
+                  }}
+                >{project.name}</span>
               )}
               {!editing && (
                 <button
