@@ -251,11 +251,14 @@ def save_connector(connector_id: str, req: SaveConnectorRequest) -> dict:
     # incoming payload against the existing vault record (no-op on
     # create paths where no prior record exists), and computes the
     # secure-key set to persist. Spec-marked secrets come from the
-    # connector JSON's `secret: true` field flag.
+    # connector JSON's `secret: true` field flag. Both the merge
+    # helper and the `secure_keys` save kwarg ship in newer anton-
+    # core; defensive try/except around each so a stale install
+    # falls through to a plain save instead of crashing.
     try:
-        from anton.core.datasources.data_vault import resolve_modify_merge
-    except Exception as exc:
-        raise HTTPException(status_code=503, detail="Anton data vault is unavailable") from exc
+        from anton.core.datasources.data_vault import resolve_modify_merge as _merge
+    except ImportError:
+        _merge = None
     spec_secret_names = [
         f.get("name") for f in (fields or [])
         if f.get("secret") and f.get("name")
@@ -263,16 +266,35 @@ def save_connector(connector_id: str, req: SaveConnectorRequest) -> dict:
 
     vault = LocalDataVault()
     try:
-        merged_payload, secure_keys = resolve_modify_merge(
-            vault, connector_id, name, payload,
-            spec_secret_keys=spec_secret_names,
-        )
-        # LocalDataVault.save(engine, name, values, secure_keys=…) is
-        # the canonical write path. Wrapping in a generic try so
-        # unexpected signature changes surface as a 500 with the
-        # actual error rather than the generic "Anton data vault is
-        # unavailable".
-        vault.save(connector_id, name, merged_payload, secure_keys=secure_keys)
+        if _merge is not None:
+            merged_payload, secure_keys = _merge(
+                vault, connector_id, name, payload,
+                spec_secret_keys=spec_secret_names,
+            )
+        else:
+            merged_payload, secure_keys = payload, None
+        # Guard against the empty-fields failure mode that produced
+        # vault rows like `{ fields: {}, secure_keys: [access_token] }`
+        # — Anton then thought the connection was present but had no
+        # DS_* vars to inject. Strip the meta-only keys before this
+        # check so a payload that's literally only `_method` /
+        # `_connector_id` (which the renderer can send if all real
+        # fields were sentinels/blank) still trips the guard.
+        meaningful = {k: v for k, v in (merged_payload or {}).items()
+                      if not (isinstance(k, str) and k.startswith("_"))}
+        if not meaningful:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Refusing to save empty credential record for connector "
+                    f"{connector_id!r}. Fill in the required fields for the "
+                    f"selected method and try again."
+                ),
+            )
+        try:
+            vault.save(connector_id, name, merged_payload, secure_keys=secure_keys)
+        except TypeError:
+            vault.save(connector_id, name, merged_payload)
     except AttributeError as exc:
         raise HTTPException(
             status_code=500,

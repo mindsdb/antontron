@@ -31,9 +31,9 @@
       {
         "id": "personal-access-token",
         "label": "Personal Access Token",
-        "description": "Generate a long-lived token in Netlify User Settings \u2192 Applications \u2192 Personal access tokens and paste it here. No OAuth setup required \u2014 the simplest path.",
+        "description": "Generate a long-lived token in Netlify User Settings → Applications → Personal access tokens and paste it here. No OAuth setup required — the simplest path.",
         "recommended": true,
-        "how_to": "## Generate a Netlify Personal Access Token\n\n1. Log in to [Netlify](https://app.netlify.com) and click your avatar in the top-right corner.\n2. Go to **User Settings** (not a team's settings \u2014 your personal account).\n3. In the left sidebar, click **Applications**.\n4. Scroll to the **Personal access tokens** section and click **New access token**.\n5. Give the token a description like `Anton` so you can identify it later.\n6. Click **Generate token**. Copy the token \u2014 it is shown **only once**.\n7. Paste the token into the **Personal access token** field below.\n\n## Notes\n\n- The token inherits your account's permissions across all teams and sites you belong to.\n- If you lose the token, generate a new one and update it in Anton \u2014 old tokens cannot be retrieved.\n- To revoke access, return to **User Settings \u2192 Applications \u2192 Personal access tokens** and click **Delete** next to the token.",
+        "how_to": "## Generate a Netlify Personal Access Token\n\n1. Log in to [Netlify](https://app.netlify.com) and click your avatar in the top-right corner.\n2. Go to **User Settings** (not a team's settings — your personal account).\n3. In the left sidebar, click **Applications**.\n4. Scroll to the **Personal access tokens** section and click **New access token**.\n5. Give the token a description like `Anton` so you can identify it later.\n6. Click **Generate token**. Copy the token — it is shown **only once**.\n7. Paste the token into the **Personal access token** field below.\n\n## Notes\n\n- The token inherits your account's permissions across all teams and sites you belong to.\n- If you lose the token, generate a new one and update it in Anton — old tokens cannot be retrieved.\n- To revoke access, return to **User Settings → Applications → Personal access tokens** and click **Delete** next to the token.",
         "help_url": "https://docs.netlify.com/api/get-started/#authentication",
         "fields": [
           {
@@ -43,7 +43,7 @@
             "required": true,
             "secret": true,
             "placeholder": "nfp_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-            "description": "Found in Netlify \u2192 User Settings \u2192 Applications \u2192 Personal access tokens. Shown only once on creation."
+            "description": "Found in Netlify → User Settings → Applications → Personal access tokens. Shown only once on creation."
           }
         ]
       },
@@ -58,7 +58,7 @@
           "token_url": "https://api.netlify.com/oauth/token",
           "scopes": []
         },
-        "how_to": "## Set up a Netlify OAuth Application\n\n1. Log in to [Netlify](https://app.netlify.com) and open your **Team** dashboard.\n2. Go to **Team Settings \u2192 OAuth \u2192 OAuth Applications \u2192 New OAuth app**.\n3. Set the application name to `Anton` and the redirect URI to `http://127.0.0.1` (or whatever Anton's local callback is).\n4. Click **Save**. Copy the **Client ID** and **Client secret** shown on the app detail page.\n5. Paste both values into the fields below and click **Submit**.\n6. Anton will open a browser tab to Netlify's authorization page \u2014 approve access.\n\n## Notes\n\n- OAuth tokens are shorter-lived than personal access tokens; Anton will refresh them automatically.\n- Netlify OAuth apps are scoped at the team level \u2014 ensure the app belongs to the right team.",
+        "how_to": "## Set up a Netlify OAuth Application\n\n1. Log in to [Netlify](https://app.netlify.com) and open your **Team** dashboard.\n2. Go to **Team Settings → OAuth → OAuth Applications → New OAuth app**.\n3. Set the application name to `Anton` and the redirect URI to `http://127.0.0.1` (or whatever Anton's local callback is).\n4. Click **Save**. Copy the **Client ID** and **Client secret** shown on the app detail page.\n5. Paste both values into the fields below and click **Submit**.\n6. Anton will open a browser tab to Netlify's authorization page — approve access.\n\n## Notes\n\n- OAuth tokens are shorter-lived than personal access tokens; Anton will refresh them automatically.\n- Netlify OAuth apps are scoped at the team level — ensure the app belongs to the right team.",
         "help_url": "https://docs.netlify.com/api/get-started/#oauth2",
         "fields": [
           {
@@ -67,7 +67,7 @@
             "type": "text",
             "required": true,
             "placeholder": "abcdef1234567890abcdef1234567890",
-            "description": "From Netlify Team Settings \u2192 OAuth \u2192 OAuth Applications. Copy the Client ID of your app."
+            "description": "From Netlify Team Settings → OAuth → OAuth Applications. Copy the Client ID of your app."
           },
           {
             "name": "client_secret",
@@ -79,6 +79,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/netlify.svg"
+  },
+  "logo_url": "logos/netlify.svg"
 }

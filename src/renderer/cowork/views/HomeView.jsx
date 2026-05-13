@@ -225,7 +225,9 @@ export default function HomeView({
   greeting, showDots,
   activeTasks, onSelectTask, onClearActive,
   onSend, project, onProjectChange, model, onModelChange, projects, models,
-  attachments, connectors, onAttachFiles, onAttachConnector, onRemoveAttachment,
+  attachments, connectors, onAttachFiles, onRemoveAttachment,
+  disabledConnections = [],
+  onUpdateConnectorMute,
   configReady, configError, onOpenSettings,
   serverOnline = false, onShowServerHelp,
   skipIntro = false,
@@ -336,7 +338,7 @@ export default function HomeView({
         background: 'transparent',
       }}
     >
-      <h1 style={{
+      <h1 className="home-greeting-row" style={{
         fontFamily: 'var(--font-display)',
         fontSize: 36, fontWeight: 700, letterSpacing: '-0.02em',
         color: 'var(--text-strong)',
@@ -351,6 +353,7 @@ export default function HomeView({
       }}>
         <span
           ref={orbRef}
+          className="home-orb"
           style={{
             position: 'relative',
             width: 42, height: 42,
@@ -502,8 +505,9 @@ export default function HomeView({
               attachments={attachments}
               connectors={connectors}
               onAttachFiles={onAttachFiles}
-              onAttachConnector={onAttachConnector}
               onRemoveAttachment={onRemoveAttachment}
+              disabledConnections={disabledConnections}
+              onUpdateConnectorMute={onUpdateConnectorMute}
               hideModel
               onTypingChange={setIsTyping}
             />

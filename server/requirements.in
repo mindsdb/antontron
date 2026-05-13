@@ -24,6 +24,9 @@
 #                      /v1/projects/{name}/files/upload.
 #   pydantic         — v2 only; v1 is a hard break for our route
 #                      models.
+#   httpx            — async HTTP client used by routes/settings.py
+#                      (LLM connectivity probe) and connectors/_build.py
+#                      (logo download during prebuild).
 #
 # Anton itself is installed separately (see scripts/install-anton.sh)
 # from git or local source; do NOT add it here.
@@ -31,3 +34,4 @@ fastapi>=0.115.0
 uvicorn[standard]>=0.32.0
 python-multipart>=0.0.12
 pydantic>=2.0.0
+httpx>=0.24

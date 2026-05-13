@@ -9,6 +9,7 @@ import * as http from 'http';
 import * as os from 'os';
 import * as path from 'path';
 import { app } from 'electron';
+import { checkPythonImports, getAntonToolPython, getPythonUtf8Env } from './server-deps';
 
 const DEFAULT_PORT = 26866; // ANTON on T9 keypad
 const SERVER_HOST = '127.0.0.1';
@@ -31,6 +32,19 @@ let recentStderr = '';
 let lastStartError: string | null = null;
 let lastStartAt: number | null = null;
 let lastExitCode: number | null = null;
+// Whether the most-recent transition to "not running" was caused by
+// a user/app-initiated stopServer() call. Distinguishes:
+//   true  → user clicked Stop (or app is quitting). Modal shows
+//           a calm "You stopped the backend" panel.
+//   false → python died on its own (crash, external kill, OOM).
+//           Modal shows the failure-style "didn't start / didn't
+//           stay up" panel with the log tail.
+//   null  → never stopped this session (initial state pre-first-stop).
+let lastStopIntentional: boolean | null = null;
+// Set true while stopServer() is running so the child's exit event
+// can attribute the death correctly. Reset to false in the exit
+// handler.
+let _stopRequested = false;
 
 function appendStderr(chunk: string) {
   recentStderr = (recentStderr + chunk).slice(-STDERR_BUFFER_BYTES);
@@ -45,12 +59,7 @@ export function getServerOrigin(): string {
 }
 
 function getAntonPython(): string | null {
-  const dataHome = process.env.XDG_DATA_HOME ||
-    path.join(os.homedir(), process.platform === 'win32' ? 'AppData/Roaming' : '.local/share');
-  const candidate = path.join(
-    dataHome, 'uv', 'tools', 'anton',
-    process.platform === 'win32' ? 'Scripts/python.exe' : 'bin/python',
-  );
+  const candidate = getAntonToolPython();
   return fs.existsSync(candidate) ? candidate : null;
 }
 
@@ -117,12 +126,52 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
   if (pendingStart) return pendingStart;
 
   serverPort = opts.port ?? (Number(process.env.ANTON_SERVER_PORT) || DEFAULT_PORT);
-  const readyTimeoutMs = opts.readyTimeoutMs ?? 15000;
+
+  // Pre-flight: somebody might already be on our port. The most
+  // common cause is an orphan python from a prior antontron session
+  // that didn't get reaped on quit. If `/health` answers cleanly we
+  // adopt that process — there's no point spawning a second python
+  // that would fail to bind. Renderer-initiated re-starts after a
+  // user "Stop" hit this same path; the brief 500ms probe is cheap
+  // enough to be unconditional.
+  const alreadyHealthy = await probeHealth(500);
+  if (alreadyHealthy) {
+    serverStarted = true;
+    lastStartError = null;
+    console.log(`[server] adopted existing instance on port ${serverPort}`);
+    return { ok: true, port: serverPort };
+  }
+
+  // 45s ceiling so the python's in-process `_maybe_self_update_and_reexec`
+  // has room to download + install + execv when a new release lands.
+  // Steady-state boots respond in <2s; only the update-on-launch path
+  // pushes us past 15s. Lower would risk timing out a valid update.
+  const readyTimeoutMs = opts.readyTimeoutMs ?? 45000;
 
   lastStartAt = Date.now();
+  // A new start attempt invalidates the prior stop attribution —
+  // whether the previous death was intentional or a crash, the
+  // user is now asking for a fresh boot. Reset so the next
+  // transition to "not running" reflects this start cycle's reason.
+  lastStopIntentional = null;
+  _stopRequested = false;
   const pythonCmd = getAntonPython();
   if (!pythonCmd) {
     lastStartError = 'Anton Python interpreter not found. Run the installer first.';
+    return {
+      ok: false,
+      reason: lastStartError,
+    };
+  }
+
+  const baseEnv = {
+    ...process.env,
+    PATH: getEnvPath(),
+    ...getPythonUtf8Env(),
+  };
+  const depsReady = await checkPythonImports(pythonCmd, baseEnv);
+  if (!depsReady) {
+    lastStartError = 'Anton server dependencies are missing from the uv tool environment. Run the installer to repair the Anton tool venv.';
     return {
       ok: false,
       reason: lastStartError,
@@ -140,16 +189,30 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
 
   pendingStart = (async (): Promise<StartServerResult> => {
     const env = {
-      ...process.env,
-      PATH: getEnvPath(),
+      ...baseEnv,
       PYTHONUNBUFFERED: '1',
       ANTON_SERVER_PORT: String(serverPort),
       ANTON_SERVER_HOST: SERVER_HOST,
       ANTON_PROJECTS_DIR: path.join(app.getPath('userData'), 'projects'),
     };
 
-    const child = spawn(pythonCmd, ['main.py'], {
-      cwd: serverDir,
+    // Spawn the python with a STABLE cwd (`~`) and pass `main.py` as
+    // an absolute path. Earlier we used `cwd: serverDir`, which sat
+    // inside the .app bundle — fine until the bundle was replaced
+    // under a running server (`npm run pack` in dev wipes
+    // `release/mac-arm64/`; in-place app updates do the same in
+    // production). Once the cwd directory is gone, anton-core's
+    // `anton/config/settings.py:_build_env_files` calls `Path.cwd()`
+    // at import time, which calls `os.getcwd()`, which raises
+    // FileNotFoundError. That surfaces in the chat as the cryptic
+    // "[Errno 2] No such file or directory" with no recoverable
+    // context. Pinning cwd to home avoids the problem entirely —
+    // the server uses absolute paths everywhere internally, cwd is
+    // only load-bearing for anton-core's optional `cwd/.env` lookup
+    // which we deliberately skip here (the server's `.env` chain
+    // resolves through `~/.anton/.env`).
+    const child = spawn(pythonCmd, [path.join(serverDir, 'main.py')], {
+      cwd: os.homedir(),
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -172,6 +235,13 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
       serverStarted = false;
       serverProcess = null;
       lastExitCode = code;
+      // Attribute the death: if `_stopRequested` is set, this exit
+      // was caused by stopServer() (user clicked Stop, or the app is
+      // quitting). Otherwise the python died on its own — surface
+      // that in the diagnostics so the modal shows the failure
+      // panel instead of a calm "you stopped it" message.
+      lastStopIntentional = _stopRequested;
+      _stopRequested = false;
       if (code !== 0 && code !== null) {
         console.error(`[anton-server] exited with code ${code}`);
       }
@@ -182,6 +252,22 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
     const ready = await probeHealth(readyTimeoutMs);
     if (!ready) {
       lastStartError = `Server did not respond on /health within ${readyTimeoutMs}ms.`;
+      // Reap the spawned child instead of leaving it as a zombie
+      // pinning the port. If we don't, every failed restart leaks a
+      // python that still owns 26866, so subsequent restart attempts
+      // bind-collide and fail the same way — making the "stop +
+      // start" cycle look broken from the user's side. SIGTERM with
+      // a SIGKILL fallback so a hung uvicorn boot can't outlive us.
+      try { child.kill('SIGTERM'); } catch {}
+      const exited = new Promise<void>((resolve) => {
+        child.once('exit', () => resolve());
+      });
+      await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 2_000))]);
+      if (child.exitCode === null && !child.killed) {
+        try { child.kill('SIGKILL'); } catch {}
+        await Promise.race([exited, new Promise<void>((r) => setTimeout(r, 1_000))]);
+      }
+      if (serverProcess === child) serverProcess = null;
       return {
         ok: false,
         reason: lastStartError,
@@ -202,11 +288,70 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
   }
 }
 
-export function stopServer() {
-  if (serverProcess) {
-    try { serverProcess.kill('SIGTERM'); } catch {}
-    serverProcess = null;
+// Stop the python child and wait for it to actually exit before
+// returning. Earlier the function fired SIGTERM and immediately nulled
+// `serverProcess`, which let a subsequent `startServer()` race ahead
+// and spawn a new python on a port the dying child still owned —
+// surfacing as a 15s /health timeout instead of an obvious failure.
+//
+// Three phases:
+//   1. SIGTERM, wait up to 3s for graceful shutdown.
+//   2. SIGKILL, wait up to 1.5s for hard kill.
+//   3. Clear the slot regardless — if the OS truly orphaned the child,
+//      we'd rather lose track of it than block app quit forever.
+export async function stopServer(): Promise<void> {
+  const proc = serverProcess;
+  if (!proc) {
     serverStarted = false;
+    // Even with no live child, mark this as an intentional stop —
+    // a stopServer() call signals user/app intent, the absence of a
+    // child is just "already stopped." Keeps the modal from showing
+    // a stale "crashed" panel after the user re-clicked Stop on an
+    // already-stopped backend.
+    lastStopIntentional = true;
+    return;
+  }
+
+  // Tell the child's exit handler this death is intentional. Set
+  // BEFORE the kill so there's no chance the exit event fires before
+  // we've recorded our intent.
+  _stopRequested = true;
+
+  // Mark not-running immediately so the renderer's `isServerRunning`
+  // check reflects intent. We keep `serverProcess` non-null until we
+  // actually verify exit so a racing startServer can't double-spawn.
+  serverStarted = false;
+
+  const exited = new Promise<void>((resolve) => {
+    proc.once('exit', () => resolve());
+    // 'close' fires after exit + stdio close; 'exit' is enough for
+    // port release on POSIX. If we ever lose 'exit' (very rare), the
+    // race-with-timeout below covers us.
+  });
+
+  try { proc.kill('SIGTERM'); } catch {}
+
+  await Promise.race([
+    exited,
+    new Promise<void>((resolve) => setTimeout(resolve, 3_000)),
+  ]);
+
+  // Still alive? Force-kill. `proc.exitCode === null` means the child
+  // hasn't reported an exit code yet → still running.
+  if (proc.exitCode === null && !proc.killed) {
+    try { proc.kill('SIGKILL'); } catch {}
+    await Promise.race([
+      exited,
+      new Promise<void>((resolve) => setTimeout(resolve, 1_500)),
+    ]);
+  }
+
+  // Clear the slot only if it still points at the same child — a
+  // concurrent startServer() may have replaced it (shouldn't happen
+  // with the renderer's serial restart flow but safe-guards against
+  // future callers that don't await stopServer).
+  if (serverProcess === proc) {
+    serverProcess = null;
   }
 }
 
@@ -234,6 +379,14 @@ export interface ServerDiagnostics {
   lastStartAt: number | null;
   /** Tail of stdout+stderr since this run of the main process. */
   recentLog: string;
+  /**
+   * Whether the most-recent transition to "not running" was caused by a
+   * user/app stopServer() call (true) vs an unexpected exit (false).
+   * Null until the first stop happens this session. The renderer uses
+   * this to choose between a calm "you stopped the backend" panel and
+   * the failure-style "didn't start / crashed" panel.
+   */
+  lastStopIntentional: boolean | null;
 }
 
 export function getServerDiagnostics(): ServerDiagnostics {
@@ -245,5 +398,6 @@ export function getServerDiagnostics(): ServerDiagnostics {
     lastExitCode,
     lastStartAt,
     recentLog: recentStderr,
+    lastStopIntentional,
   };
 }

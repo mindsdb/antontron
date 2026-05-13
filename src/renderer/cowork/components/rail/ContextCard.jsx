@@ -1,7 +1,8 @@
 // Context card body — surfaces memories (Project + Global) AND
-// files under `.context/` (anton.md + uploads). Listed via the same
-// GET /projects/{name}/files as Working folder, but only `.context/`
-// rows appear here; everything else lives in Working folder only.
+// project instructions (`.anton/anton.md`) plus any legacy `.context/`
+// files. Listed via GET /projects/{name}/files; Working folder hides
+// `.anton/` and `.context/` trees except this rail shows instructions
+// (and legacy context paths).
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import clsx from 'clsx';
@@ -10,8 +11,7 @@ import {
   deleteMemory,
   fetchAttachments,
   fetchMemory,
-  isUnderContextDir,
-  listProjectFiles,
+  fetchProjectInstructions,
   saveMemory,
   ANTON_PROJECT_INSTRUCTIONS_PATH,
 } from '../../api';
@@ -28,38 +28,31 @@ function relativeAge(ts) {
   return `${Math.floor(secs / 86400)}d`;
 }
 
-function previewFirstLine(text, max = 80) {
-  if (!text) return '';
-  const line = String(text).replace(/^#+\s*/, '').split('\n').find((l) => l.trim()) || '';
-  const trimmed = line.trim();
-  if (trimmed.length <= max) return trimmed;
-  return trimmed.slice(0, max - 1) + '…';
-}
-
 function MemoryRow({ entry, onOpen }) {
+  // Single-line row — the previous version displayed
+  // `previewFirstLine(entry.content)` underneath the filename, which
+  // for the canonical files (lessons.md, rules.md, identity.md, …)
+  // is just the H1 of the file and reads as a duplicate of the
+  // filename itself. Hover/click opens the editor, which has the
+  // full content; the rail row only needs the file identity + age.
   return (
     <button
       type="button"
       onClick={onOpen}
       title={entry.content || entry.relativePath}
       className={clsx(
-        'group grid items-start gap-2 rounded-md px-1 py-1 text-left',
+        'group grid items-center gap-2 rounded-md px-1 py-1 text-left',
         'cursor-pointer transition-colors hover:bg-surface-2',
         'border-0 bg-transparent w-full'
       )}
       style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
     >
-      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{Ico.code(13)}</span>
-      <span className="min-w-0">
-        <span className="block truncate text-[12.5px] text-ink">
-          {entry.relativePath || entry.name}
-        </span>
-        <span className="mt-0.5 block truncate text-[11px] text-ink-4">
-          {previewFirstLine(entry.content)}
-        </span>
+      <span className="text-ink-4 inline-flex flex-none">{Ico.code(13)}</span>
+      <span className="block truncate text-[12.5px] text-ink min-w-0">
+        {entry.relativePath || entry.name}
       </span>
       {entry.modifiedAt && (
-        <span className="text-[10.5px] text-ink-4 mt-0.5">{relativeAge(entry.modifiedAt)}</span>
+        <span className="text-[10.5px] text-ink-4">{relativeAge(entry.modifiedAt)}</span>
       )}
     </button>
   );
@@ -68,10 +61,10 @@ function MemoryRow({ entry, onOpen }) {
 // Row for a project context file (anton.md or any uploaded file).
 // Same visual rhythm as MemoryRow but distinguishes the always-
 // present anton.md with a subtle "Project instructions" label.
-function attachmentKindIcon(kind) {
-  if (kind === 'url') return Ico.globe(13);
-  if (kind === 'snippet') return Ico.code(13);
-  if (kind === 'connector') return Ico.link(13);
+function attachmentSourceIcon(item) {
+  const source = item.source || item.kind || 'file';
+  if (source === 'connector') return Ico.link(13);
+  if (item.mime && String(item.mime).startsWith('image/')) return Ico.image(13);
   return Ico.doc(13);
 }
 
@@ -80,7 +73,7 @@ function SessionAttachmentRow({ item }) {
   const sub = item.textPreview
     || (item.mime ? String(item.mime).split('/').pop() : '')
     || (item.size ? `${Math.ceil(item.size / 1024)} KB` : '');
-  const when = item.updatedAt || item.createdAt;
+  const when = item.updated_at || item.created_at || item.updatedAt || item.createdAt;
   return (
     <div
       className={clsx(
@@ -90,7 +83,7 @@ function SessionAttachmentRow({ item }) {
       style={{ gridTemplateColumns: '14px minmax(0,1fr) auto', font: 'inherit' }}
       title={item.note || item.textPreview || label}
     >
-      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{attachmentKindIcon(item.kind)}</span>
+      <span className="mt-0.5 text-ink-4 inline-flex flex-none">{attachmentSourceIcon(item)}</span>
       <span className="min-w-0">
         <span className="block truncate text-[12.5px] text-ink">{label}</span>
         {sub ? (
@@ -122,7 +115,12 @@ function ContextFileRow({ file, onOpen }) {
       <span className="mt-0.5 text-ink-4 inline-flex flex-none">{Ico.doc(13)}</span>
       <span className="min-w-0">
         <span className="block truncate text-[12.5px] text-ink">
-          {isAnton ? 'anton.md' : file.path}
+          {/* Display name for the canonical instructions file. The
+              raw filename (`anton.md`) is jargon — most users don't
+              know what it does. "Instructions" reads as a noun and
+              matches the project-level mental model. The on-disk
+              path is unchanged; the modal still writes to anton.md. */}
+          {isAnton ? 'Instructions' : file.path}
         </span>
         <span className="mt-0.5 block truncate text-[11px] text-ink-4">
           {isAnton
@@ -156,7 +154,7 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
     return () => { cancelled = true; };
   }, [project?.path]);
 
-  // Ticket pattern: every listProjectFiles call (mount + reload-on-
+  // Ticket pattern: every instructions fetch (mount + reload-on-
   // edit) bumps `loadVersion`. The async response only applies its
   // result if its ticket is still the latest. Without this, saving a
   // context edit and immediately switching projects could let the
@@ -164,14 +162,18 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
   // bug WorkingFolderLive had.
   const loadVersion = useRef(0);
 
+  // Stat just `.anton/anton.md` instead of walking the whole project
+  // tree. The rail only needs the one row; the old recursive listing
+  // was the dominant cost when projects had large directories
+  // (node_modules, .venv, …) anywhere under the root.
   const reloadFiles = useCallback(() => {
     if (!project?.name) { setProjectFiles([]); return; }
     const ticket = ++loadVersion.current;
-    listProjectFiles(project.name)
+    fetchProjectInstructions(project.name)
       .then((data) => {
         if (ticket !== loadVersion.current) return;
-        const raw = Array.isArray(data?.files) ? data.files : [];
-        setProjectFiles(raw.filter((f) => isUnderContextDir(f.path)));
+        const file = data?.file;
+        setProjectFiles(file ? [file] : []);
       })
       .catch(() => { if (ticket === loadVersion.current) setProjectFiles([]); });
   }, [project?.name]);
@@ -187,7 +189,9 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
     reloadFiles();
   }, [project?.name, reloadFiles]);
 
-  const sessionRelevant = conversationId && !String(conversationId).startsWith('tmp-');
+  const sessionRelevant = conversationId
+    && !String(conversationId).startsWith('tmp-')
+    && !!project?.name;
 
   // `useEffect` runs after paint — switching tasks would briefly show the
   // previous task's rows with "Loading attachments…". This runs first
@@ -211,13 +215,13 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
     }
     let cancelled = false;
     setAttachmentsError(null);
-    fetchAttachments(conversationId)
+    fetchAttachments(project.name, conversationId)
       .then((data) => {
         if (cancelled) return;
         const raw = Array.isArray(data?.attachments) ? data.attachments : [];
         const sorted = [...raw].sort((a, b) => {
-          const ta = new Date(a.updatedAt || a.createdAt || 0).getTime();
-          const tb = new Date(b.updatedAt || b.createdAt || 0).getTime();
+          const ta = new Date(a.updated_at || a.created_at || a.updatedAt || a.createdAt || 0).getTime();
+          const tb = new Date(b.updated_at || b.created_at || b.updatedAt || b.createdAt || 0).getTime();
           return tb - ta;
         });
         setSessionAttachments(sorted);
@@ -232,7 +236,7 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
         if (!cancelled) setAttachmentsLoading(false);
       });
     return () => { cancelled = true; };
-  }, [sessionRelevant, conversationId, refreshKey]);
+  }, [sessionRelevant, conversationId, refreshKey, project?.name]);
 
   // Order: Project section first, Global second.
   const ordered = useMemo(() => {
@@ -265,11 +269,11 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
 
   return (
     <div className="flex flex-col gap-3 pt-2">
-      {/* `.context/` only — Working folder lists the rest of the project tree. */}
+      {/* Instructions (`.anton/anton.md`) + legacy `.context/` only. */}
       {project?.name && hasProjectFiles && (
         <div className="flex flex-col gap-0.5">
           <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
-            Context files
+            Files
           </span>
           {projectFiles.map((f) => (
             <ContextFileRow
@@ -295,9 +299,13 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
             </p>
           )}
           {!attachmentsLoading && !attachmentsError && sessionAttachments.length === 0 && (
-            <p className="text-[12px] text-ink-4 px-1 pb-0.5">
-              No files attached to this task yet.
-            </p>
+            <div className="flex items-center gap-2 px-1 pb-0.5 text-[12px] text-ink-4">
+              {/* Empty-state glyph mirrors the row icon style above
+                  (paperclip ~ "attachment") so the row reads as a
+                  placeholder for what would otherwise live there. */}
+              <span className="text-ink-4 inline-flex flex-none">{Ico.attach(13)}</span>
+              <span>No files attached yet.</span>
+            </div>
           )}
           {!attachmentsLoading
             && sessionAttachments.map((item) => (
@@ -314,7 +322,14 @@ export function ContextCard({ project, conversationId, refreshKey = 0 }) {
         return (
           <div key={section.scope} className="flex flex-col gap-0.5">
             <span className="font-display text-[10.5px] font-semibold uppercase tracking-widest text-ink-4 px-1 mb-1">
-              {section.scope}
+              {/* Display label spelled out — "Project" / "Global" on
+                  their own read as project metadata, not memory. The
+                  vault scope (`section.scope`) is still the canonical
+                  id used to save/edit; this is purely the heading
+                  shown in the rail. */}
+              {section.scope === 'Project' ? 'Project memory'
+                : section.scope === 'Global' ? 'Global memory'
+                : section.scope}
             </span>
             {visible.map((entry) => (
               <MemoryRow

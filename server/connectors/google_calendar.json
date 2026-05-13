@@ -1,8 +1,21 @@
 {
   "id": "google_calendar",
   "label": "Google Calendar",
-  "aliases": ["gcal", "g cal", "calendar", "google cal"],
-  "keywords": ["calendar", "events", "meetings", "schedule", "google", "workspace", "appointments"],
+  "aliases": [
+    "gcal",
+    "g cal",
+    "calendar",
+    "google cal"
+  ],
+  "keywords": [
+    "calendar",
+    "events",
+    "meetings",
+    "schedule",
+    "google",
+    "workspace",
+    "appointments"
+  ],
   "description": "Read, create, and manage events on your Google Calendars.",
   "category": "productivity",
   "logo": "schedule",
@@ -20,7 +33,8 @@
         "label": "In-Browser Connect",
         "description": "Opens Google sign-in in your browser. No credentials required — just click Connect.",
         "recommended": true,
-        "fields": []
+        "fields": [],
+        "hidden": true
       },
       {
         "id": "oauth",
@@ -86,6 +100,9 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/google_calendar.svg"
+  },
+  "logo_url": "logos/google_calendar.svg",
+  "featured": true
 }

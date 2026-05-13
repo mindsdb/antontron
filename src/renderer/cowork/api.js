@@ -154,6 +154,13 @@ function _conversationToTask(conv, messages = []) {
   // the replay at the api boundary so the rest of the app sees a
   // consistent message shape regardless of whether the data came from
   // a fresh stream or a server reload.
+  const rawDisabled = conv.disabled_connections ?? conv.disabledConnections;
+  const disabledConnections = Array.isArray(rawDisabled)
+    ? rawDisabled
+      .filter((x) => x && typeof x.engine === 'string' && typeof x.name === 'string')
+      .map((x) => ({ engine: x.engine.trim(), name: x.name.trim() }))
+    : [];
+
   return {
     id: conv.id,
     title: conv.title || conv.preview || conv.id || 'Untitled task',
@@ -164,7 +171,16 @@ function _conversationToTask(conv, messages = []) {
     projectPath: conv.project_path || null,
     model: null,
     attachments: [],
+    disabledConnections,
     pinned: false,
+    // Carry the schedule linkage through so the renderer can group
+    // multiple runs of the same schedule into a single "view all"
+    // row instead of showing each execution as its own task. Set on
+    // conversations created by `_run_schedule`; null for chat-
+    // initiated conversations.
+    scheduledId: conv.scheduled_id || conv.scheduledId || null,
+    updatedAt: conv.updated_at || conv.updatedAt || null,
+    createdAt: conv.created_at || conv.createdAt || null,
   };
 }
 
@@ -211,11 +227,25 @@ export async function fetchSession(id) {
   }
 }
 
+/** 
+ * Matches server `conversation_manager._new_conversation_id` (UTC) so client can upload before the first stream. 
+ * This is required especially when the user uploads files before the first stream, so the server can assign the files to the correct conversation.
+*/
+export function allocateConversationId() {
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const stamp = `${now.getUTCFullYear()}${pad(now.getUTCMonth() + 1)}${pad(now.getUTCDate())}_${pad(now.getUTCHours())}${pad(now.getUTCMinutes())}${pad(now.getUTCSeconds())}`;
+  const hex = typeof crypto !== 'undefined' && crypto.getRandomValues
+    ? Array.from(crypto.getRandomValues(new Uint8Array(3)), (b) => b.toString(16).padStart(2, '0')).join('')
+    : Math.random().toString(16).slice(2, 8);
+  return `${stamp}_${hex}`;
+}
+
 // Streams a /v1/responses request. Maps OpenAI-style typed events to the
 // callback shape the rest of the app already speaks. `conversationId` is
 // optional — omit it to start a new conversation; the caller learns the
 // new id via the first onChunk/onProgress/onDone callback's second arg.
-function _streamResponse(text, { conversationId, projectName, projectPath, model, attachmentIds = [], onChunk, onProgress, onToolResult, onDone, onError, onEvent } = {}) {
+function _streamResponse(text, { conversationId, projectName, projectPath, model, attachmentIds = [], disabledConnections, onChunk, onProgress, onToolResult, onDone, onError, onEvent } = {}) {
   const ctrl = new AbortController();
   (async () => {
     try {
@@ -232,6 +262,9 @@ function _streamResponse(text, { conversationId, projectName, projectPath, model
           // every conversation would fall back to the active project.
           project: projectName || null,
           attachment_ids: attachmentIds,
+          ...(disabledConnections !== undefined
+            ? { disabled_connections: disabledConnections }
+            : {}),
         }),
         signal: ctrl.signal,
       });
@@ -406,15 +439,21 @@ export async function deleteProject(name) {
 // ── Project files ────────────────────────────────────────────────
 //
 // Most paths are relative to the project root. Project instructions
-// live at ANTON_PROJECT_INSTRUCTIONS_PATH (on disk: `.context/anton.md`).
+// live at ANTON_PROJECT_INSTRUCTIONS_PATH (on disk: `.anton/anton.md`).
 // These helpers wrap routes/projects.py.
 
 const enc = encodeURIComponent;
 
-/** Relative path from project root for LLM instructions (projects file API). */
-export const ANTON_PROJECT_INSTRUCTIONS_PATH = '.context/anton.md';
+/** Relative path from project root for project instructions (projects file API). */
+export const ANTON_PROJECT_INSTRUCTIONS_PATH = '.anton/anton.md';
 
-/** True if `relPath` is under the project `.context/` tree (listing paths from GET …/files). */
+/** True if `relPath` is the canonical instructions file (`.anton/anton.md`). */
+export function isProjectInstructionsPath(relPath) {
+  const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
+  return r === ANTON_PROJECT_INSTRUCTIONS_PATH;
+}
+
+/** Legacy installs: true if `relPath` is under `.context/` (pre-migration tree). */
 export function isUnderContextDir(relPath) {
   const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
   return r === '.context' || r.startsWith('.context/');
@@ -424,6 +463,21 @@ export function isUnderContextDir(relPath) {
 export function isUnderAntonDir(relPath) {
   const r = String(relPath || '').replace(/\\/g, '/').replace(/^\/+/, '');
   return r === '.anton' || r.startsWith('.anton/');
+}
+
+/**
+ * Stat just `.anton/anton.md` for the project — far cheaper than
+ * `listProjectFiles` when the only thing the caller needs is the
+ * canonical instructions row. Returns `{ file: { path, name, size,
+ * modified, is_dir, synthetic? } }`. `synthetic: true` means the
+ * file doesn't exist on disk yet (renderer should show the "empty,
+ * click to author" affordance). Coalesced like `listProjectFiles`.
+ */
+export async function fetchProjectInstructions(projectName) {
+  if (!projectName) return { file: null };
+  return dedupe(`projects/${projectName}/instructions`, () =>
+    req(`/projects/${enc(projectName)}/instructions`),
+  );
 }
 
 export async function listProjectFiles(projectName) {
@@ -514,10 +568,20 @@ export async function setActiveProject(name) {
 // the `dedupe` wrapper that meant N copies of the same request on
 // every list render. With coalescing, one network request fans out
 // to all subscribers and the cache entry releases on settle.
-export async function fetchArtifacts() {
-  return dedupe('artifacts', async () => {
+export async function fetchArtifacts({ projectPath } = {}) {
+  // `projectPath` scopes the response to one project's
+  // `<base>/artifacts/` tree. Used by the project-detail rail card
+  // so the response is small and the server skips reading every
+  // other project's metadata.json. Omit it (or pass undefined) for
+  // the system-wide list the global Live Artifacts page wants.
+  const suffix = projectPath
+    ? `?project_path=${encodeURIComponent(projectPath)}`
+    : '';
+  // Dedupe key includes the path so a global fetch and a scoped
+  // fetch don't share an in-flight promise.
+  return dedupe(`artifacts${suffix}`, async () => {
     try {
-      return await req('/artifacts');
+      return await req(`/artifacts${suffix}`);
     } catch {
       return [];
     }
@@ -577,6 +641,28 @@ export async function validateSettings() {
   return req('/settings/validate', { method: 'POST', body: JSON.stringify({}) });
 }
 
+export async function testProviders(providers) {
+  const body = Array.isArray(providers) ? { providers } : {};
+  try {
+    return await req('/settings/test-providers', { method: 'POST', body: JSON.stringify(body) });
+  } catch (err) {
+    return { providerStatus: {}, providerStatusDetails: {}, error: err?.message || 'Test failed' };
+  }
+}
+
+// Fetch the real (unmasked) value of a stored API key — drives the eye
+// icon "reveal" in Settings. The GET /settings endpoint returns "***"
+// for stored keys; this endpoint returns the actual stored value so the
+// user can verify which key is configured.
+export async function revealSettingKey(name) {
+  try {
+    const res = await req(`/settings/reveal-key/${encodeURIComponent(name)}`);
+    return res?.value || '';
+  } catch {
+    return '';
+  }
+}
+
 export async function fetchIntegrations() {
   try {
     return await req('/integrations');
@@ -591,6 +677,10 @@ export async function startGoogleDriveAuth() {
 
 export async function startGoogleCalendarAuth() {
   return req('/integrations/google-calendar/oauth/start', { method: 'POST', body: JSON.stringify({}) });
+}
+
+export async function startGmailAuth() {
+  return req('/integrations/gmail/oauth/start', { method: 'POST', body: JSON.stringify({}) });
 }
 
 // ─── Anton Utilities ────────────────────────────────────────────────────────
@@ -842,33 +932,41 @@ export async function fetchBrowseStatus() {
 }
 
 // ─── Attachments And Context ───────────────────────────────────────────────
-export async function uploadAttachments(files, { projectPath, sessionId } = {}) {
+
+/** POST /v1/attachments/{project_name}/{session_id}/upload — response body is a JSON array of file attachments. */
+export async function uploadAttachments(files, { projectName, sessionId } = {}) {
+  if (!projectName || !sessionId) {
+    throw new Error('Open a saved task before attaching files (project and conversation id are required).');
+  }
+  const enc = encodeURIComponent;
   const form = new FormData();
   Array.from(files).forEach((file) => form.append('files', file));
-  if (projectPath) form.append('project_path', projectPath);
-  if (sessionId) form.append('session_id', sessionId);
-  const res = await fetch(`${BASE}/attachments/upload`, { method: 'POST', body: form });
+  const res = await fetch(
+    `${BASE}/attachments/${enc(projectName)}/${enc(sessionId)}/upload`,
+    { method: 'POST', body: form },
+  );
   if (!res.ok) throw await responseError(res, `Attachment upload failed (${res.status})`);
-  return res.json();
+  const data = await res.json();
+  return Array.isArray(data) ? data : [];
 }
 
-export async function fetchAttachments(sessionId, ids) {
-  if (!sessionId && (!ids || !ids.length)) {
+/** GET /v1/attachments/{project_name}/{session_id} — response body is a JSON array. */
+export async function fetchAttachments(projectName, sessionId, { ids } = {}) {
+  if (!projectName || !sessionId) {
     return { attachments: [] };
   }
+  const enc = encodeURIComponent;
   const qs = new URLSearchParams();
-  if (sessionId) qs.set('session_id', sessionId);
   if (Array.isArray(ids) && ids.length) {
     for (const id of ids) {
       if (id) qs.append('ids', id);
     }
   }
   const q = qs.toString();
-  return req(`/attachments${q ? `?${q}` : ''}`);
-}
-
-export async function createSnippetAttachment(payload) {
-  return req('/attachments/snippet', { method: 'POST', body: JSON.stringify(payload) });
+  const path = `/attachments/${enc(projectName)}/${enc(sessionId)}${q ? `?${q}` : ''}`;
+  const data = await req(path);
+  const raw = Array.isArray(data) ? data : [];
+  return { attachments: raw };
 }
 
 export async function deleteAttachment(id) {
@@ -905,6 +1003,14 @@ export async function renameConversation(id, title) {
   return req(`/conversations/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify({ title }),
+  });
+}
+
+/** PATCH conversation meta (`title`, `project`, `disabled_connections`, …). */
+export async function patchConversation(id, body) {
+  return req(`/conversations/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(body),
   });
 }
 
@@ -1087,6 +1193,7 @@ export const MOCK_DATA = {
     defaultModel: 'claude-sonnet-4-6',
     autoPin: true,
     showDots: true,
+    showCounters: true,
     accentVariant: 'aqua',
     planningProvider: 'anthropic',
     planningModel: 'claude-sonnet-4-6',
@@ -1098,6 +1205,20 @@ export const MOCK_DATA = {
     proactiveDashboards: false,
     anthropicApiKey: '',
     openaiApiKey: '',
+    providers: [],
+    modelMode: 'default',
+    modelOverrides: {},
+    providerTypes: ['minds-cloud', 'anthropic', 'openai', 'gemini', 'openai-compatible'],
+    providerTypeLabels: {
+      'minds-cloud': 'MindsHub',
+      anthropic: 'Anthropic',
+      openai: 'OpenAI',
+      gemini: 'Gemini',
+      'openai-compatible': 'OpenAI-compatible',
+    },
+    recommendedModels: {},
+    recommendedPair: {},
+    providerStatus: {},
   },
 
   integrations: [

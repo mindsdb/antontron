@@ -70,8 +70,10 @@ def list_summaries() -> list[dict[str, Any]]:
             "description": c.get("description", ""),
             "category": c.get("category", "other"),
             "logo": c.get("logo"),
+            "logo_url": c.get("logo_url"),
             "logo_color": c.get("logo_color"),
             "aliases": c.get("aliases", []),
+            "featured": c.get("featured", False),
         })
     out.sort(key=lambda x: (x.get("label") or "").lower())
     return out

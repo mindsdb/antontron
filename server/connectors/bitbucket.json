@@ -32,9 +32,9 @@
       {
         "id": "app-password",
         "label": "App Password",
-        "description": "Paste your Bitbucket username and an app password \u2014 a scoped credential you generate in account settings. No OAuth client setup required; takes under a minute.",
+        "description": "Paste your Bitbucket username and an app password — a scoped credential you generate in account settings. No OAuth client setup required; takes under a minute.",
         "recommended": true,
-        "how_to": "## Connect with a Bitbucket App Password\n\nApp passwords are scoped credentials tied to your Bitbucket account. They are separate from your login password and can be revoked at any time.\n\n### Steps\n\n1. Log in to [bitbucket.org](https://bitbucket.org) and click your **avatar** in the bottom-left corner.\n2. Go to **Personal settings** (or **Account settings**).\n3. In the left sidebar, click **App passwords** under the **Access management** section.\n4. Click **Create app password**.\n5. Give it a descriptive label, e.g. `Anton`.\n6. Select the scopes Anton needs. For read access to repositories and PRs, check at minimum:\n   - **Account: Read**\n   - **Repositories: Read**\n   - **Pull requests: Read**\n   - Add **Write** scopes if you want Anton to comment or merge.\n7. Click **Create**. Bitbucket displays the app password **once** \u2014 copy it immediately.\n8. Paste your **Bitbucket username** (not your email) and the app password into the fields below.\n\n### Notes\n\n- Your username is visible at [bitbucket.org/account/settings](https://bitbucket.org/account/settings) under **Bitbucket profile settings \u2192 Username**.\n- The app password is shown only once. If you lose it, delete it and create a new one.\n- App passwords are per-user, not per-workspace \u2014 one credential can span multiple workspaces your account belongs to.",
+        "how_to": "## Connect with a Bitbucket App Password\n\nApp passwords are scoped credentials tied to your Bitbucket account. They are separate from your login password and can be revoked at any time.\n\n### Steps\n\n1. Log in to [bitbucket.org](https://bitbucket.org) and click your **avatar** in the bottom-left corner.\n2. Go to **Personal settings** (or **Account settings**).\n3. In the left sidebar, click **App passwords** under the **Access management** section.\n4. Click **Create app password**.\n5. Give it a descriptive label, e.g. `Anton`.\n6. Select the scopes Anton needs. For read access to repositories and PRs, check at minimum:\n   - **Account: Read**\n   - **Repositories: Read**\n   - **Pull requests: Read**\n   - Add **Write** scopes if you want Anton to comment or merge.\n7. Click **Create**. Bitbucket displays the app password **once** — copy it immediately.\n8. Paste your **Bitbucket username** (not your email) and the app password into the fields below.\n\n### Notes\n\n- Your username is visible at [bitbucket.org/account/settings](https://bitbucket.org/account/settings) under **Bitbucket profile settings → Username**.\n- The app password is shown only once. If you lose it, delete it and create a new one.\n- App passwords are per-user, not per-workspace — one credential can span multiple workspaces your account belongs to.",
         "help_url": "https://support.atlassian.com/bitbucket-cloud/docs/create-an-app-password/",
         "fields": [
           {
@@ -43,7 +43,7 @@
             "type": "text",
             "required": true,
             "placeholder": "your-bitbucket-username",
-            "description": "Your Bitbucket username (not your email address). Find it at Account settings \u2192 Username."
+            "description": "Your Bitbucket username (not your email address). Find it at Account settings → Username."
           },
           {
             "name": "app_password",
@@ -52,7 +52,7 @@
             "required": true,
             "secret": true,
             "placeholder": "ATBBxxxxxxxxxxxxxxxxxx",
-            "description": "Generated in Bitbucket \u2192 Personal settings \u2192 App passwords. Shown only once \u2014 copy it before closing the dialog."
+            "description": "Generated in Bitbucket → Personal settings → App passwords. Shown only once — copy it before closing the dialog."
           },
           {
             "name": "workspace",
@@ -79,7 +79,7 @@
             "pullrequest"
           ]
         },
-        "how_to": "## Connect with OAuth 2.0\n\nThis method requires you to register an OAuth consumer in your Bitbucket workspace settings.\n\n### Steps\n\n1. Log in to [bitbucket.org](https://bitbucket.org) and navigate to your **Workspace settings** (the workspace you want Anton to access).\n2. In the sidebar, go to **Apps and features \u2192 OAuth consumers**.\n3. Click **Add consumer**.\n4. Set a **Name** (e.g. `Anton`) and a **Callback URL** of `http://localhost` (Anton uses a local redirect).\n5. Under **Permissions**, enable at minimum:\n   - **Account: Read**\n   - **Repositories: Read**\n   - **Pull requests: Read**\n6. Click **Save**. Bitbucket shows your **Key** (Client ID) and **Secret** (Client Secret).\n7. Paste both into the fields below and click **Submit**.\n8. A browser window opens to Bitbucket's consent screen \u2014 approve the access.\n\n### Notes\n\n- OAuth consumers live at the workspace level; they only grant access to that workspace's repositories.\n- Bitbucket issues short-lived access tokens with a refresh token \u2014 Anton stores the refresh token locally to re-authenticate silently.",
+        "how_to": "## Connect with OAuth 2.0\n\nThis method requires you to register an OAuth consumer in your Bitbucket workspace settings.\n\n### Steps\n\n1. Log in to [bitbucket.org](https://bitbucket.org) and navigate to your **Workspace settings** (the workspace you want Anton to access).\n2. In the sidebar, go to **Apps and features → OAuth consumers**.\n3. Click **Add consumer**.\n4. Set a **Name** (e.g. `Anton`) and a **Callback URL** of `http://localhost` (Anton uses a local redirect).\n5. Under **Permissions**, enable at minimum:\n   - **Account: Read**\n   - **Repositories: Read**\n   - **Pull requests: Read**\n6. Click **Save**. Bitbucket shows your **Key** (Client ID) and **Secret** (Client Secret).\n7. Paste both into the fields below and click **Submit**.\n8. A browser window opens to Bitbucket's consent screen — approve the access.\n\n### Notes\n\n- OAuth consumers live at the workspace level; they only grant access to that workspace's repositories.\n- Bitbucket issues short-lived access tokens with a refresh token — Anton stores the refresh token locally to re-authenticate silently.",
         "help_url": "https://support.atlassian.com/bitbucket-cloud/docs/use-oauth-on-bitbucket-cloud/",
         "fields": [
           {
@@ -88,7 +88,7 @@
             "type": "text",
             "required": true,
             "placeholder": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
-            "description": "The Key shown on your OAuth consumer in Workspace settings \u2192 Apps and features \u2192 OAuth consumers."
+            "description": "The Key shown on your OAuth consumer in Workspace settings → Apps and features → OAuth consumers."
           },
           {
             "name": "client_secret",
@@ -100,6 +100,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/bitbucket.svg"
+  },
+  "logo_url": "logos/bitbucket.svg"
 }

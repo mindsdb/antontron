@@ -74,15 +74,23 @@ async def search_cowork(q: str = "", limit: int = 25):
             )
 
     for artifact in await list_artifacts():
-        text = " ".join([artifact.get("name") or "", artifact.get("path") or "", artifact.get("kind") or ""])
+        # New artifact-card shape uses `title` for the display name
+        # and adds `description`. Search across title + description +
+        # path + kind so a match on any of those surfaces the card.
+        text = " ".join([
+            artifact.get("title") or "",
+            artifact.get("description") or "",
+            artifact.get("path") or "",
+            artifact.get("kind") or "",
+        ])
         score = _score(text, query)
         if score:
             results.append(
                 {
                     "type": "artifact",
-                    "id": artifact.get("path") or artifact.get("id") or artifact.get("name"),
-                    "title": artifact.get("name") or "Artifact",
-                    "subtitle": artifact.get("path") or "Artifact",
+                    "id": artifact.get("path") or artifact.get("id") or artifact.get("title"),
+                    "title": artifact.get("title") or "Artifact",
+                    "subtitle": artifact.get("description") or artifact.get("path") or "Artifact",
                     "route": "artifacts",
                     "score": score,
                 }

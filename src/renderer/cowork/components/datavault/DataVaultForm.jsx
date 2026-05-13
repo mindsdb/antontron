@@ -45,12 +45,18 @@ const FONT_BODY    = 'var(--font-body)';
 const FONT_DISPLAY = 'var(--font-display)';
 const FONT_MONO    = 'var(--font-mono)';
 
-function FormLogo({ logo, color }) {
-  // Icon-name only — pulls from the app's palette (`Ico.<name>`).
-  // Falls back to the generic database glyph when the name is
-  // unknown or absent. URLs / data URIs are intentionally NOT
-  // supported here — keeps the connect surface predictable and
-  // theme-coherent (no random raster images breaking the rhythm).
+function FormLogo({ logo, logoUrl, color }) {
+  if (logoUrl) {
+    return (
+      <span style={{
+        display: 'inline-grid', placeItems: 'center',
+        width: 36, height: 36, borderRadius: 8,
+        background: 'var(--surface-2)',
+      }}>
+        <img src={logoUrl} alt="" style={{ width: 22, height: 22, objectFit: 'contain' }} />
+      </span>
+    );
+  }
   const fn = (logo && Ico[logo]) || Ico.database;
   return (
     <span style={{
@@ -173,7 +179,10 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
   // definitions, each with their own fields+actions). The user picks
   // a method first, then fills in fields, then submits with an
   // `auth_method` tag so the server probe knows which to test.
-  const isMultiMethod = Array.isArray(spec?.methods) && spec.methods.length > 0;
+  const visibleMethods = Array.isArray(spec?.methods)
+    ? spec.methods.filter((m) => !m.hidden)
+    : [];
+  const isMultiMethod = visibleMethods.length > 0;
   // Local override (user picked a method client-side). Falls back to
   // whatever the server set in `spec.selected_method`. Cleared when
   // a brand-new form arrives (new form_id) and when the user clicks
@@ -202,12 +211,12 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
   // on that method's fields. We pretend the spec had `selected_method`
   // set; the breadcrumb header sees a single-method form and hides
   // itself (nothing to "go back" to).
-  const onlyMethodId = (isMultiMethod && spec.methods.length === 1)
-    ? spec.methods[0].id
+  const onlyMethodId = (isMultiMethod && visibleMethods.length === 1)
+    ? visibleMethods[0].id
     : null;
   const activeMethodId = localSelectedMethod || spec?.selected_method || onlyMethodId || null;
   const activeMethod = isMultiMethod
-    ? (spec.methods.find((m) => m.id === activeMethodId) || null)
+    ? (visibleMethods.find((m) => m.id === activeMethodId) || null)
     : null;
   // "How to" modal at the form-fill stage — surfaced from the
   // bottom-left of the actions row (opposite the primary submit
@@ -416,7 +425,7 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
           "Pick how you want to connect:" caption). */}
       {!(isMultiMethod && !activeMethod) && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <FormLogo logo={spec.logo} color={spec.logo_color} />
+          <FormLogo logo={spec.logo} logoUrl={spec.logo_url} color={spec.logo_color} />
           <div style={{ minWidth: 0, flex: 1 }}>
             <div style={{
               fontFamily: FONT_DISPLAY, fontSize: 16, fontWeight: 600,
@@ -438,7 +447,7 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
           server-pre-selected). User clicks a card to pick. */}
       {isMultiMethod && !activeMethod && (
         <MethodPicker
-          methods={spec.methods}
+          methods={visibleMethods}
           onPick={(id) => {
             setLocalSelectedMethod(id);
             onMethodChange?.(id);
@@ -667,7 +676,15 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
                 dispatch(a);
               }}
               disabled={busy && a.kind !== 'cancel'}
-              className={a.kind === 'primary' ? 'btn-primary' : undefined}
+              // `is-busy` paints a gentle accent pulse while the
+              // probe is in flight (see globals.css `.btn-primary.is-busy`).
+              // Overrides the default disabled-dim so the button
+              // reads as "working" rather than "dead."
+              className={
+                a.kind === 'primary'
+                  ? `btn-primary${busy ? ' is-busy' : ''}`
+                  : undefined
+              }
               style={a.kind === 'primary' ? undefined : {
                 background: 'transparent',
                 border: '1px solid var(--line)',
@@ -787,6 +804,14 @@ function MethodPicker({ methods, onPick, busy }) {
               fontFamily: FONT_BODY,
               transition: 'transform 120ms ease, background 120ms ease, border-color 120ms ease',
               outline: 'none',
+              // Belt: when the card sits inside a constrained flex
+              // parent (the form panel column), `minWidth: 0` lets
+              // it shrink below its intrinsic content width so a
+              // long unbreakable token in the description (e.g.
+              // a sample connection URI) can't push the card past
+              // the panel's edge. Suspenders: `overflowWrap` on
+              // the description below handles the line-breaking.
+              minWidth: 0,
             }}
             onMouseOver={(e) => { if (!busy) e.currentTarget.style.transform = 'translateY(-1px)'; }}
             onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)'; }}
@@ -801,10 +826,13 @@ function MethodPicker({ methods, onPick, busy }) {
           >
             <div style={{
               display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+              minWidth: 0,
             }}>
               <span style={{
                 fontWeight: 600, fontSize: 13.5, color: 'var(--ink)',
                 letterSpacing: '-0.005em',
+                minWidth: 0, flex: '1 1 auto',
+                overflowWrap: 'anywhere', wordBreak: 'break-word',
               }}>{m.label || m.id}</span>
               {m.recommended && (
                 <span style={{
@@ -820,6 +848,16 @@ function MethodPicker({ methods, onPick, busy }) {
             {m.description && (
               <div style={{
                 fontSize: 12.5, color: 'var(--ink-3)', lineHeight: 1.45,
+                // Spec authors sometimes embed a sample connection
+                // URI in the description (Postgres `connection_string`
+                // method, for example). Without word-break that long
+                // unbreakable token blows out the card's width.
+                // `overflowWrap: anywhere` lets the browser break
+                // mid-token where needed; `minWidth: 0` on the
+                // parent card unlocks shrink below intrinsic width.
+                overflowWrap: 'anywhere',
+                wordBreak: 'break-word',
+                minWidth: 0,
               }}>{m.description}</div>
             )}
             {hasHelp && (

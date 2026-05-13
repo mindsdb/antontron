@@ -45,7 +45,7 @@ function NavItem({ icon, label, active, onClick, badge, comingSoon, compact }) {
   );
 }
 
-function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelete, onMoveToProject }) {
+function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelete, onMoveToProject, showTimestamp = true }) {
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState(null);
@@ -74,7 +74,28 @@ function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelet
         <span className="recent-row__title" style={{
           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           flex: 1, paddingRight: 8,
-        }}>{task.title || 'Untitled'}</span>
+        }}>
+          {task.title || 'Untitled'}
+          {/* Schedule-group entries — append a muted "· N runs"
+              suffix so the title still reads clean while the count
+              is visually separated from the schedule name. Painted
+              in --ink-4 (one tone below the title) and the bullet
+              uses --ink-5 so the separator recedes further still. */}
+          {task._scheduleGroup && (() => {
+            const n = task._scheduleGroup.runs;
+            return (
+              <span style={{
+                color: 'var(--ink-4)',
+                fontWeight: 400,
+                marginLeft: 6,
+                whiteSpace: 'nowrap',
+              }}>
+                <span style={{ color: 'var(--ink-5)', marginRight: 4 }}>·</span>
+                {n} {n === 1 ? 'run' : 'runs'}
+              </span>
+            );
+          })()}
+        </span>
 
         {/* Right-side fixed slot — 22px wide, holds timestamp OR kebab */}
         <span style={{
@@ -89,10 +110,10 @@ function RecentItem({ task, onClick, projects, onPin, onUnpin, onRename, onDelet
             display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end',
             fontFamily: 'var(--font-mono)', fontSize: 10,
             color: 'var(--ink-4)', letterSpacing: '0.02em',
-            opacity: showKebab ? 0 : 1,
+            opacity: (showKebab || !showTimestamp) ? 0 : 1,
             transition: 'opacity 120ms ease',
           }}>
-            {timeAgo(task.updatedAt || task.subtitle)}
+            {showTimestamp ? timeAgo(task.updatedAt || task.subtitle) : ''}
           </span>
           <span
             ref={triggerRef}
@@ -162,8 +183,22 @@ export default function Sidebar({
   onDeleteTask,
   onMoveTaskToProject,
   projects = [],
+  // Schedules + the flat sessionId → scheduleId index. When a
+  // recent task carries a scheduledId, we collapse all sibling
+  // runs of the same schedule into a single synthesized entry
+  // ("Daily digest · 3 runs") so the recents list isn't drowned
+  // out by repeat scheduled-run conversations.
+  schedules = [],
+  scheduleRunsIndex = {},
+  onOpenSchedule,
   onToggleServer,
   onShowServerHelp,
+  updateAvailable = null, // { version: string } or null
+  onApplyUpdate,
+  // Settings → Personalization → Show nav-panel counters. When
+  // false, hide the per-nav badge counts AND the time-since slot
+  // on each Recent row. Default true.
+  showCounters = true,
 }) {
   // Decorate every task with its pinned state. Tasks come from the
   // conversations endpoint which doesn't know about pins (they live
@@ -179,7 +214,67 @@ export default function Sidebar({
   // Recents excludes pinned items so a task isn't surfaced twice.
   // The full pool — sliced down to whatever fits the viewport + a
   // "Show more" affordance below.
-  const recentsAll = tasksWithPin.filter((t) => !pinnedIds.has(t.id));
+  const recentsRaw = tasksWithPin.filter((t) => !pinnedIds.has(t.id));
+
+  // Collapse all conversations belonging to one schedule into a
+  // single synthetic entry. Without this a daily/hourly schedule
+  // floods the rail with repeat rows and the actual chat tasks
+  // get pushed out of view. Each group entry inherits the most
+  // recent run's timestamp so the grouping respects "newest first."
+  const _ts = (raw) => {
+    if (!raw) return 0;
+    if (typeof raw === 'number') return raw;
+    const t = Date.parse(raw);
+    return Number.isFinite(t) ? t : 0;
+  };
+  const _scheduleById = new Map((schedules || []).map((s) => [s?.id, s]));
+  const _resolveSchedId = (t) => t?.scheduledId || scheduleRunsIndex?.[t?.id] || null;
+
+  const recentsAll = (() => {
+    const out = [];
+    const groups = new Map(); // scheduleId → synthesised group entry
+    for (const t of recentsRaw) {
+      const sid = _resolveSchedId(t);
+      if (!sid) {
+        out.push(t);
+        continue;
+      }
+      let g = groups.get(sid);
+      if (!g) {
+        const sched = _scheduleById.get(sid);
+        const baseTitle = sched?.title || t.title || 'Scheduled task';
+        g = {
+          id: `sched:${sid}`,
+          title: baseTitle,
+          subtitle: t.subtitle,
+          updatedAt: t.updatedAt,
+          // Orphan schedules (no project) resolve to "general" —
+          // matches the server's _run_schedule fallback.
+          projectName: sched?.project || t.projectName || 'general',
+          // Marker fields the click handler / row renderer key off:
+          _scheduleGroup: { scheduleId: sid, runs: 1, baseTitle },
+        };
+        groups.set(sid, g);
+        out.push(g);
+      } else {
+        g._scheduleGroup.runs += 1;
+        // Track the freshest timestamp across the group's runs so
+        // sorting / "n minutes ago" reflects the most recent run.
+        if (_ts(t.updatedAt || t.subtitle) > _ts(g.updatedAt || g.subtitle)) {
+          g.subtitle = t.subtitle;
+          g.updatedAt = t.updatedAt;
+        }
+      }
+    }
+    // Title stays as the schedule's base name; the run count is
+    // surfaced separately so RecentItem can paint it in a muted
+    // accent that distinguishes the schedule meta from the title.
+    for (const g of out) {
+      if (!g._scheduleGroup) continue;
+      g.title = g._scheduleGroup.baseTitle;
+    }
+    return out;
+  })();
 
   // Sized dynamically: measure the available height of the recents
   // scroll area on mount + on window resize, then divide by an
@@ -189,6 +284,12 @@ export default function Sidebar({
   const RECENT_FOOTER_PAD  = 36;   // reserved for the Show-more row
   const recentsRef = useRef(null);
   const [recentsHeight, setRecentsHeight] = useState(0);
+  // Strict hover state for the Recents heading row only. CSS
+  // `:hover` was bleeding (or appearing to bleed) onto the recents
+  // list below; pinning this to onMouseEnter/onMouseLeave on the
+  // heading div makes the hit area exactly the heading's bounding
+  // box and nothing else.
+  const [recentsHeadingHover, setRecentsHeadingHover] = useState(false);
   useLayoutEffect(() => {
     const el = recentsRef.current;
     if (!el || typeof ResizeObserver === 'undefined') return;
@@ -233,12 +334,25 @@ export default function Sidebar({
         boxShadow: 'var(--sh-2)',
         width: collapsed ? 0 : 'clamp(240px, 24vw, 320px)',
         opacity: collapsed ? 0 : 1,
-        transform: collapsed ? 'translateX(-16px)' : 'translateX(0)',
+        // Combine a gentle leftward translate with a slight scale so
+        // the sidebar reads as "settling into place" rather than just
+        // sliding. Origin pinned to the left edge so the scale grows
+        // from the dock side; the eye picks up the easing curve
+        // along with the width interpolation for a single coherent
+        // motion. Scale + filter values are subtle on purpose —
+        // they're the difference between "this animated" and
+        // "this animated nicely."
+        transform: collapsed
+          ? 'translateX(-12px) scale(0.985)'
+          : 'translateX(0) scale(1)',
+        transformOrigin: 'left center',
+        filter: collapsed ? 'blur(6px)' : 'blur(0)',
         transition:
-          'width 360ms cubic-bezier(0.32, 0.72, 0, 1), ' +
-          'opacity 280ms cubic-bezier(0.32, 0.72, 0, 1), ' +
-          'transform 360ms cubic-bezier(0.32, 0.72, 0, 1)',
-        willChange: 'width, opacity, transform',
+          'width 380ms cubic-bezier(0.22, 1, 0.36, 1), ' +
+          'opacity 260ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+          'transform 420ms cubic-bezier(0.22, 1, 0.36, 1), ' +
+          'filter 240ms cubic-bezier(0.32, 0.72, 0, 1)',
+        willChange: 'width, opacity, transform, filter',
         pointerEvents: collapsed ? 'none' : 'auto',
         display: 'flex', flexDirection: 'column',
         overflow: 'hidden',
@@ -251,21 +365,68 @@ export default function Sidebar({
       <div
         className="anton-sidebar__chrome drag-region"
         style={{
-          padding: '9px 14px 8px 88px',
+          // 88px left clears the macOS traffic lights in Electron.
+          // On web there are no traffic lights so 14px suffices.
+          padding: `9px 14px 8px ${host.isWeb ? 14 : 88}px`,
           flexShrink: 0,
         }}
       >
-        <div className="anton-sidebar__chrome-left">
+        {/* Right-aligned cluster: collapse + search icons, then a
+            middle-dot separator, then the ANTON wordmark. The chrome's
+            existing `justify-content: space-between` pushes the whole
+            cluster against the right edge (the left half is empty space
+            past the traffic-light pad). */}
+        <div style={{ flex: 1 }} />
+        <div className="anton-sidebar__chrome-left" style={{ marginLeft: 'auto', gap: 4 }}>
           <div className="anton-sidebar__chrome-buttons">
-            <button
-              className="icon-btn"
-              onClick={onToggleCollapsed}
-              title={`${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}  (${shortcut('B')})`}
-              aria-label={collapsed ? 'Expand sidebar' : 'Collapse sidebar'}
-              style={{ WebkitAppRegion: 'no-drag' }}
-            >
-              {collapsed ? Ico.sidebarExpandRight(15) : Ico.sidebarCollapseLeft(15)}
-            </button>
+            {/* Collapse button — always mounted so the search icon
+                next to it never shifts when the host route changes
+                whether the toggle is allowed or not.
+                  • allowed   (chat task)  → fully visible, clickable
+                  • disallowed (other routes) → fades + scales out +
+                    soft blur, but the layout slot stays put so the
+                    search icon doesn't displace.
+                The transition is gentle and a touch over-eased so
+                the hide reads as deliberate without being theatrical. */}
+            {(() => {
+              const canToggle = typeof onToggleCollapsed === 'function';
+              return (
+                <button
+                  className="icon-btn"
+                  onClick={canToggle ? onToggleCollapsed : undefined}
+                  disabled={!canToggle}
+                  aria-hidden={canToggle ? undefined : 'true'}
+                  tabIndex={canToggle ? undefined : -1}
+                  title={
+                    canToggle
+                      ? `${collapsed ? 'Expand sidebar' : 'Collapse sidebar'}  (${shortcut('B')})`
+                      : undefined
+                  }
+                  aria-label={canToggle ? (collapsed ? 'Expand sidebar' : 'Collapse sidebar') : undefined}
+                  style={{
+                    WebkitAppRegion: 'no-drag',
+                    opacity: canToggle ? 1 : 0,
+                    // Slight scale + tilt + blur on hide so the
+                    // motion is recognisable from the corner of the
+                    // eye but never noisy. Origin pinned to center
+                    // so the slot's geometry stays symmetric.
+                    transform: canToggle
+                      ? 'scale(1) rotate(0deg)'
+                      : 'scale(0.72) rotate(-8deg)',
+                    transformOrigin: 'center',
+                    filter: canToggle ? 'blur(0)' : 'blur(2px)',
+                    pointerEvents: canToggle ? 'auto' : 'none',
+                    cursor: canToggle ? 'pointer' : 'default',
+                    transition:
+                      'opacity 220ms cubic-bezier(0.32, 0.72, 0, 1), ' +
+                      'transform 320ms cubic-bezier(0.22, 1, 0.36, 1), ' +
+                      'filter 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+                  }}
+                >
+                  {collapsed ? Ico.sidebarExpandRight(15) : Ico.sidebarCollapseLeft(15)}
+                </button>
+              );
+            })()}
             <button
               className="icon-btn"
               onClick={onOpenSearch}
@@ -276,18 +437,35 @@ export default function Sidebar({
               {Ico.search(15)}
             </button>
           </div>
+          <span
+            aria-hidden="true"
+            style={{
+              color: 'var(--text-muted)',
+              opacity: 0.5,
+              fontSize: 13,
+              userSelect: 'none',
+            }}
+          >·</span>
+          <div className="anton-sidebar__wordmark">Anton</div>
         </div>
-        <div className="anton-sidebar__wordmark">Anton</div>
       </div>
 
-      {/* Body — fades + clips when collapsed */}
+      {/* Body — fades + slides in slightly behind the container so
+          the motion staggers. On appearance the body lags ~80ms so
+          the surrounding chrome lands first; on dismissal it leads
+          the container so the contents exit before the box does. */}
       <div
         style={{
           flex: 1, minHeight: 0,
           display: 'flex', flexDirection: 'column',
           opacity: collapsed ? 0 : 1,
+          transform: collapsed ? 'translateY(2px)' : 'translateY(0)',
           pointerEvents: collapsed ? 'none' : 'auto',
-          transition: 'opacity 240ms cubic-bezier(0.32, 0.72, 0, 1)',
+          transition:
+            'opacity 240ms cubic-bezier(0.32, 0.72, 0, 1) ' +
+              `${collapsed ? '0ms' : '80ms'}, ` +
+            'transform 320ms cubic-bezier(0.22, 1, 0.36, 1) ' +
+              `${collapsed ? '0ms' : '80ms'}`,
         }}
       >
         {/* New task CTA — outlined neon button */}
@@ -305,9 +483,9 @@ export default function Sidebar({
 
         {/* Primary nav */}
         <div className="nav-list" style={{ padding: '0 10px', display: 'flex', flexDirection: 'column', gap: 1 }}>
-          <NavItem icon={Ico.folder(15)}  label="Projects"        onClick={() => onNavigate('projects')}  active={activeRoute === 'projects'}  badge={projectsCount  || null} />
-          <NavItem icon={Ico.clock(15)}   label="Scheduled Tasks" onClick={() => onNavigate('scheduled')} active={activeRoute === 'scheduled'} badge={scheduledCount || null} />
-          <NavItem icon={Ico.sparkle(15)} label="Live Artifacts"  onClick={() => onNavigate('artifacts')} active={activeRoute === 'artifacts'} badge={artifactsCount || null} />
+          <NavItem icon={Ico.folder(15)}  label="Projects"        onClick={() => onNavigate('projects')}  active={activeRoute === 'projects'}  badge={showCounters ? (projectsCount  || null) : null} />
+          <NavItem icon={Ico.clock(15)}   label="Scheduled Tasks" onClick={() => onNavigate('scheduled')} active={activeRoute === 'scheduled'} badge={showCounters ? (scheduledCount || null) : null} />
+          <NavItem icon={Ico.sparkle(15)} label="Live Artifacts"  onClick={() => onNavigate('artifacts')} active={activeRoute === 'artifacts'} badge={showCounters ? (artifactsCount || null) : null} />
           {/* Connect Apps and Data — replaces "Customize". Reuses the
               `customize` route key so existing in-flight links still
               work. The page now lists connected apps + datasources in
@@ -317,18 +495,21 @@ export default function Sidebar({
               live "you have N connections" indicator. */}
           <NavItem
             icon={Ico.link(15)}
-            label={connectorsCount > 0 ? 'Connected Apps' : 'Connect Apps and Data'}
+            label={connectorsCount > 0 ? 'Connected Apps and Data' : 'Connect Apps and Data'}
             onClick={() => onNavigate('customize')}
             active={activeRoute === 'customize'}
-            badge={connectorsCount || null}
+            badge={showCounters ? (connectorsCount || null) : null}
           />
         </div>
 
-        {/* Anton group — visually grouped panel for the brain-style nav */}
+        {/* Anton group — visually grouped panel for the brain-style nav.
+            Order: Memories → Skills library → Settings. Labels read
+            as the things the user OWNS (plural collections) rather
+            than the abstract concepts the engine names them after. */}
         <div className="section-label">Anton</div>
         <div className="anton-group">
-          <NavItem icon={Ico.cube(15)}     label="Skill Library" onClick={() => onNavigate('skills')}   active={activeRoute === 'skills'}   compact />
-          <NavItem icon={Ico.brain(15)}    label="Memory"         onClick={() => onNavigate('memory')}   active={activeRoute === 'memory'}   compact />
+          <NavItem icon={Ico.brain(15)}    label="Memories"       onClick={() => onNavigate('memory')}   active={activeRoute === 'memory'}   compact />
+          <NavItem icon={Ico.cube(15)}     label="Skills library" onClick={() => onNavigate('skills')}   active={activeRoute === 'skills'}   compact />
           {/* "Connect data" removed from the sidebar — the canonical
               connector surface is the Connect Apps and Data page
               (route='customize'). The legacy 'connect' route used to
@@ -351,6 +532,7 @@ export default function Sidebar({
                 onRename={onRenameTask}
                 onDelete={onDeleteTask}
                 onMoveToProject={onMoveTaskToProject}
+                showTimestamp={showCounters}
               />
             ))}
           </div>
@@ -361,25 +543,76 @@ export default function Sidebar({
           </div>
         )}
 
-        {/* Recents */}
-        <div className="section-label">Recents</div>
+        {/* Recents — heading row with a "View all →" link pinned
+            to the right end. Hidden at rest; appears on hover of
+            the *entire* row, including the empty space between
+            "Recents" and the link. CSS-driven hover (on the
+            `recents-heading` class) — using the parent's :hover
+            pseudo-class avoids the inline-mouseenter / pointer-
+            events gap that left the dead space between elements
+            non-receptive. The span flex-grows to fill the row so
+            the heading itself owns the empty space too. */}
+        <div
+          className="section-label recents-heading"
+          style={{
+            display: 'flex',
+            alignItems: 'baseline',
+            gap: 8,
+            cursor: 'default',
+            width: '100%',
+          }}
+          onMouseEnter={() => setRecentsHeadingHover(true)}
+          onMouseLeave={() => setRecentsHeadingHover(false)}
+        >
+          <span style={{ flex: 1 }}>Recents</span>
+          <button
+            type="button"
+            className="recents-viewall"
+            onClick={() => onNavigate?.('tasks')}
+            style={{
+              background: 'transparent', border: 0, padding: 0,
+              cursor: recentsHeadingHover ? 'pointer' : 'default',
+              fontFamily: 'var(--font-body)', fontSize: 11,
+              letterSpacing: '0.02em',
+              textTransform: 'none',
+              opacity: recentsHeadingHover ? 1 : 0,
+              transform: recentsHeadingHover ? 'translateX(0)' : 'translateX(2px)',
+              pointerEvents: recentsHeadingHover ? 'auto' : 'none',
+            }}
+            title="View all tasks"
+          >
+            View all →
+          </button>
+        </div>
         <div ref={recentsRef} className="scroll-clean" style={{
           padding: '0 10px', flex: 1, overflowY: 'auto',
           display: 'flex', flexDirection: 'column', gap: 1,
         }}>
-          {recents.map((t) => (
-            <RecentItem
-              key={t.id}
-              task={t}
-              projects={projects}
-              onClick={() => onSelectTask(t.id)}
-              onPin={onPinTask}
-              onUnpin={onUnpinTask}
-              onRename={onRenameTask}
-              onDelete={onDeleteTask}
-              onMoveToProject={onMoveTaskToProject}
-            />
-          ))}
+          {recents.map((t) => {
+            // Synthetic schedule-group entries route to the schedule
+            // detail view (where the per-run history lives). Lone
+            // tasks open the chat as before. Pin / move / delete /
+            // rename are suppressed on group entries — those actions
+            // belong to the underlying schedule, not the synthesised
+            // row, and their per-run plumbing wouldn't apply cleanly.
+            const isGroup = !!t._scheduleGroup;
+            return (
+              <RecentItem
+                key={t.id}
+                task={t}
+                projects={projects}
+                onClick={() => isGroup
+                  ? onOpenSchedule?.(t._scheduleGroup.scheduleId)
+                  : onSelectTask(t.id)}
+                onPin={isGroup ? undefined : onPinTask}
+                onUnpin={isGroup ? undefined : onUnpinTask}
+                onRename={isGroup ? undefined : onRenameTask}
+                onDelete={isGroup ? undefined : onDeleteTask}
+                onMoveToProject={isGroup ? undefined : onMoveTaskToProject}
+                showTimestamp={showCounters}
+              />
+            );
+          })}
           {hasMoreRecents && (
             <button
               type="button"
@@ -416,6 +649,51 @@ export default function Sidebar({
             </button>
           )}
         </div>
+
+        {/* Update available banner */}
+        {updateAvailable && (
+          <button
+            type="button"
+            style={{
+              margin: '0 10px 6px',
+              padding: '8px 12px',
+              background: 'rgba(93,146,135,0.12)',
+              border: '1px solid rgba(93,146,135,0.30)',
+              borderRadius: 8,
+              display: 'flex', alignItems: 'center', gap: 8,
+              cursor: 'pointer',
+              transition: 'background 120ms ease',
+              width: 'calc(100% - 20px)',
+              textAlign: 'left',
+              fontFamily: 'inherit',
+              WebkitAppRegion: 'no-drag',
+            }}
+            onClick={onApplyUpdate}
+            onMouseOver={(e) => { e.currentTarget.style.background = 'rgba(93,146,135,0.22)'; }}
+            onMouseOut={(e) => { e.currentTarget.style.background = 'rgba(93,146,135,0.12)'; }}
+          >
+            <span style={{
+              width: 6, height: 6, borderRadius: '50%',
+              background: 'var(--sage-500, #5D9287)',
+              flexShrink: 0,
+            }} />
+            <span style={{
+              flex: 1, fontSize: 11.5, color: 'var(--text-strong)',
+              fontFamily: 'var(--font-sans)',
+            }}>
+              Update available{updateAvailable.version ? ` (${updateAvailable.version})` : ''}
+            </span>
+            <span style={{
+              fontSize: 10, color: 'var(--sage-500, #5D9287)',
+              fontFamily: 'var(--font-mono)',
+              letterSpacing: '0.03em',
+              textTransform: 'uppercase',
+              fontWeight: 600,
+            }}>
+              Install
+            </span>
+          </button>
+        )}
 
         {/* Footer status — Electron-only. In the hosted web shell the
             FastAPI process IS the host, so start/stop/diagnostics have

@@ -1,8 +1,20 @@
 {
   "id": "hubspot",
   "label": "HubSpot",
-  "aliases": ["hub spot", "hs"],
-  "keywords": ["crm", "marketing", "sales", "contacts", "deals", "companies", "tickets", "automation"],
+  "aliases": [
+    "hub spot",
+    "hs"
+  ],
+  "keywords": [
+    "crm",
+    "marketing",
+    "sales",
+    "contacts",
+    "deals",
+    "companies",
+    "tickets",
+    "automation"
+  ],
   "description": "Read and write contacts, companies, deals, and tickets in your HubSpot portal.",
   "category": "crm",
   "logo": "link",
@@ -71,6 +83,9 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/hubspot.svg"
+  },
+  "logo_url": "logos/hubspot.svg",
+  "featured": true
 }

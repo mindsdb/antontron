@@ -10,11 +10,12 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { DataVaultForm } from '../datavault/DataVaultForm';
-import { saveDatasource, fetchDatasources, startGoogleDriveAuth, startGoogleCalendarAuth, fetchIntegrations } from '../../api';
+import { saveDatasource, fetchDatasources, startGoogleDriveAuth, startGoogleCalendarAuth, startGmailAuth, fetchIntegrations } from '../../api';
 
 const BROWSER_OAUTH_START = {
   google_drive: startGoogleDriveAuth,
   google_calendar: startGoogleCalendarAuth,
+  gmail: startGmailAuth,
 };
 
 const BROWSER_OAUTH_POLL_MS      = 3000;
@@ -85,6 +86,7 @@ export default function ConnectorFormPanel({
     ...connector.form,
     form_error: errorMsg || undefined,
     logo: connector.form.logo || connector.logo,
+    logo_url: connector.form.logo_url || connector.logo_url,
     logo_color: connector.form.logo_color || connector.logo_color,
   };
 

@@ -377,7 +377,7 @@ function MemoryView({ data, selected, onSelect, project, setData, setStatus }) {
           own `overflowY: auto` so the file list and the viewer pane
           scroll independently — picking through a long memory file
           no longer drags the sidebar with it. */}
-      <div style={{
+      <div className="util-split" style={{
         flex: 1, minHeight: 0,
         display: 'grid', gridTemplateColumns: '300px 1fr',
         padding: '0 32px 24px', gap: 24,
@@ -634,7 +634,7 @@ function SkillsView({ data, selected, onSelect, onSaved, onDeleted, setStatus })
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: 0 }}>
+    <div className="util-split" style={{ display: 'grid', gridTemplateColumns: '300px 1fr', minHeight: 0 }}>
       <div style={{ padding: 20, borderRight: '1px solid var(--border-0)', display: 'flex', flexDirection: 'column', gap: 6 }}>
         <button className="btn-primary" onClick={startNew} style={{ marginBottom: 8 }}>{Ico.plus(14)} New skill</button>
         {skills.map((skill) => (
@@ -779,7 +779,7 @@ function ConnectView({ data, setData, setStatus }) {
   };
 
   return (
-    <div style={{ padding: 28, display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24 }}>
+    <div className="util-publish" style={{ padding: 28, display: 'grid', gridTemplateColumns: '1fr 360px', gap: 24 }}>
       <div>
         <div style={{ fontSize: 13, fontWeight: 650, color: 'var(--text-strong)', marginBottom: 10 }}>Saved connections</div>
         {(data.connections || []).length ? (data.connections || []).map((conn) => (

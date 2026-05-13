@@ -1,8 +1,23 @@
 {
   "id": "google_drive",
   "label": "Google Drive",
-  "aliases": ["gdrive", "g drive", "google docs", "drive"],
-  "keywords": ["files", "storage", "documents", "google", "workspace", "drive", "docs", "sheets", "slides"],
+  "aliases": [
+    "gdrive",
+    "g drive",
+    "google docs",
+    "drive"
+  ],
+  "keywords": [
+    "files",
+    "storage",
+    "documents",
+    "google",
+    "workspace",
+    "drive",
+    "docs",
+    "sheets",
+    "slides"
+  ],
   "description": "Read, search, and manage files in your Google Drive (including Docs, Sheets, and Slides).",
   "category": "files",
   "logo": "folder",
@@ -20,7 +35,8 @@
         "label": "In-Browser Connect",
         "description": "Opens Google sign-in in your browser. No credentials required — just click Connect.",
         "recommended": true,
-        "fields": []
+        "fields": [],
+        "hidden": true
       },
       {
         "id": "oauth",
@@ -86,6 +102,9 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/google_drive.svg"
+  },
+  "logo_url": "logos/google_drive.svg",
+  "featured": true
 }

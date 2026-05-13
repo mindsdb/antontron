@@ -10,11 +10,70 @@ Usage:
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
+import subprocess
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Names we import at the top of this module. If anton-core's
+# self-update wiped them from the venv (uv tool reinstall is the usual
+# culprit), the next `from fastapi import FastAPI` would crash the
+# whole server with a generic ModuleNotFoundError. Heal in place
+# instead — pip-install from our bundled requirements.txt and re-exec.
+_SERVER_DEP_IMPORTS: tuple[str, ...] = ("fastapi", "uvicorn", "multipart", "pydantic", "httpx")
+
+
+def _missing_server_deps() -> list[str]:
+    missing: list[str] = []
+    for name in _SERVER_DEP_IMPORTS:
+        try:
+            __import__(name)
+        except ImportError:
+            missing.append(name)
+    return missing
+
+
+def _reinstall_server_deps() -> bool:
+    """pip-install the bundled requirements.txt into the current
+    interpreter. Returns True on success."""
+    req = Path(__file__).parent / "requirements.txt"
+    if not req.is_file():
+        print(f"[server] cannot heal venv — requirements.txt not at {req}", flush=True)
+        return False
+    print(f"[server] healing venv via {sys.executable} -m pip install -r {req}", flush=True)
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-r", str(req)],
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"[server] dep reinstall failed: {exc}", flush=True)
+        return False
+    except Exception as exc:
+        print(f"[server] dep reinstall crashed: {exc}", flush=True)
+        return False
+
+
+def _heal_and_reexec_if_deps_missing() -> None:
+    """If any server-side import is gone (typical after `anton` self-
+    updates and uv reseeded the venv), reinstall and re-exec so the
+    next interpreter image has the deps loaded."""
+    if os.environ.get("_ANTON_SERVER_DEPS_HEALED") == "1":
+        return
+    missing = _missing_server_deps()
+    if not missing:
+        return
+    print(f"[server] missing deps after boot: {missing}", flush=True)
+    if not _reinstall_server_deps():
+        # Couldn't heal — drop through; the import on the next line
+        # will raise the real ModuleNotFoundError with a stack trace.
+        return
+    os.environ["_ANTON_SERVER_DEPS_HEALED"] = "1"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 # Load ~/.anton/.env if it exists (before anything else)
 _env_path = Path.home() / ".anton" / ".env"
@@ -25,6 +84,87 @@ if _env_path.exists():
             _k, _, _v = _line.partition("=")
             os.environ.setdefault(_k.strip(), _v.strip().strip('"').strip("'"))
 
+
+def _maybe_self_update_and_reexec() -> None:
+    """Run anton's self-update flow before the server boots.
+
+    Mirrors what `anton/cli.py` does at the top of its root command,
+    so antontron-launched servers stay current the same way the CLI
+    does. The Node side previously duplicated this logic in
+    TypeScript; the Python check is the single source of truth now.
+
+    Behaviour:
+      * `_ANTON_UPDATED=1` env var → already updated this process
+        tree, skip (matches `anton/updater.py` loop guard).
+      * `disable_autoupdates` setting → user opted out, skip.
+      * Otherwise call `anton.updater.check_and_update`. If it
+        installed a newer version, set the loop-guard env var and
+        `os.execv` the same python interpreter on the same script.
+        The kernel replaces the current process in-place — same PID,
+        same stdio pipes — so antontron's `server-process.ts`
+        doesn't need to know an update happened. The 15s /health
+        probe absorbs the extra cold-start time.
+
+    Errors here are non-fatal: any exception drops us through to
+    starting the server on the existing version. Better to be one
+    release behind than fail to boot because GitHub was down.
+    """
+    if os.environ.get("_ANTON_UPDATED") == "1":
+        return
+    try:
+        from anton.config.settings import AntonSettings
+        from anton.updater import check_and_update
+    except Exception:
+        # Anton not importable yet (first launch race, broken venv) —
+        # nothing for us to update against. Let the rest of main.py
+        # raise the proper diagnostic.
+        return
+    try:
+        settings = AntonSettings()
+    except Exception:
+        return
+    if getattr(settings, "disable_autoupdates", False):
+        return
+
+    class _NullConsole:
+        """Stand-in for rich.Console — `check_and_update` only calls
+        `console.print(msg)` to show status, which we capture via
+        stdout instead so antontron's log buffer picks it up."""
+        def print(self, *args, **kwargs):
+            try:
+                print(*args)
+            except Exception:
+                pass
+
+    try:
+        if check_and_update(_NullConsole(), settings):
+            os.environ["_ANTON_UPDATED"] = "1"
+            # uv tool's reinstall path can wipe the server-side deps
+            # (fastapi, uvicorn, multipart, pydantic, httpx) since
+            # they aren't anton-core's own requirements. Reinstall
+            # them BEFORE re-exec so the next interpreter image can
+            # actually boot.
+            if _missing_server_deps():
+                _reinstall_server_deps()
+            # Re-exec the same interpreter on the same script so the
+            # post-import state (anton, fastapi, etc.) reloads
+            # against the freshly installed version. PID/pipes are
+            # preserved across execv so the parent (antontron) sees
+            # this as a slightly slower cold start.
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+    except Exception:
+        # Updater raised — keep going on the existing version.
+        return
+
+
+_maybe_self_update_and_reexec()
+# Belt-and-suspenders: if a previous launch (or a manual `uv tool
+# upgrade anton`) left the venv missing server deps, heal now before
+# the top-level imports below would otherwise crash the process.
+_heal_and_reexec_if_deps_missing()
+
+
+from fastapi import FastAPI
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -44,7 +184,7 @@ from routes.search import router as search_router
 from routes.pins import router as pins_router
 from routes.schedules import router as schedules_router, start_scheduler
 from routes.browse import router as browse_router
-from routes.integrations import router as integrations_router
+from routes.integrations import router as integrations_router, refresh_google_oauth_tokens
 from routes.datavault import router as datavault_router
 from routes.connectors import router as connectors_router
 
@@ -53,7 +193,6 @@ logging.basicConfig(
     format="%(levelname)s  %(name)s  %(message)s",
 )
 logger = logging.getLogger("anton-server")
-
 
 # When ANTON_SERVE_SPA=1, serve the cowork web SPA at / from ANTON_SPA_DIR.
 # Used by the Docker image (cowork:web) — the same FastAPI process answers
@@ -70,12 +209,28 @@ if ANTON_SERVE_SPA and (SPA_DIR is None or not SPA_DIR.exists()):
     ANTON_SERVE_SPA = False
     SPA_DIR = None
 
+    
+async def _google_token_refresh_loop() -> None:
+    await asyncio.sleep(60)  # let the vault settle after startup
+    while True:
+        try:
+            await asyncio.to_thread(refresh_google_oauth_tokens)
+        except Exception:
+            pass
+        await asyncio.sleep(30 * 60)  # every 30 minutes
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    projects_store.ensure_default_project()
+    projects_store.ensure_general_project()
     start_scheduler()
+    refresh_task = asyncio.create_task(_google_token_refresh_loop())
     yield
+    refresh_task.cancel()
+    try:
+        await refresh_task
+    except asyncio.CancelledError:
+        pass
     await conversation_manager.close_all()
     await scratchpad_runtime.close_all()
 

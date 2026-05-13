@@ -1,6 +1,7 @@
 """Anton utility routes for memory, skills, data connections, and publishing."""
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -13,7 +14,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 
-from .artifacts import _resolve_artifact_path, _scan_output_dirs
+from .artifacts import _resolve_artifact_path, _scan_artifact_dirs
 from .cowork_state import backups_dir, load_state, save_state, utc_now_iso
 from .integrations import ensure_managed_integrations
 from .settings import _get_env, get_config_status
@@ -43,6 +44,8 @@ def _memory_roots(project_path: Optional[str] = None) -> list[tuple[str, Optiona
         ("Global", None, Path.home() / ".anton" / "memory"),
     ]
     if project_path:
+        # Loopback-only sidecar — project paths are user-derived by design.
+        # codeql[py/path-injection]
         target = Path(project_path).expanduser().resolve()
         roots.append(("Project", target.name, target / ".anton" / "memory"))
         return roots
@@ -63,6 +66,8 @@ def _memory_root(scope: str, project_path: Optional[str] = None) -> Path:
     if normalized == "project":
         if not project_path:
             raise HTTPException(status_code=400, detail="A project path is required for project memory.")
+        # Loopback-only sidecar — project paths are user-derived by design.
+        # codeql[py/path-injection]
         return Path(project_path).expanduser().resolve() / ".anton" / "memory"
     raise HTTPException(status_code=400, detail="Memory scope must be Global or Project.")
 
@@ -201,6 +206,8 @@ async def save_memory(req: MemorySaveRequest):
     target.write_text(req.content, encoding="utf-8")
     project_name: Optional[str] = None
     if req.scope.strip().lower() == "project" and req.projectPath:
+        # Loopback-only sidecar — project paths are user-derived by design.
+        # codeql[py/path-injection]
         project_name = Path(req.projectPath).expanduser().resolve().name
     return {"status": "ok", "file": _memory_file_payload(target, root, req.scope.title(), project_name)}
 
@@ -396,14 +403,25 @@ def _resolve_modify_merge(
     everything off to anton-core so the merge logic stays in one
     place. See `anton.core.datasources.data_vault.resolve_modify_merge`
     for the full contract.
+
+    Falls back to a passthrough (no merge, no secure-key tracking)
+    when the installed anton-core predates `resolve_modify_merge`.
+    Logs a warning so the user knows to reinstall — the modify
+    flow's sentinel preservation only kicks in once anton is fresh.
     """
     try:
-        from anton.core.datasources.data_vault import (
-            LocalDataVault,
-            resolve_modify_merge,
-        )
+        from anton.core.datasources.data_vault import LocalDataVault
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Anton data vault is unavailable") from exc
+    try:
+        from anton.core.datasources.data_vault import resolve_modify_merge
+    except ImportError:
+        logger.warning(
+            "anton-core has no `resolve_modify_merge` — saving without "
+            "the modify-flow merge. Reinstall anton to enable sentinel-"
+            "based credential preservation."
+        )
+        return dict(incoming), []
 
     spec_secret_names = [
         getattr(f, "name", "") for f in spec_fields
@@ -518,7 +536,19 @@ async def read_datasource(engine: str, name: str):
         from anton.core.datasources.data_vault import LocalDataVault
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Anton data vault is unavailable") from exc
-    record = LocalDataVault().read_record(engine.strip(), name.strip())
+    vault = LocalDataVault()
+    # Older anton installs don't have `read_record` — fall back to
+    # synthesizing a minimal record from `load()`. The renderer's
+    # modify form still works (heuristic fills in for the missing
+    # secure-keys list); only created_at / updated_at are missing.
+    if hasattr(vault, "read_record"):
+        record = vault.read_record(engine.strip(), name.strip())
+    else:
+        fields = vault.load(engine.strip(), name.strip())
+        record = (
+            None if fields is None
+            else {"engine": engine.strip(), "name": name.strip(), "fields": fields}
+        )
     if record is None:
         raise HTTPException(status_code=404, detail="Datasource connection not found")
     return _datasource_record_payload(record)
@@ -602,10 +632,23 @@ async def save_datasource(req: DatasourceSaveRequest):
                 incoming=raw_credentials,
                 spec_fields=spec_fields_pre,
             )
-        slug = save_connection(
-            vault, engine_def, name, credentials,
-            secure_keys=merged_secure_keys,
-        )
+        try:
+            slug = save_connection(
+                vault, engine_def, name, credentials,
+                secure_keys=merged_secure_keys,
+            )
+        except TypeError:
+            # Older anton.utils.datasources.save_connection signature
+            # has no `secure_keys` kwarg. Save still lands; the
+            # secure-key set just isn't persisted on the record. The
+            # next read falls back to the heuristic, which is good
+            # enough until the user reinstalls anton.
+            logger.warning(
+                "anton-core save_connection has no `secure_keys` kwarg — "
+                "persisting without it. Reinstall anton to enable "
+                "secure-key tracking."
+            )
+            slug = save_connection(vault, engine_def, name, credentials)
     except Exception as exc:
         logger.exception("Datasource save failed")
         raise HTTPException(status_code=500, detail="Could not save datasource") from exc
@@ -618,6 +661,13 @@ async def delete_datasource(engine: str, name: str):
         from anton.core.datasources.data_vault import LocalDataVault
     except Exception as exc:
         raise HTTPException(status_code=503, detail="Anton data vault is unavailable") from exc
+
+    try:
+        from routes.integrations import revoke_google_token
+        await asyncio.to_thread(revoke_google_token, engine, name)
+    except Exception:
+        pass
+
     deleted = LocalDataVault().delete(engine, name)
     if not deleted:
         raise HTTPException(status_code=404, detail="Datasource connection not found")
@@ -625,12 +675,22 @@ async def delete_datasource(engine: str, name: str):
 
 
 def _html_artifacts() -> list[dict[str, Any]]:
+    """List every HTML file under every project's `artifacts/` tree.
+
+    Recursive — multi-file artifacts (HTML + assets) get their main
+    file plus any sibling HTML pages all surfaced as publishable
+    candidates. Sorted by mtime desc, capped at 40 items.
+
+    Each entry surfaces the existing `.published.json` URL when the
+    file has been published before, so the UI can show "Re-publish"
+    instead of "Publish" on the next click.
+    """
     out = []
     seen = set()
-    for output_dir in _scan_output_dirs():
-        if not output_dir.exists():
+    for art_root in _scan_artifact_dirs():
+        if not art_root.exists():
             continue
-        for path in sorted(output_dir.rglob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True):
+        for path in sorted(art_root.rglob("*.html"), key=lambda p: p.stat().st_mtime, reverse=True):
             key = str(path.resolve())
             if key in seen:
                 continue

@@ -41,9 +41,12 @@ html, body, #root {
   width: 100%;
   overflow: hidden;
   color: var(--text-primary);
-  font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'JetBrains Mono', monospace;
   -webkit-font-smoothing: antialiased;
 }
+/* Body / root typography comes from cowork/globals.css (Inter). A legacy
+   rule here used SF Mono on #root, which overrode globals (styles.css loads
+   after globals) and made surfaces that inherit — e.g. HomeView dropdowns —
+   render in monospace while ChatView forced FONT_BODY on its subtree. */
 
 /* The body background is now controlled by .gf-theme-dark / .gf-theme-light
    from the gravity-field kit. Don't set it on html/body or it will mask
@@ -59,6 +62,14 @@ body.gf-theme-dark  { background: #0a1426; }
    feel where the dots, arrows, and center-of-mass glow all sit
    firmly in the background. 0.45 ≈ "barely there, present on focus." */
 .gravity-field { opacity: 0.45; }
+
+/* User-opt-out for the animated dot/arrow background. Toggled by
+   Settings → Personalization → Dot grid (`settings.showDots`).
+   We hide via `display: none` so the canvas stops painting AND the
+   gravity-field draw loop has nothing visible to update — no
+   ongoing requestAnimationFrame cost when the toggle is off.
+   Body class swap lives in App.jsx (`document.body.classList`). */
+body.gf-dots-off .gravity-field { display: none; }
 
 #root {
   position: relative;
@@ -871,36 +882,6 @@ body[data-theme="dark"] .legal-viewer-overlay {
   border: 1px solid var(--border);
   color: var(--text-secondary);
   font-size: 11px;
-}
-
-/* ─── Terminal ─── */
-.terminal-body {
-  flex: 1;
-  padding: 0;
-  overflow: hidden;
-  background: var(--bg-primary);
-}
-
-.terminal-body .xterm {
-  height: 100%;
-  padding: 8px;
-}
-
-.terminal-drop-overlay {
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  pointer-events: none;
-}
-
-.terminal-drop-overlay.active {
-  pointer-events: all;
-}
-
-.terminal-body.drag-over {
-  outline: 2px solid var(--cyan);
-  outline-offset: -2px;
-  background: rgba(0, 229, 255, 0.05);
 }
 
 /* ─── Status Dot ─── */

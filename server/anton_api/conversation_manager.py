@@ -6,14 +6,14 @@ Owns:
     using inside anton_bridge._build_chat_session.
   - On-disk history persistence (delegated to anton.memory.HistoryStore).
   - Conversation metadata (id / title / turns / preview / created_at /
-    updated_at / project) persisted alongside history.
+    updated_at / project, disabled_connections) persisted alongside history.
 
 The public API is small:
-  - chat_stream(input, conversation_id, project, model)        → (stream, id)
+  - chat_stream(input, conversation_id, project, model, disabled_connections=None) → (stream, id)
   - list_conversations(limit, project)
   - get_conversation(id)
   - get_messages(id)
-  - update_conversation(id, **patch)
+  - update_conversation(id, **patch)  # title, disabled_connections
   - delete_conversation(id)
   - close_all()
   - is_anton_available()
@@ -192,6 +192,89 @@ def _load_meta(project: Optional[str], conversation_id: str) -> dict | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _connection_pair_key(engine: str, name: str) -> tuple[str, str]:
+    return (engine.strip().lower(), name.strip())
+
+
+def normalize_disabled_connections(raw: object) -> list[dict[str, str]]:
+    """Return a deduped list of ``{engine, name}`` dicts for vault scoping."""
+    if raw is None or not isinstance(raw, list):
+        return []
+    out: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        eng = item.get("engine")
+        nm = item.get("name")
+        if not isinstance(eng, str) or not isinstance(nm, str):
+            continue
+        eng, nm = eng.strip(), nm.strip()
+        if not eng or not nm:
+            continue
+        key = _connection_pair_key(eng, nm)
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append({"engine": eng, "name": nm})
+    return out
+
+
+def load_disabled_connections(project: Optional[str], conversation_id: str) -> list[dict[str, str]]:
+    meta = _load_meta(project, conversation_id)
+    if not meta:
+        return []
+    return normalize_disabled_connections(meta.get("disabled_connections"))
+
+
+def load_disabled_connections_for_conversation(conversation_id: str) -> list[dict[str, str]]:
+    """Load the denylist using the project directory where this id's episodes live."""
+    located = _find_conversation_dir(conversation_id)
+    if not located:
+        return []
+    project_name, _ = located
+    return load_disabled_connections(project_name, conversation_id)
+
+
+def conversation_datasource_scope_for_id(conversation_id: str) -> dict[str, Any]:
+    """All vault connections plus which are muted for this conversation (for tools / API)."""
+    disabled = load_disabled_connections_for_conversation(conversation_id)
+    dset = {_connection_pair_key(d["engine"], d["name"]) for d in disabled}
+    connections: list[dict[str, Any]] = []
+    vault_available = False
+    try:
+        from anton.core.datasources.data_vault import LocalDataVault
+    except Exception:
+        return {
+            "conversation_id": conversation_id,
+            "disabled_connections": disabled,
+            "connections": [],
+            "vault_available": False,
+        }
+    vault = LocalDataVault()
+    vault_available = True
+    try:
+        for conn in vault.list_connections():
+            eng = conn.get("engine")
+            nm = conn.get("name")
+            if not eng or not nm:
+                continue
+            key = _connection_pair_key(str(eng), str(nm))
+            connections.append({
+                "engine": eng,
+                "name": nm,
+                "disabled": key in dset,
+            })
+    except Exception:
+        logger.debug("conversation_datasource_scope: list_connections failed", exc_info=True)
+    return {
+        "conversation_id": conversation_id,
+        "disabled_connections": disabled,
+        "connections": connections,
+        "vault_available": vault_available,
+    }
 
 
 def _save_meta(project: Optional[str], conversation_id: str, meta: dict) -> None:
@@ -689,6 +772,7 @@ def _ensure_meta(
         "created_at": now,
         "updated_at": now,
         "project": name,
+        "disabled_connections": [],
     }
     _save_meta(project, conversation_id, meta)
     return meta
@@ -762,6 +846,87 @@ def _update_meta_after_turn(
 
 
 # ---------------------------------------------------------------------------
+# Artifact reconciliation — pre/post-turn snapshot/diff so every turn
+# that touches an artifact folder gets stamped into its provenance.
+#
+# The snapshot is `{relative_path: (mtime_ns, size)}`; the diff
+# walks the after-snapshot and flags every entry that's new or
+# differs from the before-snapshot. Groups changed files by top-
+# level slug (the artifact folder name) and writes one provenance
+# entry per touched artifact.
+# ---------------------------------------------------------------------------
+
+
+# Files that are housekeeping, not user-content. The store writes
+# both on every save, so they'd otherwise show up in every diff
+# and pollute provenance.
+_ARTIFACT_HOUSEKEEPING = {"metadata.json", "README.md"}
+
+
+def _reconcile_artifacts_after_turn(
+    *,
+    artifacts_root: Path,
+    conversation_id: str,
+    project: Optional[str],
+    user_input: str,
+    turn_index: int,
+    snapshot_before: dict,
+) -> None:
+    """For each artifact folder modified during the turn, append a
+    provenance entry + rescan its file list.
+
+    No-op when the artifacts dir doesn't exist or no files changed.
+    Failures are logged at WARNING and swallowed — provenance is a
+    nice-to-have, not load-bearing for the conversation flow.
+    """
+    try:
+        from anton.core.artifacts import (
+            ArtifactStore,
+            diff_snapshots,
+            snapshot_dir,
+        )
+        from anton.core.artifacts.snapshot import _files_by_artifact
+    except Exception:
+        logger.debug("Anton artifact module unavailable; skipping reconcile", exc_info=True)
+        return
+    if not artifacts_root.exists():
+        return
+    after = snapshot_dir(artifacts_root)
+    changed = diff_snapshots(snapshot_before, after)
+    if not changed:
+        return
+    grouped = _files_by_artifact(changed)
+    if not grouped:
+        return
+    meta = _load_meta(project, conversation_id) or {}
+    title = meta.get("title") or None
+    store = ArtifactStore(artifacts_root)
+    summary = (user_input or "").strip()
+    for slug, files in grouped.items():
+        # Housekeeping files (metadata.json, README.md) get rewritten on
+        # every store save — drop them from the touched set so they
+        # don't pollute provenance with no-op turns.
+        user_files = sorted(f for f in files if f not in _ARTIFACT_HOUSEKEEPING)
+        if not user_files:
+            continue
+        try:
+            store.record_turn(
+                slug,
+                conversation_id=conversation_id,
+                conversation_title=title,
+                turn_index=turn_index,
+                summary=summary,
+                files_touched=user_files,
+            )
+            store.rescan_files(slug)
+        except Exception:
+            logger.warning(
+                "Failed to record artifact provenance for %s (slug=%s)",
+                conversation_id, slug, exc_info=True,
+            )
+
+
+# ---------------------------------------------------------------------------
 # ChatSession construction (lifted from cowork's anton_bridge._build_chat_session)
 # ---------------------------------------------------------------------------
 
@@ -793,12 +958,14 @@ async def _build_chat_session(
         build_cowork_fetch_submission_tool,
         build_cowork_update_form_tool,
         build_cowork_lookup_connector_tool,
+        build_list_conversation_datasources_tool,
     )
     PUBLISH_TOOL = build_cowork_publish_tool()
     REQUEST_CREDENTIALS_TOOL = build_cowork_request_credentials_tool()
     FETCH_SUBMISSION_TOOL = build_cowork_fetch_submission_tool()
     UPDATE_FORM_TOOL = build_cowork_update_form_tool()
     LOOKUP_CONNECTOR_TOOL = build_cowork_lookup_connector_tool()
+    LIST_CONVERSATION_DATASOURCES_TOOL = build_list_conversation_datasources_tool()
 
     try:
         from anton.core.datasources.data_vault import LocalDataVault
@@ -806,21 +973,61 @@ async def _build_chat_session(
         LocalDataVault = None
 
     base = _project_base(project)
+    # Reload ~/.anton/.env into os.environ before building settings.
+    # AntonSettings caches its env_file list at module import time — if the
+    # server started before ~/.anton/.env existed (first-run onboarding),
+    # the file is not in the cached list and planning_provider would fall
+    # back to the "anthropic" default, causing a TypeError when no
+    # ANTHROPIC_API_KEY is set. Loading the file here ensures settings
+    # always reflect the current config, even after onboarding.
+    # Skip server-operational vars that the Electron host controls.
+    _SERVER_MANAGED_KEYS = {"ANTON_SERVER_PORT", "ANTON_SERVER_HOST", "ANTON_PROJECTS_DIR"}
+    _user_env = Path.home() / ".anton" / ".env"
+    if _user_env.is_file():
+        for _line in _user_env.read_text(encoding="utf-8").splitlines():
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _k, _, _v = _line.partition("=")
+                _k = _k.strip()
+                if _k not in _SERVER_MANAGED_KEYS:
+                    os.environ[_k] = _v.strip().strip('"').strip("'")
     settings = AntonSettings()
     settings.resolve_workspace(str(base))
     if model:
-        settings.planning_model = model
+        # Minds Cloud sentinels (`_reason_`, `_code_`) only resolve at
+        # the openai-compatible router. If the active provider is
+        # something else (e.g. anthropic, after the user switched off
+        # Minds), an old cowork preference can keep sending these on
+        # every request. Drop the override and stay with the env's
+        # `ANTON_PLANNING_MODEL` instead of forwarding `_reason_` to
+        # api.anthropic.com (which 404s).
+        is_minds_sentinel = model.startswith("_") and model.endswith("_")
+        if is_minds_sentinel and settings.planning_provider != "openai-compatible":
+            logging.getLogger(__name__).warning(
+                "Ignoring Minds sentinel model %r — active planning_provider is %r. "
+                "Falling back to env ANTON_PLANNING_MODEL=%r.",
+                model, settings.planning_provider, settings.planning_model,
+            )
+        else:
+            settings.planning_model = model
 
     workspace = Workspace(base)
     workspace.initialize()
     workspace.apply_env_to_process()
 
     anton_dir = base / ".anton"
-    output_dir = Path(settings.output_dir)
-    context_dir = Path(settings.context_dir)
+    def _settings_path(value: object, fallback: Path) -> Path:
+        raw = str(value or "").strip()
+        if not raw:
+            return fallback
+        path = Path(raw).expanduser()
+        return path if path.is_absolute() else base / path
+
+    artifacts_dir = anton_dir / "artifacts"
+    context_dir = _settings_path(getattr(settings, "context_dir", None), anton_dir / "context")
     episodes_dir = anton_dir / "episodes"
     project_memory_dir = anton_dir / "memory"
-    for directory in (output_dir, context_dir, episodes_dir, project_memory_dir):
+    for directory in (artifacts_dir, context_dir, episodes_dir, project_memory_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
     llm_client = LLMClient.from_settings(settings)
@@ -840,34 +1047,48 @@ async def _build_chat_session(
 
     project_context = (
         f"You are operating in the project {project}."
-        f"You have access to all of the files in the project at {str(base)} except for the .anton/ and .context/ directories."
-        "They are off limits. Do not mention the .anton/ and .context/ directories in your responses."
+        f"You have access to all of the files in the project at {str(base)} except for the .anton/ directory."
+        "They are off limits. Do not mention the .anton/ directory in your responses."
         "You can perform operations on these files via the scratchpad."
         "You can freely read any of these project files."
         "If you need to perform any actions on these files, ask the user for permission first."
         "The only other files that you are allowed to access are any items that are attached to the conversation."
         "Access to any files not attached to the conversation or located outside the project is strictly forbidden."
         "ALWAYS use the scratchpad to interact with files."
+        f"Your scratchpad's working directory is {str(base)} — bare relative paths like `open('data.csv')` resolve from the project root."
     )
     output_context = (
-        # Anchor user-facing artifacts at .anton/output/ so the
-        # artifacts view picks them up and inline previews resolve.
-        # Files written elsewhere in the workspace still work, but
-        # this is the canonical location.
-        f"Save user-facing artifacts (HTML dashboards, CSVs, PDFs, charts, reports) under {str(base)}/.anton/output/<filename>. "
-        f"Use a bare filename — never nest into deeper subfolders. "
-        f"When you write a file from a scratchpad, use an absolute path so it always lands in the right place: "
-        f"e.g. open('{str(base)}/.anton/output/report.html', 'w')."
+        # Artifacts now live in their own visible folder at the
+        # project root (`<base>/artifacts/<slug>/...`), one folder
+        # per output. The agent never picks the folder name itself
+        # — it calls `create_artifact` to claim one, then writes
+        # files into the absolute path the tool returns. Provenance
+        # (which conversation, which turns) is tracked server-side
+        # and stamped into each folder's metadata.json + README.md
+        # automatically.
+        f"User-facing artifacts (HTML dashboards, CSVs, PDFs, datasets, fullstack apps, etc.) live under `{str(artifacts_dir)}/`. "
+        "Workflow:\n"
+        "  1. Call `create_artifact(name, description, type)` BEFORE writing any output. "
+        "It returns `{slug, path, ...}` — write your files into the returned `path`.\n"
+        "  2. To MODIFY an existing artifact, call `list_artifacts()` to find its slug, "
+        "then `open_artifact(slug)` to get the path again.\n"
+        "  3. Use absolute paths from a scratchpad cell so the file always lands in the right place: "
+        "`with open(f\"{path}/dashboard.html\", \"w\") as f: ...`\n"
+        "Never write to the legacy `.anton/output/` directory — it's no longer scanned by the artifacts view."
     )
 
     data_vault = LocalDataVault() if LocalDataVault is not None else None
     google_drive_oauth_connected = False
+    disabled = load_disabled_connections(project, conversation_id)
+    disabled_keys = {_connection_pair_key(d["engine"], d["name"]) for d in disabled}
     if data_vault is not None:
         try:
             for conn in data_vault.list_connections():
                 engine = conn.get("engine")
                 name = conn.get("name")
                 if engine and name:
+                    if _connection_pair_key(str(engine), str(name)) in disabled_keys:
+                        continue
                     data_vault.inject_env(engine, name)
                     if engine == "google_drive":
                         fields = data_vault.load(engine, name) or {}
@@ -883,6 +1104,19 @@ async def _build_chat_session(
             "in the injected `DS_GOOGLE_DRIVE_<CONNECTION>__...` environment variables. "
             "Only claim Google Drive access if you can actually use those credentials successfully."
         )
+
+    datasource_scope_guidance = (
+        " SAVED DATASOURCES: Before you run queries, connection tests, `connect_datasource`, "
+        "scratchpad probes, or any step that assumes a specific saved vault connection is in play, "
+        "call `list_conversation_datasources` with `{}` and treat its JSON as authoritative: "
+        "each connection includes `disabled` when the user muted it for this conversation "
+        "(those credentials are not injected for this chat). Re-call the tool later in the "
+        "thread if the user may have changed muting. Do not infer availability only from "
+        "environment variables."
+        "This tool should be called before any action taken on connectors, even if the conversation "
+        "history implies that you previously had access to the connector. This is because the user may "
+        "have muted the connector since the last time you called this tool."
+    )
 
     config = ChatSessionConfig(
         llm_client=llm_client,
@@ -900,6 +1134,7 @@ async def _build_chat_session(
                 "is itself the final answer the user needs."
                 f"{project_context}"
                 f"{integration_guidance}"
+                f"{datasource_scope_guidance}"
             ),
             output_context=output_context,
         ),
@@ -916,6 +1151,7 @@ async def _build_chat_session(
             REQUEST_CREDENTIALS_TOOL,
             FETCH_SUBMISSION_TOOL,
             UPDATE_FORM_TOOL,
+            LIST_CONVERSATION_DATASOURCES_TOOL,
         ],
     )
     return ChatSession(config)
@@ -1043,6 +1279,7 @@ async def chat_stream(
     conversation_id: Optional[str] = None,
     project: Optional[str] = None,
     model: Optional[str] = None,
+    disabled_connections: Optional[list[dict[str, str]]] = None,
 ) -> tuple[AsyncIterator, str]:
     """Run one turn against a conversation, returning (event_stream, conversation_id).
 
@@ -1062,6 +1299,8 @@ async def chat_stream(
 
     cid = conversation_id or _new_conversation_id()
     _ensure_meta(project, cid)
+    if disabled_connections is not None:
+        update_conversation(cid, disabled_connections=disabled_connections)
 
     # Seed the conversation's title + preview from the user's first
     # message immediately, so the recents listing shows the right
@@ -1125,6 +1364,21 @@ async def chat_stream(
         """
         async for event in active_session.turn_stream(prompt):
             yield event
+
+    # Pre-turn artifact snapshot. Pinned at the start of `_stream()`
+    # rather than at chat_stream entry so it captures the state right
+    # before the agent fires — covers retries cleanly (a retried turn
+    # still diffs against the same baseline). Turn index is the
+    # current count of user-role messages in history; the about-to-
+    # fire turn slots in at this position.
+    artifacts_root = _project_base(project) / "artifacts"
+    try:
+        from anton.core.artifacts import snapshot_dir as _snapshot_dir
+        artifact_snapshot_before = _snapshot_dir(artifacts_root)
+    except Exception:
+        logger.debug("Could not snapshot artifacts dir pre-turn", exc_info=True)
+        artifact_snapshot_before = {}
+    turn_index = sum(1 for m in (session.history or []) if m.get("role") == "user")
 
     async def _stream() -> AsyncGenerator:
         nonlocal session
@@ -1202,6 +1456,17 @@ async def chat_stream(
                 _update_meta_after_turn(project, cid, session.history)
             except Exception:
                 logger.debug("Could not update conversation meta", exc_info=True)
+            try:
+                _reconcile_artifacts_after_turn(
+                    artifacts_root=artifacts_root,
+                    conversation_id=cid,
+                    project=project,
+                    user_input=user_input,
+                    turn_index=turn_index,
+                    snapshot_before=artifact_snapshot_before,
+                )
+            except Exception:
+                logger.debug("Could not reconcile artifacts after turn", exc_info=True)
 
     return _stream(), cid
 
@@ -1267,6 +1532,12 @@ def list_conversations(limit: int = 200, project: Optional[str] = None) -> list[
                 meta["id"] = cid
             if not meta.get("project"):
                 meta["project"] = project_name
+            if "disabled_connections" not in meta:
+                meta["disabled_connections"] = []
+            else:
+                meta["disabled_connections"] = normalize_disabled_connections(
+                    meta.get("disabled_connections"),
+                )
             # Backfill turns/preview from history if meta is sparse
             if not meta.get("turns") or not meta.get("preview"):
                 hist_path = ep_dir / f"{cid}_history.json"
@@ -1325,6 +1596,12 @@ def get_conversation(conversation_id: str) -> dict | None:
             data["id"] = conversation_id
             if not data.get("project"):
                 data["project"] = project_name
+            if "disabled_connections" not in data:
+                data["disabled_connections"] = []
+            else:
+                data["disabled_connections"] = normalize_disabled_connections(
+                    data.get("disabled_connections"),
+                )
             return data
         except Exception:
             return None
@@ -1350,6 +1627,7 @@ def get_conversation(conversation_id: str) -> dict | None:
                     "created_at": "",
                     "updated_at": "",
                     "project": project_name,
+                    "disabled_connections": [],
                 }
         except Exception:
             return None
@@ -1385,11 +1663,14 @@ def update_conversation(conversation_id: str, **patch) -> dict | None:
             meta = {}
     else:
         meta = {}
-    allowed = {"title"}
+    allowed = {"title", "disabled_connections"}
+    evict_session = False
     for k, v in patch.items():
-        if k not in allowed or v is None:
+        if k not in allowed:
             continue
         if k == "title":
+            if v is None:
+                continue
             cleaned = sanitize_title(v)
             # Empty-after-sanitization → preserve the existing title
             # instead of blanking it. Callers that genuinely want a
@@ -1399,8 +1680,11 @@ def update_conversation(conversation_id: str, **patch) -> dict | None:
             if cleaned is None:
                 continue
             meta[k] = cleaned
-        else:
-            meta[k] = v
+        elif k == "disabled_connections":
+            if v is None:
+                continue
+            meta[k] = normalize_disabled_connections(v)
+            evict_session = True
     meta["id"] = conversation_id
     if not meta.get("project"):
         meta["project"] = project_name
@@ -1409,6 +1693,8 @@ def update_conversation(conversation_id: str, **patch) -> dict | None:
         _atomic_write(meta_path, meta)
     except Exception:
         logger.debug("Could not update conversation meta", exc_info=True)
+    if evict_session:
+        _evict_session(conversation_id)
     return meta
 
 

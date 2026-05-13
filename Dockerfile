@@ -48,9 +48,8 @@ FROM node:22-slim AS spa-builder
 WORKDIR /build
 # Lockfile-only install first → cached layer when only source changes.
 COPY cowork/package.json cowork/package-lock.json ./
-# --ignore-scripts skips postinstall hooks (notably node-pty's node-gyp
-# rebuild) — node-pty is Electron-only (Terminal page) and doesn't ship
-# in the web SPA, so its missing native binding is harmless here.
+# --ignore-scripts skips postinstall hooks (e.g. node-gyp rebuilds for
+# native modules) — the web SPA has no native dependencies.
 RUN npm ci --ignore-scripts
 COPY cowork/ ./
 RUN npm run build:web

@@ -108,6 +108,19 @@ function iconFor(connector) {
   return Ico[name] || Ico.database;
 }
 
+function ConnectorLogo({ connector, size = 22 }) {
+  if (connector.logo_url) {
+    return (
+      <img
+        src={connector.logo_url}
+        alt=""
+        style={{ width: size, height: size, objectFit: 'contain' }}
+      />
+    );
+  }
+  return iconFor(connector)(size);
+}
+
 // Compact "Filter by / Sort by" control. Uses a transparent native
 // <select> overlaid on a styled pill so the chevron + label read as
 // one element while the dropdown UX is the OS one (familiar, free).
@@ -154,7 +167,6 @@ function SelectPill({ label, value, onChange, options }) {
 }
 
 function ConnectorTile({ connector, onPick }) {
-  const Icon = iconFor(connector);
   return (
     <button
       type="button"
@@ -188,7 +200,7 @@ function ConnectorTile({ connector, onPick }) {
         color: connector.logo_color || 'var(--ink-3)',
         flexShrink: 0,
       }}>
-        {Icon(22)}
+        <ConnectorLogo connector={connector} size={22} />
       </span>
       <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <span style={{
@@ -417,8 +429,8 @@ export default function ConnectorPicker({ open, onPick, onClose }) {
             </div>
           )}
           {/* Body — two modes:
-                • sortBy=default → category sections (one per group,
-                  in CATEGORY_ORDER, alphabetical within each).
+                • sortBy=default → Featured section first (when not
+                  searching/filtering), then category sections.
                 • sortBy=name    → single flat grid sorted A–Z.
               The search/category filter shrinks `filtered` first, so
               both modes operate on the same already-narrowed list. */}
@@ -435,34 +447,62 @@ export default function ConnectorPicker({ open, onPick, onClose }) {
                 ))}
             </div>
           ) : (
-            groupByCategory(filtered).map(([cat, list]) => (
-              <div key={cat} style={{ marginBottom: 18 }}>
-                <div style={{
-                  fontFamily: FONT_BODY, fontSize: 11, fontWeight: 600,
-                  letterSpacing: '0.04em', textTransform: 'uppercase',
-                  color: 'var(--ink-3)',
-                  padding: '4px 2px 8px',
-                }}>
-                  {categoryLabel(cat)}
-                  <span style={{
-                    marginLeft: 8, fontWeight: 500,
-                    color: 'var(--ink-4)',
-                    fontSize: 11, letterSpacing: 0, textTransform: 'none',
+            <>
+              {/* Featured section — only when showing all categories and not searching */}
+              {category === 'all' && !query.trim() && (() => {
+                const featured = filtered.filter((c) => c.featured);
+                if (!featured.length) return null;
+                return (
+                  <div style={{ marginBottom: 24 }}>
+                    <div style={{
+                      fontFamily: FONT_BODY, fontSize: 11, fontWeight: 600,
+                      letterSpacing: '0.04em', textTransform: 'uppercase',
+                      color: 'var(--ink-3)',
+                      padding: '4px 2px 8px',
+                    }}>
+                      Featured
+                    </div>
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                      gap: 10,
+                    }}>
+                      {featured.map((c) => (
+                        <ConnectorTile key={c.id} connector={c} onPick={onPick} />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
+              {groupByCategory(filtered).map(([cat, list]) => (
+                <div key={cat} style={{ marginBottom: 18 }}>
+                  <div style={{
+                    fontFamily: FONT_BODY, fontSize: 11, fontWeight: 600,
+                    letterSpacing: '0.04em', textTransform: 'uppercase',
+                    color: 'var(--ink-3)',
+                    padding: '4px 2px 8px',
                   }}>
-                    {list.length}
-                  </span>
+                    {categoryLabel(cat)}
+                    <span style={{
+                      marginLeft: 8, fontWeight: 500,
+                      color: 'var(--ink-4)',
+                      fontSize: 11, letterSpacing: 0, textTransform: 'none',
+                    }}>
+                      {list.length}
+                    </span>
+                  </div>
+                  <div style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                    gap: 10,
+                  }}>
+                    {list.map((c) => (
+                      <ConnectorTile key={c.id} connector={c} onPick={onPick} />
+                    ))}
+                  </div>
                 </div>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                  gap: 10,
-                }}>
-                  {list.map((c) => (
-                    <ConnectorTile key={c.id} connector={c} onPick={onPick} />
-                  ))}
-                </div>
-              </div>
-            ))
+              ))}
+            </>
           )}
         </div>
     </Modal>

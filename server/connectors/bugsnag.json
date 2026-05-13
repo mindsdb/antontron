@@ -32,9 +32,9 @@
       {
         "id": "personal-auth-token",
         "label": "Personal Auth Token",
-        "description": "Paste a personal auth token from your BugSnag account settings. The fastest and simplest way to connect \u2014 no OAuth app setup required.",
+        "description": "Paste a personal auth token from your BugSnag account settings. The fastest and simplest way to connect — no OAuth app setup required.",
         "recommended": true,
-        "how_to": "## Generate a BugSnag Personal Auth Token\n\nBugSnag issues per-user personal auth tokens that grant API access scoped to your account's permissions.\n\n### Steps\n\n1. Log in to [BugSnag](https://app.bugsnag.com).\n2. Click your avatar or name in the top-right corner and choose **My Account**.\n3. Scroll to **Settings \u2192 Personal auth tokens**.\n4. Click **Generate new token**, give it a descriptive name like `Anton`, and confirm.\n5. Copy the token immediately \u2014 BugSnag only shows it once.\n6. Paste the token into the **Personal Auth Token** field below.\n\n### Notes\n\n- The token inherits your account's organization and project permissions. If you need access to a specific organization, make sure your account is a member.\n- If you lose the token, generate a new one from the same page and update it in Anton.\n- Revoking the token in BugSnag will immediately break Anton's connection \u2014 just paste a new one to restore it.\n",
+        "how_to": "## Generate a BugSnag Personal Auth Token\n\nBugSnag issues per-user personal auth tokens that grant API access scoped to your account's permissions.\n\n### Steps\n\n1. Log in to [BugSnag](https://app.bugsnag.com).\n2. Click your avatar or name in the top-right corner and choose **My Account**.\n3. Scroll to **Settings → Personal auth tokens**.\n4. Click **Generate new token**, give it a descriptive name like `Anton`, and confirm.\n5. Copy the token immediately — BugSnag only shows it once.\n6. Paste the token into the **Personal Auth Token** field below.\n\n### Notes\n\n- The token inherits your account's organization and project permissions. If you need access to a specific organization, make sure your account is a member.\n- If you lose the token, generate a new one from the same page and update it in Anton.\n- Revoking the token in BugSnag will immediately break Anton's connection — just paste a new one to restore it.\n",
         "help_url": "https://bugsnagapi.docs.apiary.io/#introduction/authentication",
         "fields": [
           {
@@ -44,7 +44,7 @@
             "required": true,
             "secret": true,
             "placeholder": "your-personal-auth-token",
-            "description": "Found in BugSnag \u2192 My Account \u2192 Settings \u2192 Personal auth tokens. Shown only once on creation."
+            "description": "Found in BugSnag → My Account → Settings → Personal auth tokens. Shown only once on creation."
           },
           {
             "name": "organization_slug",
@@ -93,6 +93,8 @@
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/bugsnag.svg"
+  },
+  "logo_url": "logos/bugsnag.svg"
 }

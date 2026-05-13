@@ -14,6 +14,16 @@ const FONT_MONO = "var(--font-mono, 'JetBrains Mono', monospace)";
 export default function ServerOfflineHelpModal({
   open,
   onClose,
+  // Atomic server actions wired from App.jsx. The modal composes
+  // "Restart" locally from `onStop` + `onStart` so the parent only
+  // needs to expose the two primitives. Older callers passed a
+  // single `onRetry` that did stop+start; that hid the "I just want
+  // to stop, not restart" intent and made it impossible to give the
+  // user a Stop button. Kept here for backwards-compat — when neither
+  // `onStop` nor `onStart` is provided, `onRetry` runs the legacy
+  // stop+start cycle.
+  onStart,
+  onStop,
   onRetry,
   serverOnline = false,
   serverBusy = false,
@@ -59,9 +69,28 @@ export default function ServerOfflineHelpModal({
   // Live state → title + header colour + subtitle. The same modal is
   // used in every state — clicking the status pill while the backend
   // is up should read as "Backend status" not "Backend isn't running".
+  //
+  // The offline branch splits further. Three signals are involved:
+  //   - `lastError`: present when a start attempt failed (timeout,
+  //     spawn error, deps missing, …). Absent after a successful
+  //     start, even if the python later crashed.
+  //   - `lastStopIntentional`: TRUE when the death was caused by a
+  //     user/app stopServer() call; FALSE on crash; NULL pre-first-
+  //     stop. This is the load-bearing signal — `lastError` alone
+  //     can't distinguish a clean stop from a post-start crash since
+  //     both leave it null.
+  // Decision: stopped panel iff there's no start-time error AND the
+  // last transition was intentional. Everything else (including the
+  // initial "never tried" state and post-start crashes) gets the
+  // failure panel.
   const state = serverBusy
     ? (serverBusyKind === 'stopping' ? 'stopping' : 'starting')
     : serverOnline ? 'online' : 'offline';
+  const offlineKind = state === 'offline'
+    && !error
+    && diag?.lastStopIntentional === true
+    ? 'stopped'
+    : 'failed';
   const HEADER = {
     online:   {
       title:    'Anton backend is running',
@@ -81,14 +110,71 @@ export default function ServerOfflineHelpModal({
       iconColor:  'var(--ink-3)',
       iconBgMix:  'var(--ink-3)',
     },
-    offline: {
-      title:    "Anton backend isn't running",
-      subtitle: "The local Python server didn't start. Below is the most recent error and log tail captured from the process.",
-      iconColor:  'var(--danger)',
-      iconBgMix:  'var(--danger)',
-    },
+    offline: offlineKind === 'stopped'
+      ? {
+          title:    'Anton backend is stopped',
+          subtitle: 'You stopped the local Python server. Click "Start backend" below to bring it back up.',
+          iconColor:  'var(--ink-3)',
+          iconBgMix:  'var(--ink-3)',
+        }
+      : {
+          title:    "Anton backend isn't running",
+          subtitle: "The local Python server didn't start. Below is the most recent error and log tail captured from the process.",
+          iconColor:  'var(--danger)',
+          iconBgMix:  'var(--danger)',
+        },
   }[state];
 
+  const refreshDiag = async () => {
+    try {
+      const data = await window.antontron?.serverDiagnostics?.();
+      setDiag(data || null);
+    } catch {}
+  };
+
+  const handleStart = async () => {
+    if (!onStart) return;
+    setBusy(true);
+    try {
+      await onStart();
+      await refreshDiag();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleStop = async () => {
+    if (!onStop) return;
+    setBusy(true);
+    try {
+      await onStop();
+      await refreshDiag();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleRestart = async () => {
+    setBusy(true);
+    try {
+      // Prefer atomic actions when wired; fall back to the legacy
+      // single onRetry handler so older callers still work.
+      if (onStop && onStart) {
+        await onStop();
+        await onStart();
+      } else if (onRetry) {
+        await onRetry();
+      }
+      await refreshDiag();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Legacy single-button click target — only used when atomic
+  // handlers aren't provided. Kept as a thin wrapper so the existing
+  // disabled-while-busy + diagnostics-refresh logic is unchanged for
+  // any caller that still ships the old API.
   const handleRetry = async () => {
     setBusy(true);
     try {
@@ -203,10 +289,11 @@ export default function ServerOfflineHelpModal({
             </div>
           </div>
 
-          {/* Headline error — offline only. While running there's no
-              "start error" to surface; the log tail below is enough
-              for live debugging. */}
-          {state === 'offline' && (error ? (
+          {/* Headline error — offline + start-failure only. A
+              user-initiated stop has no failure to surface, so we
+              skip the error block entirely; the header subtitle
+              already explains why the backend is down. */}
+          {state === 'offline' && offlineKind === 'failed' && (error ? (
             <div style={{
               padding: '10px 12px', borderRadius: 8,
               background: 'color-mix(in srgb, var(--danger) 12%, var(--surface))',
@@ -274,30 +361,73 @@ export default function ServerOfflineHelpModal({
               fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 500,
             }}
           >Close</button>
-          {/* Restart is available in every state — even when the
-              backend reports "online" some kinds of corruption (a
-              cached ChatSession pointing at a deleted project dir,
-              etc.) only clear after a full restart. Disabled while
-              starting/stopping so we don't fire concurrent toggles
-              into the main process. */}
-          <button
-            type="button"
-            onClick={handleRetry}
-            disabled={busy || serverBusy}
-            style={{
-              cursor: (busy || serverBusy) ? 'progress' : 'pointer',
-              background: 'var(--accent)',
-              border: '1px solid var(--accent)',
-              color: '#fff',
-              padding: '7px 14px', borderRadius: 7,
-              fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 600,
-              opacity: (busy || serverBusy) ? 0.7 : 1,
-            }}
-          >
-            {busy
-              ? (state === 'offline' ? 'Starting…' : 'Restarting…')
-              : (state === 'offline' ? 'Start backend' : 'Restart backend')}
-          </button>
+          {/* Action buttons — split by intent so the user can stop
+              the backend without it immediately restarting:
+                * online   → [Stop] [Restart]   (Restart = stop + start)
+                * offline  → [Start]
+              All disabled while a transition is in flight so we
+              don't fire concurrent toggles into the main process.
+              Falls back to a single legacy button when only the
+              old `onRetry` API was provided. */}
+          {(onStart || onStop) ? (
+            <>
+              {state !== 'offline' && (
+                <button
+                  type="button"
+                  onClick={handleStop}
+                  disabled={busy || serverBusy || !onStop}
+                  style={{
+                    cursor: (busy || serverBusy) ? 'progress' : 'pointer',
+                    background: 'transparent',
+                    border: '1px solid var(--line)',
+                    color: 'var(--ink-2)',
+                    padding: '7px 14px', borderRadius: 7,
+                    fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 500,
+                    opacity: (busy || serverBusy) ? 0.7 : 1,
+                  }}
+                >
+                  {(busy && serverBusyKind === 'stopping') ? 'Stopping…' : 'Stop backend'}
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={state === 'offline' ? handleStart : handleRestart}
+                disabled={busy || serverBusy || (state === 'offline' ? !onStart : !(onStart && onStop))}
+                style={{
+                  cursor: (busy || serverBusy) ? 'progress' : 'pointer',
+                  background: 'var(--accent)',
+                  border: '1px solid var(--accent)',
+                  color: '#fff',
+                  padding: '7px 14px', borderRadius: 7,
+                  fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 600,
+                  opacity: (busy || serverBusy) ? 0.7 : 1,
+                }}
+              >
+                {busy
+                  ? (state === 'offline' ? 'Starting…' : 'Restarting…')
+                  : (state === 'offline' ? 'Start backend' : 'Restart backend')}
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              onClick={handleRetry}
+              disabled={busy || serverBusy}
+              style={{
+                cursor: (busy || serverBusy) ? 'progress' : 'pointer',
+                background: 'var(--accent)',
+                border: '1px solid var(--accent)',
+                color: '#fff',
+                padding: '7px 14px', borderRadius: 7,
+                fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 600,
+                opacity: (busy || serverBusy) ? 0.7 : 1,
+              }}
+            >
+              {busy
+                ? (state === 'offline' ? 'Starting…' : 'Restarting…')
+                : (state === 'offline' ? 'Start backend' : 'Restart backend')}
+            </button>
+          )}
         </div>
       </div>
     </div>

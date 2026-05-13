@@ -32,7 +32,7 @@
       {
         "id": "oauth-byok",
         "label": "Sign in with Xero (OAuth 2.0)",
-        "description": "Opens Xero's consent screen in your browser. You'll need to create a free OAuth 2.0 app in the Xero Developer Portal first \u2014 takes about 3 minutes. Tokens are stored locally and refreshed automatically.",
+        "description": "Opens Xero's consent screen in your browser. You'll need to create a free OAuth 2.0 app in the Xero Developer Portal first — takes about 3 minutes. Tokens are stored locally and refreshed automatically.",
         "recommended": true,
         "submit_action": "oauth_launch",
         "oauth": {
@@ -44,7 +44,7 @@
             "offline_access"
           ]
         },
-        "how_to": "## Sign in with Xero (OAuth 2.0 \u2014 bring your own client)\n\nXero requires you to register an app to obtain a Client ID and Client Secret. This is free and takes about 3 minutes.\n\n### 1. Create a Xero OAuth app\n\n1. Go to [Xero Developer Portal](https://developer.xero.com/app/manage) and sign in with your Xero account.\n2. Click **New app**.\n3. Fill in:\n   - **App name**: e.g. `Anton`\n   - **Company or application URL**: your company website or `https://localhost`\n   - **OAuth 2.0 redirect URI**: `http://127.0.0.1` (Anton uses a local redirect)\n4. Click **Create app**.\n\n### 2. Copy your credentials\n\n1. Inside the new app, open the **Configuration** tab.\n2. Copy the **Client ID** \u2014 paste it into the field below.\n3. Click **Generate a secret**, copy the **Client secret** immediately (it won't be shown again), and paste it into the field below.\n\n### 3. Authorize\n\n1. Click **Submit**. Anton opens Xero's consent screen in your browser.\n2. Select the Xero organisation(s) you want to grant access to.\n3. Review the requested scopes:\n   - **accounting.transactions** \u2014 read/write invoices, bills, bank transactions\n   - **accounting.contacts** \u2014 read/write customers and suppliers\n   - **offline_access** \u2014 issue a refresh token so Anton can reconnect without asking again\n4. Click **Allow access**. Anton stores the tokens locally and refreshes them automatically.\n\n### Notes\n\n- If your Xero plan is **Starter**, some transaction types may be rate-limited by Xero's API.\n- To revoke access: Xero \u2192 **My Xero \u2192 Connected apps** \u2192 find Anton \u2192 **Disconnect**.\n- Xero refresh tokens expire after 60 days of inactivity \u2014 simply re-authorize if Anton reports an auth error.\n",
+        "how_to": "## Sign in with Xero (OAuth 2.0 — bring your own client)\n\nXero requires you to register an app to obtain a Client ID and Client Secret. This is free and takes about 3 minutes.\n\n### 1. Create a Xero OAuth app\n\n1. Go to [Xero Developer Portal](https://developer.xero.com/app/manage) and sign in with your Xero account.\n2. Click **New app**.\n3. Fill in:\n   - **App name**: e.g. `Anton`\n   - **Company or application URL**: your company website or `https://localhost`\n   - **OAuth 2.0 redirect URI**: `http://127.0.0.1` (Anton uses a local redirect)\n4. Click **Create app**.\n\n### 2. Copy your credentials\n\n1. Inside the new app, open the **Configuration** tab.\n2. Copy the **Client ID** — paste it into the field below.\n3. Click **Generate a secret**, copy the **Client secret** immediately (it won't be shown again), and paste it into the field below.\n\n### 3. Authorize\n\n1. Click **Submit**. Anton opens Xero's consent screen in your browser.\n2. Select the Xero organisation(s) you want to grant access to.\n3. Review the requested scopes:\n   - **accounting.transactions** — read/write invoices, bills, bank transactions\n   - **accounting.contacts** — read/write customers and suppliers\n   - **offline_access** — issue a refresh token so Anton can reconnect without asking again\n4. Click **Allow access**. Anton stores the tokens locally and refreshes them automatically.\n\n### Notes\n\n- If your Xero plan is **Starter**, some transaction types may be rate-limited by Xero's API.\n- To revoke access: Xero → **My Xero → Connected apps** → find Anton → **Disconnect**.\n- Xero refresh tokens expire after 60 days of inactivity — simply re-authorize if Anton reports an auth error.\n",
         "help_url": "https://developer.xero.com/documentation/guides/oauth2/overview/",
         "fields": [
           {
@@ -61,10 +61,12 @@
             "type": "password",
             "required": true,
             "secret": true,
-            "description": "Generated once in the Xero Developer Portal. Copy it immediately \u2014 it cannot be retrieved after leaving the page."
+            "description": "Generated once in the Xero Developer Portal. Copy it immediately — it cannot be retrieved after leaving the page."
           }
         ]
       }
-    ]
-  }
+    ],
+    "logo_url": "logos/xero.svg"
+  },
+  "logo_url": "logos/xero.svg"
 }

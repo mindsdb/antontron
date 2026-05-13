@@ -133,35 +133,45 @@ function EnableToggle({ enabled, onChange, busy }) {
       cursor: busy ? 'not-allowed' : 'pointer',
       opacity: busy ? 0.6 : 1,
     }}>
-      <input
-        type="checkbox"
-        checked={!!enabled}
-        disabled={busy}
-        onChange={(e) => onChange?.(e.target.checked)}
-        style={{
-          appearance: 'none',
-          width: 30, height: 18, borderRadius: 999,
-          background: enabled ? 'var(--accent)' : 'var(--surface-2)',
-          border: '1px solid var(--line)',
-          position: 'relative',
-          transition: 'background 140ms ease',
-          cursor: 'inherit',
-          margin: 0,
-        }}
-        // The checkbox visually carries a "thumb" via an absolutely
-        // positioned ::before pseudo — but native input doesn't allow
-        // pseudo-elements, so we render the thumb ourselves below.
-      />
-      {/* Thumb */}
-      <span aria-hidden style={{
-        position: 'absolute',
-        marginLeft: enabled ? 14 : 2, marginTop: 2,
-        width: 14, height: 14, borderRadius: '50%',
-        background: '#fff',
-        boxShadow: '0 1px 2px rgba(15,16,17,0.18)',
-        transition: 'margin-left 140ms ease',
-        pointerEvents: 'none',
-      }} />
+      {/* Track + thumb live in a positioned wrapper so the absolute-
+          positioned thumb anchors to the track itself. Earlier the
+          thumb was a sibling of the label with `position: absolute`
+          but no positioned ancestor — it ended up anchored to the
+          nearest higher-up positioned element and visually
+          "floated" as the page scrolled. */}
+      <span style={{
+        position: 'relative',
+        display: 'inline-block',
+        width: 30, height: 18,
+        flexShrink: 0,
+      }}>
+        <input
+          type="checkbox"
+          checked={!!enabled}
+          disabled={busy}
+          onChange={(e) => onChange?.(e.target.checked)}
+          style={{
+            appearance: 'none',
+            width: 30, height: 18, borderRadius: 999,
+            background: enabled ? 'var(--accent)' : 'var(--surface-2)',
+            border: '1px solid var(--line)',
+            transition: 'background 140ms ease',
+            cursor: 'inherit',
+            margin: 0,
+            display: 'block',
+          }}
+        />
+        {/* Thumb — absolutely positioned inside the track wrapper. */}
+        <span aria-hidden style={{
+          position: 'absolute',
+          top: 2, left: enabled ? 14 : 2,
+          width: 14, height: 14, borderRadius: '50%',
+          background: '#fff',
+          boxShadow: '0 1px 2px rgba(15,16,17,0.18)',
+          transition: 'left 140ms ease',
+          pointerEvents: 'none',
+        }} />
+      </span>
       <span style={{
         fontFamily: FONT_BODY, fontSize: 12.5, fontWeight: 500,
         color: enabled ? 'var(--ink-2)' : 'var(--ink-3)',
@@ -378,7 +388,7 @@ export default function ScheduleDetailView({
     }}>
       {/* Breadcrumb header — matches ProjectsView typography exactly
           so drilldown surfaces feel like one family. */}
-      <div style={{
+      <div className="sched-crumb" style={{
         padding: '14px 28px 8px',
         display: 'flex', alignItems: 'center', gap: 4,
       }}>
@@ -392,7 +402,7 @@ export default function ScheduleDetailView({
         }}>{task.title || 'Untitled schedule'}</span>
       </div>
 
-      <div style={{ padding: '6px 28px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="sched-body" style={{ padding: '6px 28px 24px', display: 'flex', flexDirection: 'column', gap: 16 }}>
 
         {error && (
           <div style={{
@@ -404,14 +414,14 @@ export default function ScheduleDetailView({
         )}
 
         {/* Hero card — title, status, run-now, enable toggle, next-run */}
-        <div style={{
+        <div className="sched-hero" style={{
           padding: '18px 22px',
           background: 'var(--surface)',
           border: '1px solid var(--line)',
           borderRadius: 14,
           display: 'flex', flexDirection: 'column', gap: 14,
         }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <div className="sched-hero-top" style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{
                 fontFamily: FONT_DISPLAY, fontSize: 20, fontWeight: 600,
@@ -428,7 +438,7 @@ export default function ScheduleDetailView({
                 </span>
               </div>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+            <div className="sched-hero-actions" style={{ display: 'inline-flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
               <EnableToggle
                 enabled={task.enabled}
                 busy={busy}
@@ -509,14 +519,14 @@ export default function ScheduleDetailView({
         </div>
 
         {/* Health card. */}
-        <div style={{
+        <div className="sched-health" style={{
           padding: '18px 22px',
           background: 'var(--surface)',
           border: '1px solid var(--line)',
           borderRadius: 14,
           display: 'flex', flexDirection: 'column', gap: 14,
         }}>
-          <div style={{
+          <div className="sched-health-top" style={{
             display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
             gap: 12,
           }}>
@@ -530,7 +540,7 @@ export default function ScheduleDetailView({
                 marginTop: 2,
               }}>Last {Math.min(stats.total, 30)} runs · success rate, duration, error frequency.</div>
             </div>
-            <div style={{ display: 'inline-flex', alignItems: 'center', gap: 14 }}>
+            <div className="sched-health-metrics" style={{ display: 'inline-flex', alignItems: 'center', gap: 14 }}>
               <Metric label="Total runs" value={stats.total} />
               <Metric
                 label="Success rate"

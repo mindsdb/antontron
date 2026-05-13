@@ -113,10 +113,17 @@ def _save_connection(engine: str, name: str, credentials: dict, auth_method: str
     `resolve_modify_merge` runs on every save — it's a no-op on
     create paths where no prior record exists.
     """
-    from anton.core.datasources.data_vault import (
-        LocalDataVault,
-        resolve_modify_merge,
-    )
+    from anton.core.datasources.data_vault import LocalDataVault
+    # `resolve_modify_merge` ships in newer anton-core; fall back to
+    # a passthrough when the installed anton predates it so the save
+    # still lands (without sentinel resolution). Same defensive shim
+    # for the `secure_keys` save kwarg — older vaults silently drop
+    # it via Python's positional/kwarg semantics, but to keep one
+    # code path we route everything through a thin local helper.
+    try:
+        from anton.core.datasources.data_vault import resolve_modify_merge as _merge
+    except ImportError:
+        _merge = None
 
     engine_def, _ = _validate_shape(engine, credentials, auth_method)
 
@@ -135,11 +142,49 @@ def _save_connection(engine: str, name: str, credentials: dict, auth_method: str
 
     vault = LocalDataVault()
     save_name = (name or "").strip() or f"{engine}-{vault.next_connection_number(engine)}"
-    merged, secure_keys = resolve_modify_merge(
-        vault, engine, save_name, cleaned,
-        spec_secret_keys=spec_secret_names,
-    )
-    vault.save(engine, save_name, merged, secure_keys=secure_keys)
+    if _merge is not None:
+        merged, secure_keys = _merge(
+            vault, engine, save_name, cleaned,
+            spec_secret_keys=spec_secret_names,
+        )
+        # Refuse to persist an empty record. This guards against the
+        # silent failure that produced records like
+        # `gmail/gmail-1: { fields: {}, secure_keys: [access_token] }` —
+        # the slot exists, anton-core then tries to inject DS_* env
+        # vars from nothing, and the next task can't reach the
+        # underlying service. Raising here lets the caller surface a
+        # real "fill in <required-fields>" message.
+        if not merged:
+            raise ValueError(
+                f"Refusing to save empty credential record for engine={engine!r}, "
+                f"name={save_name!r}. None of the submitted values matched the "
+                f"connector spec's field names. Submitted keys: "
+                f"{sorted(credentials.keys())!r}; expected one of: "
+                f"{sorted({getattr(f, 'name', '') for f in (locals().get('fields') or [])}) if locals().get('fields') else 'unknown'}"
+            )
+        try:
+            vault.save(engine, save_name, merged, secure_keys=secure_keys)
+        except TypeError:
+            # Older LocalDataVault.save signature lacks the keyword.
+            vault.save(engine, save_name, merged)
+    else:
+        # Legacy fallback: no sentinel resolution, no secure_keys
+        # persistence. The user is on a stale anton-core and needs
+        # to reinstall to get the modify-flow merge — log a hint so
+        # the trail in the chat is informative.
+        logger.warning(
+            "anton-core has no `resolve_modify_merge` — saving without "
+            "the modify-flow merge. Reinstall anton (e.g. "
+            "`uv tool install --reinstall --force-reinstall anton`) "
+            "to enable sentinel-based credential preservation."
+        )
+        if not cleaned:
+            raise ValueError(
+                f"Refusing to save empty credential record for engine={engine!r}, "
+                f"name={save_name!r}. None of the submitted values matched the "
+                f"engine's known fields."
+            )
+        vault.save(engine, save_name, cleaned)
     return save_name
 
 

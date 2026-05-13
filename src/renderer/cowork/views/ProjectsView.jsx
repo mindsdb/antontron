@@ -15,6 +15,7 @@ import { WorkingFolderBox, ContextBox, ScheduledBox } from '../components/rail';
 import { TaskList } from '../components/task';
 import { ProjectCard } from '../components/project/ProjectCard';
 import NewProjectModal from '../components/project/NewProjectModal';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 import {
   PageHeader,
   FilterRow,
@@ -140,7 +141,7 @@ function activitySummaryFor(project, tasks) {
 // type, height, padding and accent-glow consistent across pages.
 function NewProjectButton({ onClick }) {
   return (
-    <button type="button" className="btn-primary" onClick={onClick}>
+    <button type="button" className="btn-primary proj-new-action" onClick={onClick}>
       {Ico.plus(14)} New project
     </button>
   );
@@ -284,7 +285,6 @@ function ProjectMenu({ open, anchorRect, project, pinned, isReserved, undeletabl
         />
       )}
       {!isReserved && <Item label="Rename…" icon={Ico.edit(13)} onClick={() => onRename?.(project)} />}
-      <Item label="Show in Finder" icon={Ico.folder(13)} onClick={() => onReveal?.(project)} />
       <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
       <Item
         label="Delete…"
@@ -534,9 +534,19 @@ function useRowStats(project) {
   return { mem, art };
 }
 
-function ListRow({ project, tasks, scheduled, pinned, onOpen, onTogglePin, onMenuOpen }) {
+function ListRow({
+  project, tasks, scheduled, pinned, onOpen, onTogglePin, onMenuOpen,
+  // Inline-edit plumbing — wired from the parent the same way the
+  // grid `ProjectCard` is, so the kebab → Rename action works in both
+  // views. Earlier the list row showed no input when editing, which
+  // forced users to flip to grid view to actually rename.
+  editing = false,
+  onRenameSubmit,
+  onRenameCancel,
+}) {
   const [hover, setHover] = useState(false);
   const triggerRef = useRef(null);
+  const inputRef = useRef(null);
   const { mem, art } = useRowStats(project);
   const summary = activitySummaryFor(project, tasks);
   const projectTasks = (tasks || []).filter((t) => t.projectName === project.name || t.projectPath === project.path);
@@ -549,20 +559,35 @@ function ListRow({ project, tasks, scheduled, pinned, onOpen, onTogglePin, onMen
   const active = isActive(project, tasks);
   const isReserved = project.name === 'general' || project.name === 'default';
 
+  // Auto-focus + select-all when the row enters edit mode so the user
+  // can start typing the new name immediately.
+  useEffect(() => {
+    if (!editing) return;
+    const el = inputRef.current;
+    if (!el) return;
+    el.focus();
+    try { el.setSelectionRange(0, el.value.length); } catch {}
+  }, [editing]);
+
+  const submitRename = () => {
+    const next = inputRef.current?.value ?? project.name;
+    onRenameSubmit?.(next);
+  };
+
   return (
     <div
-      role="button"
-      tabIndex={0}
-      onClick={() => onOpen?.(project)}
+      role={editing ? undefined : 'button'}
+      tabIndex={editing ? undefined : 0}
+      onClick={editing ? undefined : () => onOpen?.(project)}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onKeyDown={(e) => { if (e.key === 'Enter') onOpen?.(project); }}
+      onKeyDown={(e) => { if (!editing && e.key === 'Enter') onOpen?.(project); }}
       style={{
         display: 'grid', gridTemplateColumns: LIST_GRID, gap: 14,
         padding: '12px 14px',
         background: hover ? 'var(--surface)' : 'transparent',
         borderBottom: '1px solid var(--line)',
-        cursor: 'pointer',
+        cursor: editing ? 'default' : 'pointer',
         transition: 'background .12s ease',
         alignItems: 'center',
         outline: 'none',
@@ -579,12 +604,37 @@ function ListRow({ project, tasks, scheduled, pinned, onOpen, onTogglePin, onMen
         <span style={{ display: 'inline-flex', color: 'var(--ink-3)', flexShrink: 0 }}>
           {Ico.folder(13)}
         </span>
-        <span style={{
-          fontFamily: FONT_DISPLAY, fontSize: 14.5, fontWeight: 600,
-          color: 'var(--ink)', minWidth: 0,
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{project.name}</span>
-        {pinned && (
+        {editing ? (
+          <input
+            ref={inputRef}
+            defaultValue={project.name}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              e.stopPropagation();
+              if (e.key === 'Enter') { e.preventDefault(); submitRename(); }
+              else if (e.key === 'Escape') { e.preventDefault(); onRenameCancel?.(); }
+            }}
+            onBlur={submitRename}
+            spellCheck={false}
+            autoCapitalize="none"
+            autoCorrect="off"
+            style={{
+              flex: '1 1 0', minWidth: 0,
+              fontFamily: FONT_DISPLAY, fontSize: 14.5, fontWeight: 600,
+              color: 'var(--ink)',
+              background: 'var(--surface-2)',
+              border: '1px solid var(--accent)',
+              borderRadius: 5, padding: '2px 6px', outline: 'none',
+            }}
+          />
+        ) : (
+          <span style={{
+            fontFamily: FONT_DISPLAY, fontSize: 14.5, fontWeight: 600,
+            color: 'var(--ink)', minWidth: 0,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}>{project.name}</span>
+        )}
+        {pinned && !editing && (
           <span style={{ display: 'inline-flex', color: 'var(--accent)', flexShrink: 0 }}>
             {Ico.pin(11)}
           </span>
@@ -719,13 +769,14 @@ function CrumbSep() {
 }
 
 function ProjectDetail({
-  project, projects, tasks, scheduled, models, onSend, onSelectTask,
+  project, projects, tasks, scheduled, scheduleRunsIndex = {}, models, onSend, onSelectTask,
   onDeleteTask, onShowAll,
   attachments = [],
   connectors = [],
   onAttachFiles,
-  onAttachConnector,
   onRemoveAttachment,
+  disabledConnections = [],
+  onUpdateConnectorMute,
   // Header kebab + inline rename — lets users rename / reveal / delete
   // the active project without bouncing back to the grid. Pin is
   // intentionally absent: the only pin store today is localStorage on
@@ -737,6 +788,10 @@ function ProjectDetail({
   onRenameCancel,
   onReveal,
   onDelete,
+  // Clicking a row inside the rail's Scheduled Tasks card routes to
+  // the schedule detail page. Wired by App.jsx — same handler the
+  // ScheduledView grid uses.
+  onOpenSchedule,
 }) {
   const projectTasks = (tasks || [])
     .filter((t) => t.projectName === project.name || t.projectPath === project.path)
@@ -770,7 +825,7 @@ function ProjectDetail({
   };
 
   return (
-    <div style={{
+    <div className="project-detail-root" style={{
       flex: 1, minHeight: 0,
       display: 'grid',
       gridTemplateColumns: railOpen ? 'minmax(0, 1fr) 320px' : 'minmax(0, 1fr) 0px',
@@ -791,6 +846,7 @@ function ProjectDetail({
         {/* Floating expand-rail button (mirrors ChatView). */}
         <button
           type="button"
+          className="project-detail-rail-toggle"
           onClick={() => setRailOpen(true)}
           title="Expand panel"
           aria-label="Expand panel"
@@ -869,12 +925,31 @@ function ProjectDetail({
                   }}
                 />
               ) : (
-                <span title={project.name} style={{
-                  fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
-                  letterSpacing: '0.04em', color: 'var(--ink)',
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  minWidth: 0, flex: '0 1 auto',
-                }}>{project.name}</span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title={project.name}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    if (menuRect) { setMenuRect(null); return; }
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    setMenuRect(rect);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      const rect = e.currentTarget.getBoundingClientRect();
+                      setMenuRect((cur) => (cur ? null : rect));
+                    }
+                  }}
+                  style={{
+                    fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 14,
+                    letterSpacing: '0.04em', color: 'var(--ink)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    minWidth: 0, flex: '0 1 auto',
+                    cursor: 'pointer',
+                  }}
+                >{project.name}</span>
               )}
               {!editing && (
                 <button
@@ -943,8 +1018,9 @@ function ProjectDetail({
               attachments={attachments}
               connectors={connectors}
               onAttachFiles={onAttachFiles}
-              onAttachConnector={onAttachConnector}
               onRemoveAttachment={onRemoveAttachment}
+              disabledConnections={disabledConnections}
+              onUpdateConnectorMute={onUpdateConnectorMute}
               hideModel
               metaReadOnly
               placeholder={`Start a new task in ${project.name}…`}
@@ -953,15 +1029,18 @@ function ProjectDetail({
             <TaskList
               tasks={projectTasks}
               projects={projects || []}
+              schedules={scheduled || []}
+              scheduleRunsIndex={scheduleRunsIndex}
               emptyMessage={`No tasks in this project yet — type a prompt above to start one.`}
               onSelectTask={onSelectTask}
+              onOpenSchedule={onOpenSchedule}
               onDeleteTask={onDeleteTask}
             />
           </div>
         </div>
       </div>
 
-      <aside style={{
+      <aside className="project-detail-rail" style={{
         background: 'transparent',
         padding: '14px 14px 22px',
         visibility: railOpen ? 'visible' : 'hidden',
@@ -972,12 +1051,13 @@ function ProjectDetail({
         minWidth: 0,
         WebkitAppRegion: 'no-drag',
       }}>
-        <div style={{
+        <div className="project-detail-rail-toggle-row" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           flexShrink: 0,
         }}>
           <button
             type="button"
+            className="project-detail-rail-toggle"
             onClick={() => setRailOpen(false)}
             title="Collapse panel"
             aria-label="Collapse panel"
@@ -996,7 +1076,7 @@ function ProjectDetail({
         </div>
         <WorkingFolderBox project={project} />
         <ContextBox project={project} />
-        <ScheduledBox items={projectSchedules} />
+        <ScheduledBox items={projectSchedules} onSelect={onOpenSchedule} />
       </aside>
     </div>
   );
@@ -1009,6 +1089,10 @@ export default function ProjectsView({
   selectedProject,
   tasks = [],
   scheduled = [],
+  // Flat sessionId → scheduleId map. Forwarded to TaskList so the
+  // project view's task list collapses scheduled runs the same way
+  // TasksView does.
+  scheduleRunsIndex = {},
   models = [],
   loading = false,
   onSelectProject,
@@ -1020,13 +1104,22 @@ export default function ProjectsView({
   attachments = [],
   connectors = [],
   onAttachFiles,
-  onAttachConnector,
   onRemoveAttachment,
+  disabledConnections = [],
+  onUpdateConnectorMute,
+  // Forwarded to ProjectDetail's rail Scheduled Tasks card —
+  // clicking a row routes to the schedule detail page.
+  onOpenSchedule,
 }) {
   const { pinned, togglePin } = usePinnedProjects();
+  const { isMobile } = useBreakpoint();
   const [view, setView] = useState(() =>
     localStorage.getItem('anton:projects-view') === 'list' ? 'list' : 'grid'
   );
+  // List rows use a 5-column grid that breaks at phone widths. Force
+  // grid mode on mobile so the toggle isn't needed; the user's
+  // persisted desktop preference is preserved when they go back wide.
+  const effectiveView = isMobile ? 'grid' : view;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('recent');
   const [menuFor, setMenuFor] = useState(null); // { project, rect }
@@ -1057,6 +1150,16 @@ export default function ProjectsView({
   const handleNewProject = () => {
     setCreating(true);
   };
+
+  // External open trigger — fired by the mobile FAB menu's "New
+  // project" option. The modal lives inside ProjectsView, so the FAB
+  // navigates to this route and dispatches the event once we're
+  // mounted (App.jsx handles the timing).
+  useEffect(() => {
+    const onOpen = () => setCreating(true);
+    window.addEventListener('anton:open-new-project', onOpen);
+    return () => window.removeEventListener('anton:open-new-project', onOpen);
+  }, []);
   const handleCreateProject = async (name) => {
     if (onCreateProject) await onCreateProject({ name });
     else await createProjectApi(name);
@@ -1139,6 +1242,7 @@ export default function ProjectsView({
         projects={projects}
         tasks={tasks}
         scheduled={scheduled}
+        scheduleRunsIndex={scheduleRunsIndex}
         models={models}
         onSend={onSendInProject}
         onSelectTask={onSelectTask}
@@ -1146,8 +1250,9 @@ export default function ProjectsView({
         attachments={attachments}
         connectors={connectors}
         onAttachFiles={onAttachFiles}
-        onAttachConnector={onAttachConnector}
         onRemoveAttachment={onRemoveAttachment}
+        disabledConnections={disabledConnections}
+        onUpdateConnectorMute={onUpdateConnectorMute}
         onShowAll={() => setDetailProject(null)}
         editing={editingProjectName === detailProject.name}
         onRenameStart={handleRenameStart}
@@ -1161,6 +1266,7 @@ export default function ProjectsView({
           setDetailProject(null);
           onDeleteProject?.(proj);
         }}
+        onOpenSchedule={onOpenSchedule}
       />
     );
   }
@@ -1197,7 +1303,7 @@ export default function ProjectsView({
           />
         }
         sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
-        view={<ViewToggle value={view} onChange={setView} />}
+        view={<span className="proj-view-toggle"><ViewToggle value={view} onChange={setView} /></span>}
         counts={
           <ProjectsCounts
             search={search}
@@ -1218,7 +1324,7 @@ export default function ProjectsView({
         </div>
       ) : projects.length === 0 ? (
         <EmptyState onNewProject={handleNewProject} />
-      ) : view === 'grid' ? (
+      ) : effectiveView === 'grid' ? (
         <div style={{
           padding: '6px 32px 60px',
           display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 14,
@@ -1287,6 +1393,9 @@ export default function ProjectsView({
               onOpen={handleOpen}
               onTogglePin={(proj, next) => togglePin(proj.name, next)}
               onMenuOpen={(proj, rect) => setMenuFor({ project: proj, rect })}
+              editing={editingProjectName === p.name}
+              onRenameSubmit={(next) => handleRenameSubmit(p.name, next)}
+              onRenameCancel={handleRenameCancel}
             />
           ))}
         </div>

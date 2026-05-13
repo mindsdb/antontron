@@ -28,6 +28,7 @@ import {
   useCollectionShortcut,
 } from '../components/collection';
 import { host } from '../../platform/host';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
@@ -178,15 +179,16 @@ function PublishedPill() {
         background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
         border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
         color: 'var(--accent)',
-        padding: '3px 8px', borderRadius: 999,
-        fontSize: 10.5, fontWeight: 600,
-        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '1px 6px', borderRadius: 999,
+        fontSize: 9, fontWeight: 700,
+        lineHeight: 1.2,
+        display: 'inline-flex', alignItems: 'center', gap: 4,
         flexShrink: 0,
-        letterSpacing: '0.04em', textTransform: 'uppercase',
+        letterSpacing: '0.05em', textTransform: 'uppercase',
         fontFamily: FONT_BODY,
       }}
     >
-      <span style={{ width: 5, height: 5, borderRadius: 99, background: 'var(--accent)' }} />
+      <span style={{ width: 4, height: 4, borderRadius: 99, background: 'var(--accent)' }} />
       Published
     </span>
   );
@@ -477,6 +479,23 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
             overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
           }}>{artifact.title}</span>
         </div>
+        {/* Description — agent-supplied at create_artifact time. Two-
+            line clamp keeps the card height stable across artifacts
+            with short and long descriptions; the full text is in the
+            modal viewer. */}
+        {artifact.description && (
+          <span
+            title={artifact.description}
+            style={{
+              fontFamily: FONT_BODY, fontSize: 12, color: 'var(--ink-3)',
+              lineHeight: 1.4,
+              display: '-webkit-box', WebkitBoxOrient: 'vertical', WebkitLineClamp: 2,
+              overflow: 'hidden', textOverflow: 'ellipsis',
+            }}
+          >
+            {artifact.description}
+          </span>
+        )}
         {/* project: <name> — sits above the type line so the workspace
             origin reads first. Ellipsis-truncates so a long project
             name can't push the card out of grid alignment; full name
@@ -494,7 +513,19 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
           {canOpenProject ? (
             <button
               type="button"
+              // Same mousedown+click+keydown hardening the list row uses —
+              // the grid card's outer `<div role="button">` opens the
+              // artifact viewer, and we don't want the project click
+              // to fall through to that.
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); onOpenProject(projectMatch); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onOpenProject(projectMatch);
+                }
+              }}
               title={`Open ${projectMatch.name}`}
               style={{
                 all: 'unset', cursor: 'pointer',
@@ -519,11 +550,26 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
             }}>{projectLabel}</span>
           )}
         </span>
+        {/* type line — prefer the artifact's declared `type` (e.g.
+            `html-app`, `fullstack-stateless-app`) since that's the
+            metadata's source of truth; fall back to the bare
+            extension for legacy artifacts that predate the rename.
+            file-count chip surfaces multi-file artifacts at a glance
+            without competing with the title for space. */}
         <span style={{
           fontFamily: FONT_MONO, fontSize: 11,
           color: 'var(--ink-4)', letterSpacing: '0.04em',
+          display: 'flex', alignItems: 'baseline', gap: 8,
+          minWidth: 0,
         }}>
-          type: <span style={{ color: 'var(--ink-3)' }}>{ext}</span>
+          <span>
+            type: <span style={{ color: 'var(--ink-3)' }}>{artifact.type || ext}</span>
+          </span>
+          {typeof artifact.fileCount === 'number' && artifact.fileCount > 1 && (
+            <span title={`${artifact.fileCount} files in this artifact`}>
+              · <span style={{ color: 'var(--ink-3)' }}>{artifact.fileCount} files</span>
+            </span>
+          )}
         </span>
       </div>
 
@@ -623,7 +669,7 @@ function StatusDot({ artifact }) {
   );
 }
 
-function RowMenu({ open, anchorRect, artifact, onClose, onOpen, onReveal, onCopyUrl, onPublish, onUnpublish }) {
+function RowMenu({ open, anchorRect, artifact, onClose, onOpen, onReveal, onCopyUrl, onPublish, onUnpublish, onDelete }) {
   const ref = useRef(null);
   useEffect(() => {
     if (!open) return;
@@ -692,16 +738,24 @@ function RowMenu({ open, anchorRect, artifact, onClose, onOpen, onReveal, onCopy
         <Item label="Publish" icon={Ico.upload(13)} onClick={onPublish} />
       )}
       {published && (
+        <Item label="Unpublish" icon={Ico.upload(13)} onClick={onUnpublish} />
+      )}
+      {/* Delete sits at the bottom under a divider so it reads as a
+          terminal / destructive action distinct from the rest of
+          the menu. Routes through the parent's `handleTrash` which
+          uses Electron's `shell.trashItem` — the file goes to the
+          OS Trash, not unlinked, so the action is recoverable. */}
+      {onDelete && (
         <>
           <div style={{ height: 1, background: 'var(--line)', margin: '4px 0' }} />
-          <Item label="Unpublish" icon={Ico.trash(13)} danger onClick={onUnpublish} />
+          <Item label="Delete artifact" icon={Ico.trash(13)} danger onClick={onDelete} />
         </>
       )}
     </div>
   );
 }
 
-function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, onUnpublish: doUnpublish, onOpenProject }) {
+function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, onUnpublish: doUnpublish, onDelete: doDelete, onOpenProject }) {
   const [hover, setHover] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [anchorRect, setAnchorRect] = useState(null);
@@ -774,14 +828,18 @@ function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, o
           )}
         </div>
 
-        {/* Type — bare extension, monospace, slightly muted to read
-            as metadata. Sits before Kind so the eye picks up the
-            concrete file format first. */}
-        <div style={{
-          fontFamily: FONT_MONO, fontSize: 11,
-          color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase',
-          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-        }}>{extensionOf(artifact)}</div>
+        {/* Type — prefer the metadata-declared `type` (html-app,
+            fullstack-stateless-app, …); fall back to the primary
+            file's extension for legacy artifacts. Mono + uppercase
+            so it reads as a tag rather than a label. */}
+        <div
+          title={artifact.type || extensionOf(artifact)}
+          style={{
+            fontFamily: FONT_MONO, fontSize: 11,
+            color: 'var(--ink-4)', letterSpacing: '0.06em', textTransform: 'uppercase',
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+          }}
+        >{artifact.type || extensionOf(artifact)}</div>
 
         <div style={{
           fontFamily: FONT_MONO, fontSize: 11,
@@ -798,7 +856,23 @@ function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, o
           {canOpenProject ? (
             <button
               type="button"
+              // Stop propagation on BOTH mousedown and click — the
+              // surrounding row is a `role="button"` whose onClick
+              // opens the artifact, and a single onClick stopPropagation
+              // wasn't reliably preventing the row handler from firing
+              // first. Same defensive pattern the kebab uses.
+              onMouseDown={(e) => e.stopPropagation()}
               onClick={(e) => { e.stopPropagation(); onOpenProject(projectMatch); }}
+              onKeyDown={(e) => {
+                // Block keyboard Enter / Space from also bubbling to
+                // the row's `onKeyDown` (which would re-open the
+                // artifact). Activates the navigation in-place.
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onOpenProject(projectMatch);
+                }
+              }}
               title={`Open ${projectMatch.name}`}
               style={{
                 all: 'unset', cursor: 'pointer',
@@ -862,6 +936,7 @@ function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, o
         onCopyUrl={onCopyUrl}
         onPublish={() => doPublish?.(artifact)}
         onUnpublish={() => doUnpublish?.(artifact)}
+        onDelete={doDelete ? () => doDelete(artifact) : undefined}
       />
     </>
   );
@@ -936,9 +1011,14 @@ function Toast({ kind, message, onClose }) {
 export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, projects = [], onOpenProject }) {
   const [list, setList] = useState(initial);
   const [viewer, setViewer] = useState(null);
+  const { isMobile } = useBreakpoint();
   const [view, setView] = useState(() =>
     localStorage.getItem('anton:artifacts-view') === 'list' ? 'list' : 'grid'
   );
+  // List rows break at phone widths (5-column grid). Force grid on
+  // mobile so the toggle isn't needed; the user's persisted desktop
+  // preference is left untouched.
+  const effectiveView = isMobile ? 'grid' : view;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('published');
   // Per-artifact-path "in flight" set so multiple cards can publish
@@ -1155,7 +1235,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
             />
           }
           sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
-          view={<ViewToggle value={view} onChange={setView} />}
+          view={<span className="artifacts-view-toggle"><ViewToggle value={view} onChange={setView} /></span>}
           counts={
             <ArtifactsCounts
               search={search}
@@ -1169,8 +1249,8 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
 
       {total === 0 ? (
         <EmptyState />
-      ) : view === 'grid' ? (
-        <div style={{
+      ) : effectiveView === 'grid' ? (
+        <div className="artifacts-grid" style={{
           padding: '6px 32px 60px',
           // Same grid geometry as ProjectsView so cards line up at
           // the same density across pages.
@@ -1201,6 +1281,10 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
               onOpenViewer={setViewer}
               onPublish={handlePublish}
               onUnpublish={handleUnpublish}
+              // host.trashItem is Electron-only — gate the delete
+              // option to native runs so the web shell doesn't show
+              // a menu item that wouldn't work.
+              onDelete={!host.isWeb ? handleTrash : undefined}
               onOpenProject={onOpenProject}
             />
           ))}
