@@ -1010,6 +1010,7 @@ export default function ChatView({
             sidebar's hamburger pattern. */}
         <button
           type="button"
+          className="chat-rail-toggle"
           onClick={() => isNarrow ? setRailNarrowOpen(true) : setRailOpen(true)}
           title="Expand panel"
           aria-label="Expand panel"
@@ -1516,12 +1517,13 @@ export default function ChatView({
         WebkitAppRegion: 'no-drag',
       }}>
         {/* Rail header bar — collapse button */}
-        <div style={{
+        <div className="chat-rail-toggle-row" style={{
           display: 'flex', alignItems: 'center', justifyContent: 'flex-end',
           flexShrink: 0,
         }}>
           <button
             type="button"
+            className="chat-rail-toggle"
             onClick={() => isNarrow ? setRailNarrowOpen(false) : setRailOpen(false)}
             title="Collapse panel"
             aria-label="Collapse panel"

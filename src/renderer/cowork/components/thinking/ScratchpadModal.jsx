@@ -90,7 +90,7 @@ export function ScratchpadModal({ open, onClose, steps = [], focusStepId = null 
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm"
       style={{ WebkitAppRegion: 'no-drag' }}
     >
-      <div className="flex h-[82vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl">
+      <div className="scratchpad-modal flex h-[82vh] w-[min(1040px,94vw)] flex-col overflow-hidden rounded-xl border border-line bg-surface shadow-2xl">
 
         {/* Modal header — title + close. Per-cell `step x/y` already
             says the count, so we don't repeat it here. */}
@@ -270,6 +270,7 @@ function CellView({ cell, index, total, focused = false }) {
     <div
       ref={containerRef}
       className={clsx(
+        'scratchpad-cell',
         'border-b border-line py-5 last:border-b-0',
         // Inset the card 4px so the highlight bar can sit at the
         // exact left edge of the cell when focused. Padding stays
@@ -289,9 +290,11 @@ function CellView({ cell, index, total, focused = false }) {
           all those blocks share a single left edge that's aligned
           with the description text rather than with the step
           counter. The badge stays on the left, baseline-aligned to
-          the first row of the description. */}
+          the first row of the description. On mobile we collapse to
+          a single column (see globals.css) so output/code fill the
+          full width. */}
       <div
-        className="grid items-start"
+        className="scratchpad-cell-grid grid items-start"
         style={{ gridTemplateColumns: 'auto 1fr', columnGap: 12 }}
       >
         <span className="font-mono text-[10.5px] tracking-wider text-ink-4 pt-[2px]">

@@ -174,7 +174,7 @@ function applyProviderPreset(preset, settings, setSetting) {
 
 function Section({ title, subtitle, children }) {
   return (
-    <div style={{
+    <div className="settings-section" style={{
       display: 'grid', gridTemplateColumns: '1fr 320px', gap: 24,
       padding: '16px 0', borderBottom: '1px solid var(--border-subtle)',
       alignItems: 'flex-start',
@@ -837,7 +837,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
         flex: 1, display: 'flex', flexDirection: 'column',
         position: 'relative', minHeight: 0,
       }}>
-        <div className="scroll-clean" style={{
+        <div className="scroll-clean settings-scroll" style={{
           flex: 1, overflowY: 'auto',
           padding: '28px 28px 96px',
         }}>
@@ -1019,7 +1019,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   </span>
                 );
                 return (
-                  <div key={p.type} style={{
+                  <div key={p.type} className="settings-provider-row" style={{
                     display: 'grid',
                     gridTemplateColumns: '1fr 380px auto',
                     gap: 24,
@@ -1300,15 +1300,17 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               <Section title="Greeting" subtitle="The line shown when you start a new task.">
                 <TextInput value={settings.greeting} onChange={(v) => setSetting('greeting', v)} />
               </Section>
-              <Section title="Animated background" subtitle="Toggle off if you prefer a flat surface instead of an animated grid.">
-                <Toggle value={settings.showDots} onChange={(v) => setSetting('showDots', v)} />
-              </Section>
-              <Section title="Show nav-panel counters" subtitle="Badge counts on Projects / Scheduled / Artifacts / Connected apps, plus the time-since label on each Recent row.">
-                <Toggle
-                  value={settings.showCounters !== false}
-                  onChange={(v) => setSetting('showCounters', v)}
-                />
-              </Section>
+              <div className="settings-hide-mobile">
+                <Section title="Animated background" subtitle="Toggle off if you prefer a flat surface instead of an animated grid.">
+                  <Toggle value={settings.showDots} onChange={(v) => setSetting('showDots', v)} />
+                </Section>
+                <Section title="Show nav-panel counters" subtitle="Badge counts on Projects / Scheduled / Artifacts / Connected apps, plus the time-since label on each Recent row.">
+                  <Toggle
+                    value={settings.showCounters !== false}
+                    onChange={(v) => setSetting('showCounters', v)}
+                  />
+                </Section>
+              </div>
             </CollapsibleGroup>
 
             {/* Legacy single-provider Models + Credentials block kept

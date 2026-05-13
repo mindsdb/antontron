@@ -338,7 +338,7 @@ export default function HomeView({
         background: 'transparent',
       }}
     >
-      <h1 style={{
+      <h1 className="home-greeting-row" style={{
         fontFamily: 'var(--font-display)',
         fontSize: 36, fontWeight: 700, letterSpacing: '-0.02em',
         color: 'var(--text-strong)',
@@ -353,6 +353,7 @@ export default function HomeView({
       }}>
         <span
           ref={orbRef}
+          className="home-orb"
           style={{
             position: 'relative',
             width: 42, height: 42,

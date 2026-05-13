@@ -369,7 +369,13 @@ export default function Sidebar({
           flexShrink: 0,
         }}
       >
-        <div className="anton-sidebar__chrome-left">
+        {/* Right-aligned cluster: collapse + search icons, then a
+            middle-dot separator, then the ANTON wordmark. The chrome's
+            existing `justify-content: space-between` pushes the whole
+            cluster against the right edge (the left half is empty space
+            past the traffic-light pad). */}
+        <div style={{ flex: 1 }} />
+        <div className="anton-sidebar__chrome-left" style={{ marginLeft: 'auto', gap: 4 }}>
           <div className="anton-sidebar__chrome-buttons">
             {/* Collapse button — always mounted so the search icon
                 next to it never shifts when the host route changes
@@ -429,8 +435,17 @@ export default function Sidebar({
               {Ico.search(15)}
             </button>
           </div>
+          <span
+            aria-hidden="true"
+            style={{
+              color: 'var(--text-muted)',
+              opacity: 0.5,
+              fontSize: 13,
+              userSelect: 'none',
+            }}
+          >·</span>
+          <div className="anton-sidebar__wordmark">Anton</div>
         </div>
-        <div className="anton-sidebar__wordmark">Anton</div>
       </div>
 
       {/* Body — fades + slides in slightly behind the container so
