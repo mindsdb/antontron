@@ -180,7 +180,11 @@ function Section({ title, subtitle, children }) {
       alignItems: 'flex-start',
     }}>
       <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{title}</div>
+        <h4 style={{
+          margin: 0, padding: 0,
+          fontSize: 14, fontWeight: 600, color: 'var(--text-strong)',
+          fontFamily: 'inherit', lineHeight: 1.3,
+        }}>{title}</h4>
         {subtitle && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>{subtitle}</div>}
       </div>
       <div>{children}</div>
@@ -193,6 +197,7 @@ function Section({ title, subtitle, children }) {
 function CollapsibleGroup({ title, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
   const panelId = useId();
+  const headingId = useId();
   return (
     <div style={{
       border: '1px solid var(--border-subtle)',
@@ -203,28 +208,33 @@ function CollapsibleGroup({ title, defaultOpen = true, children }) {
       marginBottom: 14,
       overflow: 'hidden',
     }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        aria-expanded={open}
-        aria-controls={panelId}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-          padding: '14px 18px', background: 'transparent', border: 0,
-          fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600,
-          letterSpacing: '0.04em', textTransform: 'uppercase',
-          color: 'var(--text-muted)', cursor: 'pointer', textAlign: 'left',
-        }}
-      >
-        <span aria-hidden="true" style={{
-          display: 'inline-flex', width: 14, height: 14,
-          color: 'var(--text-muted)',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
-        }}>{Ico.chevronRight ? Ico.chevronRight(12) : '›'}</span>
-        <span style={{ flex: 1 }}>{title}</span>
-      </button>
+      {/* W3C "Accordion" pattern: heading wraps the toggle button so the
+          group surfaces in SR heading navigation, while the button still
+          owns interaction. h3 margin reset to keep the visual layout. */}
+      <h3 id={headingId} style={{ margin: 0, padding: 0, fontWeight: 'inherit', fontSize: 'inherit' }}>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+            padding: '14px 18px', background: 'transparent', border: 0,
+            fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            color: 'var(--text-muted)', cursor: 'pointer', textAlign: 'left',
+          }}
+        >
+          <span aria-hidden="true" style={{
+            display: 'inline-flex', width: 14, height: 14,
+            color: 'var(--text-muted)',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}>{Ico.chevronRight ? Ico.chevronRight(12) : '›'}</span>
+          <span style={{ flex: 1 }}>{title}</span>
+        </button>
+      </h3>
       {open && (
-        <div id={panelId} role="region" style={{ padding: '0 18px 8px' }}>{children}</div>
+        <div id={panelId} role="region" aria-labelledby={headingId} style={{ padding: '0 18px 8px' }}>{children}</div>
       )}
     </div>
   );
