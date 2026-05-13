@@ -33,7 +33,8 @@
         "label": "In-Browser Connect",
         "description": "Opens Google sign-in in your browser. No credentials required — just click Connect.",
         "recommended": true,
-        "fields": []
+        "fields": [],
+        "hidden": true
       },
       {
         "id": "oauth",
