@@ -235,6 +235,8 @@ function Segmented({ value, onChange, options, style }) {
           key={o.value}
           className={value === o.value ? 'active' : ''}
           onClick={() => onChange(o.value)}
+          title={o.title}
+          aria-label={o.ariaLabel || o.title}
         >
           {o.label}
         </button>
@@ -243,11 +245,13 @@ function Segmented({ value, onChange, options, style }) {
   );
 }
 
-function Toggle({ value, onChange }) {
+function Toggle({ value, onChange, title, ariaLabel }) {
   return (
     <button
       role="switch"
       aria-checked={value}
+      aria-label={ariaLabel}
+      title={title}
       className={`toggle${value ? ' on' : ''}`}
       onClick={() => onChange(!value)}
     >
@@ -256,13 +260,14 @@ function Toggle({ value, onChange }) {
   );
 }
 
-function TextInput({ value, onChange, placeholder }) {
+function TextInput({ value, onChange, placeholder, title }) {
   return (
     <input
       className="field-input"
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      title={title}
     />
   );
 }
@@ -911,6 +916,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     onClick={validate}
                     disabled={testing}
                     aria-busy={testing}
+                    title="Re-run the configuration and active-provider tests."
                     style={testing ? { opacity: 0.7, cursor: 'progress' } : undefined}
                   >{testButtonLabel}</button>
                   <button
@@ -1004,6 +1010,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                           value={p.name ?? ''}
                           onChange={(e) => updateProviderField('openai-compatible', 'name', e.target.value)}
                           placeholder="Custom provider name"
+                          title="Display name for this custom provider — shown in the model dropdowns below."
                           style={{
                             width: 220, fontSize: 13.5, fontWeight: 600,
                             borderColor: !(p.name || '').trim() ? 'rgba(224,112,96,0.55)' : undefined,
@@ -1065,6 +1072,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                             href={GET_KEY_URL[p.type]}
                             target="_blank"
                             rel="noreferrer noopener"
+                            title={`Open ${GET_KEY_URL[p.type].replace(/^https?:\/\//, '')} in your browser.`}
                             style={{ color: 'var(--accent-500, #7CC4B6)' }}
                           >{GET_KEY_URL[p.type].replace(/^https?:\/\//, '')} →</a>
                         </div>
@@ -1076,6 +1084,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                             href="https://mindshub.ai"
                             target="_blank"
                             rel="noreferrer noopener"
+                            title="Open mindshub.ai sign-up in your browser."
                             style={{ color: 'var(--accent-500, #7CC4B6)' }}
                           >Sign up at mindshub.ai →</a>
                         </div>
@@ -1152,6 +1161,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                       type="button"
                       onClick={() => addProviderOfType(t)}
                       className="btn-secondary"
+                      title={PROVIDER_TYPE_DESC[t]}
                       style={{ fontSize: 12.5, padding: '4px 10px', fontWeight: 400 }}
                     >{typeLabels[t] || t}</button>
                   ))}
@@ -1159,6 +1169,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   <button
                     type="button"
                     onClick={() => setAddPickerOpen(false)}
+                    title="Hide the provider picker."
                     style={{
                       fontSize: 12.5, padding: '4px 8px',
                       background: 'transparent', border: 0,
@@ -1211,6 +1222,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                               setModelInputMode((m) => ({ ...m, [role]: false }));
                               writeOverride({ providerType: t, model: newModel });
                             }}
+                            title={`Choose which provider powers the ${role} role.`}
                             style={{ width: '100%' }}
                           >
                             {providers.map((p) => (
@@ -1248,6 +1260,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                                       writeOverride({ providerType: curType, model: e.target.value });
                                     }
                                   }}
+                                  title={`Pick the model used for ${role}. Choose Other… to type a custom model id.`}
                                   style={{ width: '100%' }}
                                 >
                                   {modelList.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -1258,6 +1271,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                                     value={curModel}
                                     onChange={(v) => writeOverride({ providerType: curType, model: v })}
                                     placeholder="Type a model id"
+                                    title="Free-form model id sent verbatim to the provider."
                                   />
                                 )}
                               </>
@@ -1268,6 +1282,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                             value={curModel}
                             onChange={(v) => writeOverride({ providerType: curType, model: v })}
                             placeholder="model-id"
+                            title="Model id sent verbatim to this provider."
                           />
                         )}
                         {!provider && curType && (
@@ -1292,22 +1307,33 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   value={theme || 'dark'}
                   onChange={(v) => onThemeChange?.(v)}
                   options={[
-                    { value: 'light', label: 'Light' },
-                    { value: 'dark',  label: 'Dark' },
+                    { value: 'light', label: 'Light', title: 'Use the light theme.' },
+                    { value: 'dark',  label: 'Dark',  title: 'Use the dark theme.' },
                   ]}
                 />
               </Section>
               <Section title="Greeting" subtitle="The line shown when you start a new task.">
-                <TextInput value={settings.greeting} onChange={(v) => setSetting('greeting', v)} />
+                <TextInput
+                  value={settings.greeting}
+                  onChange={(v) => setSetting('greeting', v)}
+                  title="Shown above the task input when you start a new task."
+                />
               </Section>
               <div className="settings-hide-mobile">
                 <Section title="Animated background" subtitle="Toggle off if you prefer a flat surface instead of an animated grid.">
-                  <Toggle value={settings.showDots} onChange={(v) => setSetting('showDots', v)} />
+                  <Toggle
+                    value={settings.showDots}
+                    onChange={(v) => setSetting('showDots', v)}
+                    title="Toggle the animated grid background."
+                    ariaLabel="Animated background"
+                  />
                 </Section>
                 <Section title="Show nav-panel counters" subtitle="Badge counts on Projects / Scheduled / Artifacts / Connected apps, plus the time-since label on each Recent row.">
                   <Toggle
                     value={settings.showCounters !== false}
                     onChange={(v) => setSetting('showCounters', v)}
+                    title="Show badge counts on Projects, Scheduled, Artifacts and Connected apps."
+                    ariaLabel="Nav-panel counters"
                   />
                 </Section>
               </div>
@@ -1515,17 +1541,27 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   value={settings.memoryMode ?? 'autopilot'}
                   onChange={(v) => setSetting('memoryMode', v)}
                   options={[
-                    { value: 'autopilot', label: 'Autopilot' },
-                    { value: 'copilot', label: 'Copilot' },
-                    { value: 'off', label: 'Off' },
+                    { value: 'autopilot', label: 'Autopilot', title: 'Anton updates long-term memory automatically.' },
+                    { value: 'copilot',   label: 'Copilot',   title: 'Anton suggests memory updates for you to confirm.' },
+                    { value: 'off',       label: 'Off',       title: 'Disable long-term memory updates.' },
                   ]}
                 />
               </Section>
               <Section title="Episodic memory" subtitle="Save conversation history for future recall.">
-                <Toggle value={settings.episodicMemory ?? true} onChange={(v) => setSetting('episodicMemory', v)} />
+                <Toggle
+                  value={settings.episodicMemory ?? true}
+                  onChange={(v) => setSetting('episodicMemory', v)}
+                  title="Save conversation history so Anton can recall past tasks."
+                  ariaLabel="Episodic memory"
+                />
               </Section>
               <Section title="Proactive dashboards" subtitle="Auto-generate HTML reports from scratchpad output.">
-                <Toggle value={settings.proactiveDashboards ?? false} onChange={(v) => setSetting('proactiveDashboards', v)} />
+                <Toggle
+                  value={settings.proactiveDashboards ?? false}
+                  onChange={(v) => setSetting('proactiveDashboards', v)}
+                  title="Auto-generate HTML reports from scratchpad output."
+                  ariaLabel="Proactive dashboards"
+                />
               </Section>
             </CollapsibleGroup>
 
@@ -1538,8 +1574,8 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   value={settings.uiUpdateMode ?? 'manual'}
                   onChange={(v) => setSetting('uiUpdateMode', v)}
                   options={[
-                    { value: 'auto', label: 'Auto' },
-                    { value: 'manual', label: 'Manual' },
+                    { value: 'auto',   label: 'Auto',   title: 'Download and apply UI updates automatically.' },
+                    { value: 'manual', label: 'Manual', title: 'Only apply UI updates when triggered manually.' },
                   ]}
                 />
               </Section>
@@ -1570,12 +1606,21 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     ? configError
                     : 'Changes apply on save.'}
           </div>
-          <button className="btn-secondary" onClick={validate}>Test</button>
+          <button
+            className="btn-secondary"
+            onClick={validate}
+            title="Re-run the configuration and active-provider tests."
+          >Test</button>
           <button
             className="btn-primary"
             onClick={save}
             disabled={!settingsDirty || testing || missingCustomNames}
-            title={missingCustomNames ? 'Each custom provider needs a name' : undefined}
+            title={
+              missingCustomNames ? 'Each custom provider needs a name'
+              : testing ? 'Saving…'
+              : !settingsDirty ? 'No unsaved changes'
+              : 'Save changes and re-run provider tests.'
+            }
             style={{
               minWidth: 132,
               opacity: (!settingsDirty || testing || missingCustomNames) ? 0.55 : 1,
