@@ -495,7 +495,7 @@ export default function Sidebar({
               live "you have N connections" indicator. */}
           <NavItem
             icon={Ico.link(15)}
-            label={connectorsCount > 0 ? 'Connected Apps' : 'Connect Apps and Data'}
+            label={connectorsCount > 0 ? 'Connected Apps and Data' : 'Connect Apps and Data'}
             onClick={() => onNavigate('customize')}
             active={activeRoute === 'customize'}
             badge={showCounters ? (connectorsCount || null) : null}
