@@ -1096,6 +1096,20 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     }}
                   />
                 );
+                // Each provider row is a sub-section in the Providers group,
+                // so every row gets an <h4> for SR heading navigation. Known
+                // types render the label visibly; the openai-compatible row
+                // already shows an editable name input as its title, so the
+                // <h4> uses the `.sr-only` utility (its text is the current
+                // name or a sensible fallback) — keeps the visual unchanged
+                // while making the row reachable by H/4 navigation.
+                const headingBaseStyle = {
+                  margin: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1.3,
+                  fontSize: 14, fontWeight: 600, color: 'var(--text-strong)',
+                };
+                const customHeadingText = p.type === 'openai-compatible'
+                  ? ((p.name || '').trim() || 'Custom OpenAI-compatible provider')
+                  : null;
                 const titleNode = (
                   <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     {dot}
@@ -1104,6 +1118,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                       const errorId = `provider-name-error-${p.type}`;
                       return (
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <h4 className="sr-only">{customHeadingText}</h4>
                           <input
                             className="field-input"
                             value={p.name ?? ''}
@@ -1125,7 +1140,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                         </div>
                       );
                     })() : (
-                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{label}</span>
+                      <h4 style={headingBaseStyle}>{label}</h4>
                     )}
                   </span>
                 );
