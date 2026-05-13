@@ -1,7 +1,7 @@
 """
 Artifacts — outputs Anton produces, surfaced to the user.
 
-Each artifact is a folder under `<project>/artifacts/<slug>/`. The
+Each artifact is a folder under `<project>/.anton/artifacts/<slug>/`. The
 folder owns its `metadata.json` (Pydantic-validated source of truth)
 and `README.md` (rendered from metadata). Multi-file outputs (HTML +
 CSS + JS, app + dataset) cluster together; single-file outputs
@@ -118,38 +118,38 @@ def _human_mtime(path: Path) -> str:
 
 
 def _scan_artifact_dirs() -> list[Path]:
-    """Every registered project's `<base>/artifacts/` dir that exists.
+    """Every registered project's `<base>/.anton/artifacts/` dir that exists.
 
     The legacy `.anton/output/` flat dump is intentionally NOT
     scanned anymore — the renamed model demands per-folder metadata
     and old files have neither. Users migrate by moving their files
-    into a proper `artifacts/<slug>/` subfolder; until they do, the
+    into a proper `.anton/artifacts/<slug>/` subfolder; until they do, the
     files just stay where they are and stop showing up here.
     """
     dirs: dict[str, Path] = {}
     for project in projects_store.list_projects():
-        candidate = Path(project["path"]) / "artifacts"
+        candidate = Path(project["path"]) / ".anton" / "artifacts"
         if candidate.is_dir():
             dirs[str(candidate.resolve())] = candidate
     return list(dirs.values())
 
 
 def _iter_artifact_folders(project_path: str | None = None) -> Iterator[Path]:
-    """Yield every direct subfolder of every project's artifacts dir.
+    """Yield every direct subfolder of every project's .anton/artifacts/ dir.
 
     Only folders containing a readable `metadata.json` are passed
     through to callers; bare folders are skipped (incomplete writes,
     or user-stashed dirs the agent hasn't claimed).
 
     When `project_path` is provided, restrict the walk to that single
-    project's `<base>/artifacts/`. Avoids reading every other
+    project's `<base>/.anton/artifacts/`. Avoids reading every other
     project's metadata.json on requests that only care about one
     project (e.g. the project-detail rail card).
     """
     roots: list[Path]
     if project_path:
         try:
-            candidate = Path(project_path).expanduser() / "artifacts"
+            candidate = Path(project_path).expanduser() / ".anton" / "artifacts"
         except Exception:
             return
         if not candidate.is_dir():
@@ -276,7 +276,7 @@ async def list_artifacts(project_path: str | None = Query(default=None)):
     about `path` / `kind` / `updated` keep working.
 
     `project_path` scopes the response to one project's
-    `<base>/artifacts/` tree. The rail card uses this so each
+    `<base>/.anton/artifacts/` tree. The rail card uses this so each
     project-detail mount doesn't pay for reading every other
     project's metadata.json.
     """
@@ -342,11 +342,11 @@ async def list_artifacts(project_path: str | None = Query(default=None)):
 
 
 def _candidate_relative_artifacts(raw_path: str) -> list[Path]:
-    """Resolve a relative path against every project's artifacts/ dir.
+    """Resolve a relative path against every project's .anton/artifacts/ dir.
 
     Accepts any of:
-      - `<slug>/dashboard.html`        → matches `<base>/artifacts/<slug>/dashboard.html`
-      - `artifacts/<slug>/dashboard.html` (legacy callers may include the prefix)
+      - `<slug>/dashboard.html`        → matches `<base>/.anton/artifacts/<slug>/dashboard.html`
+      - `.anton/artifacts/<slug>/dashboard.html` (legacy callers may include the prefix)
     """
     text = (raw_path or "").strip().replace("\\", "/")
     while text.startswith("./"):
@@ -372,9 +372,9 @@ def _resolve_artifact_path(raw_path: str) -> Path:
     """Turn an artifact request path into an absolute path on disk.
 
     Accepts:
-      - Absolute paths under any registered project's `artifacts/` dir.
+      - Absolute paths under any registered project's `.anton/artifacts/` dir.
       - Relative paths anchored at any artifact root (slug-prefixed or
-        with a leading `artifacts/`).
+        with a leading `.anton/artifacts/`).
     Path-traversal guarded; non-existent files yield 404.
     """
     # Reject null bytes, which are used in path injection attacks.
