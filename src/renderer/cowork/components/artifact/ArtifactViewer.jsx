@@ -206,7 +206,7 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
   // `<script>` / `<link>` refs in the HTML resolve against a real URL.
   // (srcdoc has no base URL → relative refs 404.)
   const [previewUrl, setPreviewUrl] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [err, setErr] = useState('');
   const [publishedUrl, setPublishedUrl] = useState(artifact?.publishedUrl || '');
   const [busy, setBusy] = useState(false);
@@ -221,10 +221,14 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
 
   // Esc-to-close + portal + body-scroll lock all live in <Modal>.
 
-  // Mount the artifact when opened. The server registers the parent
-  // dir under a token and returns a URL that serves the entry HTML;
-  // assets at sibling paths resolve naturally because they share the
-  // same URL prefix.
+  // Mount the artifact when opened.
+  //   - Static (HTML-only): server registers the parent dir under a
+  //     token and returns a URL that serves the entry HTML; sibling
+  //     assets resolve naturally because they share the URL prefix.
+  //   - Proxy (backend+frontend): main hosts a loopback HTTP forwarder
+  //     pointed at the artifact's backend port (read lazily from
+  //     metadata.json on every request, so a restarted backend on a
+  //     new port keeps working).
   useEffect(() => {
     if (!open || !artifact) return;
     if (!hasActionPath) {
@@ -235,9 +239,21 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
     setLoading(true);
     setErr('');
     setPreviewUrl('');
+    let cancelled = false;
+    let usedProxy = false;
     mountArtifactPreview(actionPath)
-      .then(({ url, publishedUrl: serverPublishedUrl }) => {
+      .then(async ({ kind, url, artifactDir, publishedUrl: serverPublishedUrl }) => {
+        if (kind === 'proxy') {
+          if (!artifactDir) throw new Error('Preview mount returned no artifact dir');
+          const proxy = await window.antontron?.preview?.startProxy?.(artifactDir);
+          if (!proxy?.url) throw new Error('Preview proxy unavailable');
+          if (cancelled) return;
+          usedProxy = true;
+          setPreviewUrl(proxy.url);
+          return;
+        }
         if (!url) throw new Error('Preview mount returned no URL');
+        if (cancelled) return;
         setPreviewUrl(url);
         // The mount endpoint now also reports the artifact's published
         // URL from `.published.json`. Adopt it whenever the server
@@ -248,8 +264,14 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
         // may have just published; we don't want a flicker).
         if (serverPublishedUrl) setPublishedUrl(serverPublishedUrl);
       })
-      .catch((e) => setErr(e?.message || 'Could not load artifact'))
-      .finally(() => setLoading(false));
+      .catch((e) => { if (!cancelled) setErr(e?.message || 'Could not load artifact'); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => {
+      cancelled = true;
+      if (usedProxy) {
+        window.antontron?.preview?.stopProxy?.();
+      }
+    };
   }, [open, artifact?.path, actionPath, hasActionPath, disabledReason]);
 
   if (!open || !artifact) return null;

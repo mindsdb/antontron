@@ -108,7 +108,7 @@ from routes.scratchpad import router as scratchpad_router
 from routes.projects import router as projects_router
 from routes.settings import router as settings_router
 from routes.settings import get_config_status
-from routes.artifacts import router as artifacts_router
+from routes.artifacts import router as artifacts_router, shutdown_launched_backends
 from routes.utilities import router as utilities_router
 from routes.attachments import router as attachments_router
 from routes.search import router as search_router
@@ -164,6 +164,11 @@ async def lifespan(app: FastAPI):
         pass
     await conversation_manager.close_all()
     await scratchpad_runtime.close_all()
+    # Reap any artifact backends we auto-launched from the preview path.
+    # Without this they outlive cowork, hold their TCP port, and the
+    # next preview attempt finds the port "alive" pointing at a dead
+    # previous session's process.
+    shutdown_launched_backends()
 
 
 app = FastAPI(title="Anton CoWork API", version="1.0.0", lifespan=lifespan)

@@ -1135,8 +1135,8 @@ async def _build_chat_session(
                 f"{project_context}"
                 f"{integration_guidance}"
                 f"{datasource_scope_guidance}"
+                f"{output_context}"
             ),
-            output_context=output_context,
         ),
         workspace=workspace,
         data_vault=data_vault,
