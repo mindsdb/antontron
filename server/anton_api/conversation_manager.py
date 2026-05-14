@@ -645,6 +645,13 @@ def load_turns(conversation_id: str) -> dict | None:
 def _displayable_text_for(msg: object) -> str | None:
     """Return the text the UI would render for this message, or None
     if it gets filtered out (mirroring `_parse_for_display`).
+
+    Must apply the SAME filters as the display layer — empty
+    content, SYSTEM: auto-retry prompts, non-user/assistant roles.
+    Otherwise `_count_displayable_assistant_bubbles` (which drives
+    the per-turn sidecar key) reads a different bubble count than
+    the renderer renders, and event metadata lands under the wrong
+    index after a reload.
     """
     if not isinstance(msg, dict):
         return None
@@ -660,8 +667,18 @@ def _displayable_text_for(msg: object) -> str | None:
             for block in content
             if isinstance(block, dict) and block.get("type") == "text"
         )
-        return text if text else None
-    return str(content) if str(content) else None
+        if not text:
+            return None
+    else:
+        text = str(content)
+        if not text:
+            return None
+    # Filter anton-core's auto-retry / failure-recovery prompts the
+    # same way `_parse_for_display` does. Keeps the bubble count in
+    # lockstep with what the renderer actually shows.
+    if role == "user" and text.lstrip().startswith("SYSTEM:"):
+        return None
+    return text
 
 
 def _count_displayable_assistant_bubbles(history: list[dict]) -> int:
@@ -1700,8 +1717,15 @@ def update_conversation(conversation_id: str, **patch) -> dict | None:
 
 def _is_user_input_message(msg: object) -> bool:
     """True iff this is a real user-typed message (vs a tool_result
-    user message that anton inserts mid-turn). User input messages
-    are the boundaries between displayable turns.
+    user message that anton inserts mid-turn, OR a SYSTEM: error-
+    recovery prompt anton appends after a tool failure). User input
+    messages are the boundaries between displayable turns.
+
+    MUST stay in sync with `_parse_for_display`'s filter in
+    `routes/conversations.py` — both must skip the same messages, or
+    the renderer's trash-button turn index won't match what
+    `delete_turn` operates on, and deleting bubble N silently
+    removes a different slice on the server side.
     """
     if not isinstance(msg, dict):
         return False
@@ -1709,12 +1733,35 @@ def _is_user_input_message(msg: object) -> bool:
         return False
     content = msg.get("content")
     if isinstance(content, str):
-        return bool(content)
+        if not content:
+            return False
+        # Skip anton-core's auto-retry / failure-recovery prompts —
+        # they live in `_history.json` (the LLM needs them as
+        # context on the next turn) but the user never typed them
+        # and `_parse_for_display` strips them from the chat
+        # render. Anything starting with "SYSTEM:" is treated the
+        # same way; legit user text starting with that token is
+        # vanishingly unlikely.
+        if content.lstrip().startswith("SYSTEM:"):
+            return False
+        return True
     if isinstance(content, list):
-        return any(
-            isinstance(b, dict) and b.get("type") == "text" and b.get("text")
-            for b in content
-        )
+        # Multi-block user messages can carry tool_result + text
+        # blocks side by side. We only count the message as a
+        # user-input boundary when it actually carries typed text;
+        # purely-tool_result messages (anton's mid-turn responses)
+        # are skipped. Same SYSTEM: filter applies to the text
+        # blocks for consistency with the string-content path.
+        text_blocks = [
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        if not any(text_blocks):
+            return False
+        joined = "\n".join(text_blocks).lstrip()
+        if joined.startswith("SYSTEM:"):
+            return False
+        return True
     return False
 
 
