@@ -636,6 +636,38 @@ body[data-theme="light"] .overlay-inline-code {
   background: color-mix(in srgb, rgb(168, 76, 60) 16%, transparent);
   color: color-mix(in srgb, rgb(168, 76, 60) 70%, var(--ink));
 }
+
+/* WCAG 1.4.6 / Windows High Contrast — when the user opts into a
+   stronger contrast preference, bump the overlay washes so the
+   fence markers, fenced bodies, and inline-code regions remain
+   distinguishable behind the (transparent-color) textarea text.
+   Light theme uses a darker accent / coral wash; dark theme leans
+   on a brighter accent / coral tint. The textarea text itself is
+   unchanged — it always inherits the regular --ink tokens which
+   already meet 4.5:1 against the composer background. */
+@media (prefers-contrast: more) {
+  .overlay-fence-marker {
+    color: color-mix(in srgb, var(--accent) 90%, var(--ink));
+    background: color-mix(in srgb, var(--accent) 28%, transparent);
+  }
+  .overlay-fence-body {
+    background: color-mix(in srgb, var(--accent) 14%, transparent);
+  }
+  .overlay-inline-code {
+    background: color-mix(in srgb, rgb(232, 132, 110) 32%, transparent);
+    color: color-mix(in srgb, rgb(232, 132, 110) 90%, var(--ink));
+  }
+  body[data-theme="light"] .overlay-fence-marker {
+    background: color-mix(in srgb, var(--accent) 32%, transparent);
+  }
+  body[data-theme="light"] .overlay-fence-body {
+    background: color-mix(in srgb, var(--accent) 18%, transparent);
+  }
+  body[data-theme="light"] .overlay-inline-code {
+    background: color-mix(in srgb, rgb(168, 76, 60) 30%, transparent);
+    color: color-mix(in srgb, rgb(168, 76, 60) 90%, var(--ink));
+  }
+}
 .composer-toolbar {
   display: flex; align-items: center; gap: 6px;
   padding: 8px 10px 10px;

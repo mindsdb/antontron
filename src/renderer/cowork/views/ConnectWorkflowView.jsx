@@ -661,6 +661,12 @@ function DirectoryModal({ mode, onChangeMode, onClose, onChooseConnector }) {
   const [filterCategory, setFilterCategory] = useState('all');
   const [sortBy, setSortBy] = useState('popular');
 
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
   const connectorCards = useMemo(() => {
     const lower = query.trim().toLowerCase();
     let cards = DIRECTORY_CONNECTOR_CARDS.filter((card) => {

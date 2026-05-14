@@ -31,7 +31,7 @@ function PageHeader({ title, subtitle }) {
   return (
     <div className="page-header">
       <div style={{ flex: 1 }}>
-        <h2 className="page-title">{title}</h2>
+        <h1 className="page-title">{title}</h1>
         {subtitle && <div style={{ fontSize: 13, color: 'var(--frost-600)', marginTop: 4 }}>{subtitle}</div>}
       </div>
     </div>
