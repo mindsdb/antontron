@@ -229,10 +229,10 @@ export function MarkdownCode(props) {
   }
 
   // Inline code (single backticks) — kept visually distinct from fenced
-  // blocks: no header, lighter background, in-flow.
+  // blocks: no header, lighter accent-tinted background, in-flow. Styled
+  // in globals.css so the tint can use color-mix(...) against the theme
+  // tokens (Tailwind alone can't reach the cyberpunk-accent wash we want).
   return (
-    <code className="font-mono text-[12.5px] text-ink rounded bg-surface-2 px-1 py-0.5">
-      {props.children}
-    </code>
+    <code className="anton-inline-code">{props.children}</code>
   );
 }

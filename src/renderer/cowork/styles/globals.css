@@ -4324,6 +4324,22 @@ body[data-theme="dark"] .mshell__drawer-title {
    one of our special kinds (chartjs / chart / data-vault-form*).
    Header carries the language tag + a Copy button driven by a delegated
    click listener mounted on the MarkdownContent root. */
+/* Inline `code` chip — accent-tinted so it pops out of any bubble
+   surface (user-message `--surface`, assistant flow `transparent`,
+   light mode `#FFF`). Tint is gentle in both themes; the thin border
+   carries most of the separation. */
+.anton-inline-code {
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  line-height: inherit;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 10%, var(--surface-3));
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
+  border-radius: 4px;
+  padding: 1px 5px;
+  word-break: break-word;
+}
+
 .anton-code-block {
   margin: 12px 0;
   border: 1px solid var(--line);
