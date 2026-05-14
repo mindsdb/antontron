@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import Ico from './Icons';
 import {
   parseFences,
@@ -146,9 +146,10 @@ export default function Composer({
   }, []);
   const recognitionRef = useRef(null);
 
-  // Memoized fence parse — recomputed only when `value` changes. Caret
-  // and key handlers branch off this instead of reparsing the full
-  // composer string on every keystroke / selection event.
+  // All fence-context lookups in this component MUST consume this memoized result.
+  // Never call parseFences(value) directly — it walks the full string on every call.
+  // Caret and key handlers branch off `parsedFences.fences` instead of reparsing
+  // on every keystroke / selection event.
   const parsedFences = useMemo(() => parseFences(value), [value]);
 
   // Auto-resize the textarea up to a max height; past that it scrolls.
@@ -188,15 +189,17 @@ export default function Composer({
 
   // Refresh the caret-position ref + derived inFence flag on selection
   // events. Cheap: an int write to a ref plus a setState that no-ops
-  // unless the boolean actually changes.
-  const syncCaret = () => {
+  // unless the boolean actually changes. Memoized on `parsedFences` so
+  // every invocation closes over the latest cached parse result without
+  // forcing a re-parse of `value`.
+  const syncCaret = useCallback(() => {
     const ta = taRef.current;
     if (!ta) return;
     const pos = ta.selectionStart;
     caretPosRef.current = pos;
     const next = fenceCtxAtParsed(parsedFences.fences, pos) !== null;
     setInFence((prev) => (prev === next ? prev : next));
-  };
+  }, [parsedFences]);
 
   // Mirror the textarea's scroll position onto the overlay so long
   // content stays char-for-char aligned through wheel/keyboard scroll.

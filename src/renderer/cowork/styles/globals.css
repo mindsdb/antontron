@@ -533,12 +533,17 @@ a[href],
     0 0 0 3px rgba(31, 156, 176, 0.15),
     0 6px 18px -8px rgba(0, 0, 0, 0.12);
 }
+/* Font, line-height, and padding MUST match the textarea exactly — both
+   consume the same custom properties from .composer-input-shell so any
+   change propagates to both automatically. */
 .composer-textarea {
   width: 100%; border: 0; outline: 0; resize: none;
   background: transparent;
   font-family: var(--font-sans);
-  font-size: 15px; line-height: 1.5;
-  color: var(--text-strong); padding: 16px 18px 4px;
+  font-size: var(--composer-font-size);
+  line-height: var(--composer-line-height);
+  color: var(--text-strong);
+  padding: var(--composer-padding);
   min-height: 56px; max-height: 220px;
   user-select: text;
 }
@@ -555,17 +560,26 @@ a[href],
 .composer-input-shell {
   position: relative;
   width: 100%;
+  /* Single source of truth for the metrics the textarea and overlay
+     must share. Surface variants (chat-floating-composer, etc.) override
+     these vars on their own .composer-input-shell scope so both children
+     stay coupled — never set font-size/line-height/padding directly on
+     the textarea or overlay. */
+  --composer-font-size: 15px;
+  --composer-line-height: 1.5;
+  --composer-padding: 16px 18px 4px;
 }
+/* Font, line-height, and padding MUST match the textarea exactly — both
+   consume the same custom properties from .composer-input-shell so any
+   change propagates to both automatically. */
 .composer-textarea-overlay {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  /* Match textarea defaults exactly. Surface-specific overrides
-     (chat-floating-composer) re-declare the bits that differ. */
   font-family: var(--font-sans);
-  font-size: 15px;
-  line-height: 1.5;
-  padding: 16px 18px 4px;
+  font-size: var(--composer-font-size);
+  line-height: var(--composer-line-height);
+  padding: var(--composer-padding);
   white-space: pre-wrap;
   word-wrap: break-word;
   overflow-wrap: break-word;
@@ -3807,23 +3821,24 @@ body[data-theme="dark"] .chat-shell .chat-composer-dock > div {
     0 1px 2px rgba(15, 16, 17, 0.04),
     0 4px 14px rgba(15, 16, 17, 0.06);
 }
+/* Override the shared metrics on the shell so the textarea and overlay
+   stay coupled. Font-family still ships on each child because it's not
+   in the shared var set (textarea uses --font-sans by default; the
+   floating composer flips it to --font-body via two thin overrides). */
+.chat-floating-composer .composer-input-shell {
+  /* 10px (wrap) + 8px = 18px body inset — matches home .composer-textarea.
+     Tighter bottom than default textarea: toolbar supplies top spacing so we
+     don't stack 12px + 10px and leave a tall band under the input line. */
+  --composer-font-size: 14px;
+  --composer-line-height: 1.45;
+  --composer-padding: 2px 8px 6px;
+}
 .chat-floating-composer .composer-textarea {
   font-family: var(--font-body);
-  font-size: 14px;
-  line-height: 1.45;
-  /* 10px (wrap) + 8px = 18px body inset — matches home .composer-textarea */
-  /* Tighter bottom than default textarea: toolbar supplies top spacing so we
-     don't stack 12px + 10px and leave a tall band under the input line. */
-  padding: 2px 8px 6px;
   min-height: 22px;
 }
-/* Mirror the chat-floating textarea's metrics on the overlay so the
-   highlighted spans wrap and align identically. */
 .chat-floating-composer .composer-textarea-overlay {
   font-family: var(--font-body);
-  font-size: 14px;
-  line-height: 1.45;
-  padding: 2px 8px 6px;
 }
 .chat-floating-composer .composer-toolbar {
   /* Horizontal inset comes from .composer-wrap; no bottom padding — wrap's

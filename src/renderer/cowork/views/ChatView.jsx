@@ -447,7 +447,7 @@ function TextBlock({ text, id, complete = true, conversationId = null }) {
   // Full markdown rendering — GFM tables, lists, code blocks (with
   // chartjs/chart and data-vault-form support), links, etc. via
   // react-markdown + our MarkdownContent override map.
-  return <MarkdownContent text={text} id={id} complete={complete} conversationId={conversationId} />;
+  return <MarkdownContent text={text} id={id} complete={complete} conversationId={conversationId} isAssistant />;
 }
 
 // Convert an artifact step (from the SSE adapter, badge='Artifact')

@@ -94,13 +94,15 @@ function _mergeInlineCodeLines(text) {
       run.push(mj[1]);
       j += 1;
     }
-    if (run.length >= 2) {
+    // Two consecutive inline-code lines is a plausible user pattern; require
+    // at least three before auto-promoting to a fenced block.
+    if (run.length >= 3) {
       out.push('```');
       out.push(...run);
       out.push('```');
       i = j;
     } else {
-      // Just one inline-code line — leave it as inline.
+      // One or two inline-code lines — leave them as inline.
       out.push(lines[i]);
       i += 1;
     }
@@ -241,19 +243,25 @@ export function MarkdownContent({
   variant = 'assistant',
   enableForms = true,
   enableCharts = true,
+  // Gate the "consecutive inline-code lines → fenced block" rewrite to
+  // assistant output only. Authored content (user turns, memory files,
+  // artifact previews) defaults to off so author-intentional inline
+  // code runs are preserved verbatim.
+  isAssistant = false,
 }) {
   const rootRef = useRef(null);
   // Only run the form-fence normalization pass when forms are enabled.
   // User messages bypass it so a typed ```data-vault-form block stays
   // a normal fenced code block instead of getting auto-tidied for the
-  // form renderer.
+  // form renderer. The inline-code-run merge is similarly gated by
+  // `isAssistant` so only LLM output gets that fix-up.
   const normalized = useMemo(
     () => {
-      const merged = _mergeInlineCodeLines(text);
+      const merged = isAssistant ? _mergeInlineCodeLines(text) : text;
       const formNormalized = enableForms ? _normalizeFormFences(merged) : merged;
       return _renderEngramComments(formNormalized);
     },
-    [text, enableForms],
+    [text, enableForms, isAssistant],
   );
   const sz = dense ? _SIZES.dense : _SIZES.default;
 

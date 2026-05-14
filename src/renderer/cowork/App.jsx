@@ -610,7 +610,12 @@ function AppCore() {
     return head;
   };
 
-  const handleStopStream = useCallback(async () => {
+  const handleStopStream = useCallback(async (opts = {}) => {
+    // `silent: true` aborts the stream without leaving the "Task stopped"
+    // assistant placeholder behind — used when the caller is about to
+    // remove the user turn anyway (delete flow), so the placeholder
+    // would just flash on screen for a frame before being pruned.
+    const silent = opts?.silent === true;
     // 1) Cancel the running scratchpad (if any) so anton stops
     //    executing user code mid-cell.
     const padName = activeScratchpadRef.current;
@@ -625,6 +630,19 @@ function AppCore() {
     }
     activeScratchpadRef.current = null;
     activeStreamingTaskIdRef.current = null;
+
+    if (silent) {
+      // Just strip the `_streaming` + stale `activity` rows; the caller
+      // will follow up with its own state mutation (e.g. delete the user
+      // turn) and we don't want a "stopped" message lingering between.
+      setTasks((prev) => prev.map((t) => {
+        const before = t.messages || [];
+        const filtered = before.filter((m) => m.role !== '_streaming' && m.role !== 'activity');
+        if (filtered.length === before.length) return t;
+        return { ...t, status: 'idle', messages: filtered };
+      }));
+      return;
+    }
 
     // 3) Roll the streaming placeholder into a final assistant
     //    message. Drop the in-flight steps so the rail's Progress
@@ -2219,6 +2237,14 @@ function AppCore() {
 
   const performDeleteTurn = async (taskId, turnIndex) => {
     if (!taskId || typeof turnIndex !== 'number') return;
+    // If anton is actively streaming a response to the turn being
+    // deleted, stop the stream first so the SSE connection doesn't
+    // keep producing events for a turn that no longer exists. The
+    // silent flag keeps the abort from injecting a "Task stopped"
+    // placeholder which would only flash before being pruned.
+    if (activeStreamingTaskIdRef.current === taskId) {
+      try { await handleStopStream({ silent: true }); } catch {}
+    }
     if (typeof taskId === 'string' && taskId.startsWith('tmp-')) {
       // No server-side history yet — drop the local pair only.
       setTasks((prev) => prev.map((t) => {
