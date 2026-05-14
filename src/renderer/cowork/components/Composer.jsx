@@ -1,5 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import Ico from './Icons';
+import {
+  parseFences,
+  fenceCtxAt,
+  stackEmptyBeforeLine,
+  parseOpenerLine,
+} from './composerFences';
 
 function AttachmentChip({ attachment, onRemove }) {
   const src = attachment.source || attachment.kind || 'file';
@@ -77,9 +83,22 @@ export default function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [listening, setListening] = useState(false);
+  /** True when the caret is currently inside a fenced block. The boolean
+      changes much less often than the caret itself, so we track caret
+      position in a ref and only set state on the derived flag. */
+  const [inFence, setInFence] = useState(false);
   const taRef = useRef(null);
   const fileRef = useRef(null);
   const wrapRef = useRef(null);
+  /** Caret position the textarea last reported. Updated on input and
+      selection events; consumed by handlers that need the live caret
+      without a render cycle. */
+  const caretPosRef = useRef(0);
+  /** Caret position to apply on the NEXT layout-effect pass — used by
+      the setValue fallback path when execCommand('insertText') isn't
+      available. Gated on that path only so the execCommand branch
+      (which manages its own caret) doesn't collide. */
+  const pendingCaretRef = useRef(null);
   /** Positioning context for the attach (+) menu — tight box around the + control so the menu aligns with the activator. */
   const attachAnchorRef = useRef(null);
   const attachMenuRef = useRef(null);
@@ -127,6 +146,60 @@ export default function Composer({
     taRef.current.style.height = 'auto';
     taRef.current.style.height = Math.min(220, taRef.current.scrollHeight) + 'px';
   }, [value]);
+
+  // After every commit: apply any pending caret position from the
+  // setValue fallback path, then re-derive `inFence` from the current
+  // textarea state. Runs before paint (useLayoutEffect) so the visual
+  // indicator can't lag a frame behind the caret. Only sets state when
+  // the boolean actually flips — flat int updates stay on the ref.
+  useLayoutEffect(() => {
+    const ta = taRef.current;
+    if (!ta) return;
+    if (pendingCaretRef.current != null) {
+      const target = pendingCaretRef.current;
+      ta.selectionStart = ta.selectionEnd = target;
+      pendingCaretRef.current = null;
+    }
+    const pos = ta.selectionStart;
+    caretPosRef.current = pos;
+    const next = fenceCtxAt(ta.value, pos) !== null;
+    setInFence((prev) => (prev === next ? prev : next));
+  });
+
+  // Refresh the caret-position ref + derived inFence flag on selection
+  // events. Cheap: an int write to a ref plus a setState that no-ops
+  // unless the boolean actually changes.
+  const syncCaret = () => {
+    const ta = taRef.current;
+    if (!ta) return;
+    const pos = ta.selectionStart;
+    caretPosRef.current = pos;
+    const next = fenceCtxAt(ta.value, pos) !== null;
+    setInFence((prev) => (prev === next ? prev : next));
+  };
+
+  // execCommand('insertText') routes the mutation through the
+  // browser's native undo stack, so Cmd+Z reverses just the inserted
+  // snippet rather than the whole controlled-textarea state. Falls
+  // back to a setValue path (handled by the caller via
+  // `pendingCaretRef`) when execCommand returns false — Firefox can be
+  // spotty here, especially inside React-controlled textareas, but
+  // Chromium/Electron handles it cleanly.
+  const insertTextWithUndo = (text, caretAfter) => {
+    const ta = taRef.current;
+    if (!ta) return false;
+    if (document.activeElement !== ta) ta.focus();
+    try {
+      if (document.execCommand('insertText', false, text)) {
+        ta.selectionStart = ta.selectionEnd = caretAfter;
+        return true;
+      }
+    } catch {
+      // Future Chromium may throw on the deprecated API. Fall through
+      // to the caller's setValue fallback.
+    }
+    return false;
+  };
 
   // Edit-and-resend: when ChatView bumps `prefill`, drop the supplied
   // text into the composer and focus the textarea so the user can
@@ -241,7 +314,7 @@ export default function Composer({
       />
 
       <div style={{ width: '100%' }}>
-        <div className={`composer-wrap${focused ? ' focused' : ''}`}>
+        <div className={`composer-wrap${focused ? ' focused' : ''}${inFence ? ' in-fence' : ''}`}>
           {attachments.length > 0 && (
             <div className="attachment-strip">
               {attachments.map((attachment) => (
@@ -259,10 +332,137 @@ export default function Composer({
             onChange={(e) => { setValue(e.target.value); bumpTyping(); }}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
+            onSelect={syncCaret}
+            onClick={syncCaret}
             onKeyDown={(e) => {
-              if (!disabled && e.key === 'Enter' && !e.shiftKey) {
+              if (disabled) return;
+              const ta = e.currentTarget;
+              const pos = ta.selectionStart;
+              const txt = value;
+
+              if (e.key === 'Enter') {
+                // (A) Cmd/Ctrl+Enter sends from anywhere — including
+                // inside a fence and even with Shift held.
+                if (e.metaKey || e.ctrlKey) {
+                  e.preventDefault();
+                  handleSend();
+                  return;
+                }
+                // Shift+Enter: default browser newline.
+                if (e.shiftKey) return;
+
+                // Inside a fenced block — Enter inserts a newline, never sends.
+                const ctx = fenceCtxAt(txt, pos);
+                if (ctx) {
+                  e.preventDefault();
+                  if (!insertTextWithUndo('\n', pos + 1)) {
+                    pendingCaretRef.current = pos + 1;
+                    setValue(txt.slice(0, pos) + '\n' + txt.slice(pos));
+                  }
+                  return;
+                }
+
+                // (F) Closing-fence line ergonomics — if the caret is on
+                // a paired closing fence line, insert a content line
+                // ABOVE the closer and land on it, staying inside the
+                // (now-extended) block.
+                const lineStart = txt.lastIndexOf('\n', pos - 1) + 1;
+                const parsed = parseFences(txt);
+                const onCloser = parsed.fences.find(
+                  (f) => f.char === lineStart && !f.isOpening,
+                );
+                if (onCloser) {
+                  e.preventDefault();
+                  ta.selectionStart = ta.selectionEnd = lineStart;
+                  if (!insertTextWithUndo('\n', lineStart)) {
+                    pendingCaretRef.current = lineStart;
+                    setValue(txt.slice(0, lineStart) + '\n' + txt.slice(lineStart));
+                  }
+                  return;
+                }
+
+                // Auto-expand on a clean opener line, only when the
+                // parser's stack would be empty BEFORE this line —
+                // i.e. the user is starting a fresh block, not closing
+                // or interrupting a prior unbalanced one. Closer
+                // length matches the opener's run length so
+                // 4-backtick fences pair with 4-backtick closers.
+                const lineEndIdx = txt.indexOf('\n', pos);
+                const lineEnd = lineEndIdx === -1 ? txt.length : lineEndIdx;
+                const currentLine = txt.slice(lineStart, lineEnd);
+                const opener = parseOpenerLine(currentLine);
+                if (opener && stackEmptyBeforeLine(txt, lineStart)) {
+                  e.preventDefault();
+                  const closer = '`'.repeat(opener.len);
+                  const insertion = '\n\n' + closer;
+                  const caretAfter = lineEnd + 1; // empty middle line
+                  ta.selectionStart = ta.selectionEnd = lineEnd;
+                  if (!insertTextWithUndo(insertion, caretAfter)) {
+                    pendingCaretRef.current = caretAfter;
+                    setValue(txt.slice(0, lineEnd) + insertion + txt.slice(lineEnd));
+                  }
+                  return;
+                }
+
+                // Default: send.
                 e.preventDefault();
                 handleSend();
+                return;
+              }
+
+              // (B) Escape inside a fence — caret jumps to the line
+              // right after the closing ```. If there's no line after,
+              // append one. No content inserted inside the fence.
+              if (e.key === 'Escape') {
+                const ctx = fenceCtxAt(txt, pos);
+                if (!ctx) return;
+                e.preventDefault();
+                const afterClosingNL = txt.indexOf('\n', ctx.close.end);
+                if (afterClosingNL === -1) {
+                  ta.selectionStart = ta.selectionEnd = txt.length;
+                  if (!insertTextWithUndo('\n', txt.length + 1)) {
+                    pendingCaretRef.current = txt.length + 1;
+                    setValue(txt + '\n');
+                  }
+                } else {
+                  ta.selectionStart = ta.selectionEnd = afterClosingNL + 1;
+                  syncCaret();
+                }
+                return;
+              }
+
+              if (e.key === 'ArrowDown') {
+                const ctx = fenceCtxAt(txt, pos);
+                if (ctx) {
+                  const lineEndIdx = txt.indexOf('\n', pos);
+                  const lineEnd = lineEndIdx === -1 ? txt.length : lineEndIdx;
+                  if (lineEnd >= ctx.contentEnd) {
+                    e.preventDefault();
+                    const afterClosingNL = txt.indexOf('\n', ctx.close.end);
+                    const target = afterClosingNL === -1 ? txt.length : afterClosingNL + 1;
+                    ta.selectionStart = ta.selectionEnd = target;
+                    syncCaret();
+                  }
+                }
+                return;
+              }
+
+              if (e.key === 'ArrowUp') {
+                const lineStart = txt.lastIndexOf('\n', pos - 1) + 1;
+                if (lineStart === 0) return;
+                const prevLineEnd = lineStart - 1;
+                const prevLineStart = txt.lastIndexOf('\n', prevLineEnd - 1) + 1;
+                const prevLine = txt.slice(prevLineStart, prevLineEnd);
+                if (/^`{3,}\s*$/.test(prevLine)) {
+                  const { fences } = parseFences(txt);
+                  const idx = fences.findIndex((f) => f.char === prevLineStart);
+                  if (idx >= 0 && !fences[idx].isOpening) {
+                    e.preventDefault();
+                    ta.selectionStart = ta.selectionEnd = prevLineStart - 1;
+                    syncCaret();
+                  }
+                }
+                return;
               }
             }}
             rows={1}
