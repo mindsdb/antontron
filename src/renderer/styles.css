@@ -1365,9 +1365,9 @@ body[data-theme="dark"] .legal-viewer-overlay {
   width: 100%;
   max-width: 456px;
   font-size: 12px;
-  color: rgba(255, 255, 255, 0.6);
-  background: rgba(0, 229, 255, 0.06);
-  border: 1px solid rgba(0, 229, 255, 0.15);
+  color: var(--text-secondary);
+  background: var(--accent-bg, rgba(0, 229, 255, 0.06));
+  border: 1px solid var(--accent-border, rgba(0, 229, 255, 0.15));
   border-radius: 8px;
   padding: 10px 14px;
   margin-bottom: 4px;
