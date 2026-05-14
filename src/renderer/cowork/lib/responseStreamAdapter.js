@@ -361,6 +361,79 @@ export function reduceStream(state, event, now = Date.now) {
       return addArtifactStep(state, payload, eventTs);
     }
 
+    const genericProgress = {
+      file: { badge: 'File', label: event.file_path || progressMessage(event) || 'File accessed' },
+      source: { badge: 'Source', label: event.source_path || progressMessage(event) || 'Source used' },
+      approval: { badge: 'Approval', label: progressMessage(event) || 'Approval required' },
+    }[phase];
+    if (genericProgress) {
+      const failed = progressStatus === 'failed' || Boolean(event.error);
+      const completed = failed || progressStatus === 'completed' || progressStatus === 'done';
+      const label = String(genericProgress.label).split('/').pop() || genericProgress.label;
+      const stepPatch = {
+        label,
+        status: failed ? 'failed' : (completed ? 'completed' : 'in_progress'),
+        completedAt: completed ? eventTs : null,
+        data: {
+          phase,
+          progress_status: failed ? 'failed' : (progressStatus || (completed ? 'completed' : 'started')),
+          message: progressMessage(event),
+          file_path: event.file_path || null,
+          source_path: event.source_path || null,
+          tool_name: event.tool_name || null,
+          error: event.error || null,
+        },
+      };
+      if (!completed) {
+        return {
+          ...state,
+          steps: [
+            ...state.steps,
+            {
+              id: `progress-${state.steps.length + 1}`,
+              badge: genericProgress.badge,
+              icon: 'sparkle',
+              startedAt: eventTs,
+              output: null,
+              result: null,
+              _isScratchpad: false,
+              _isGenericProgress: true,
+              _progressPhase: phase,
+              _toolName: event.tool_name || null,
+              ...stepPatch,
+            },
+          ],
+        };
+      }
+      const patched = patchLastGenericStep(
+        state.steps,
+        (step) => step._progressPhase === phase
+          && step.status === 'in_progress'
+          && (!event.tool_name || step._toolName === event.tool_name),
+        stepPatch,
+      );
+      if (patched) return { ...state, steps: patched };
+      return {
+        ...state,
+        steps: [
+          ...state.steps,
+          {
+            id: `progress-${state.steps.length + 1}`,
+            badge: genericProgress.badge,
+            icon: 'sparkle',
+            startedAt: eventTs,
+            output: null,
+            result: null,
+            _isScratchpad: false,
+            _isGenericProgress: true,
+            _progressPhase: phase,
+            _toolName: event.tool_name || null,
+            ...stepPatch,
+          },
+        ],
+      };
+    }
+
     // Cell finished — flip the trailing in-progress scratchpad to
     // completed if the .result hasn't arrived yet. (When .result does
     // come in, it'll carry the same status flip plus the output.)

@@ -1,7 +1,7 @@
 """
 Artifacts — outputs Anton produces, surfaced to the user.
 
-Each artifact is a folder under `<project>/.anton/artifacts/<slug>/`. The
+Each artifact is a folder under `<project>/artifacts/<slug>/`. The
 folder owns its `metadata.json` (Pydantic-validated source of truth)
 and `README.md` (rendered from metadata). Multi-file outputs (HTML +
 CSS + JS, app + dataset) cluster together; single-file outputs
@@ -33,6 +33,11 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from anton_api import projects_store
+from runtime.artifacts import (
+    artifact_root_for_project,
+    pick_primary as _runtime_pick_primary,
+    user_files as _runtime_user_files,
+)
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -94,11 +99,6 @@ BG_CYCLE = [
     "linear-gradient(135deg, #fff, var(--stone-150))",
 ]
 
-# Files under each artifact folder that are housekeeping rather than
-# user-content. They're listed in metadata for the renderer but not
-# considered when picking the "primary" file to open.
-_HOUSEKEEPING_FILES = {"metadata.json", "README.md", ".published.json"}
-
 # Extensions we'll preview as text in the artifact viewer.
 TEXT_EXTENSIONS = {
     ".html", ".md", ".txt", ".csv", ".json", ".py", ".js",
@@ -152,7 +152,7 @@ def _registered_project_dirs() -> list[Path]:
 
 
 def _scan_artifact_dirs() -> list[Path]:
-    """Every registered project's `<base>/.anton/artifacts/` dir that exists.
+    """Every registered project's canonical `<base>/artifacts/` dir that exists.
 
     Project paths are funnelled through `_registered_project_dirs`
     so a tampered projects-store entry (symlink pointing outside
@@ -162,26 +162,26 @@ def _scan_artifact_dirs() -> list[Path]:
     The legacy `.anton/output/` flat dump is intentionally NOT
     scanned anymore — the renamed model demands per-folder metadata
     and old files have neither. Users migrate by moving their files
-    into a proper `.anton/artifacts/<slug>/` subfolder; until they do, the
+    into a proper `artifacts/<slug>/` subfolder; until they do, the
     files just stay where they are and stop showing up here.
     """
     dirs: dict[str, Path] = {}
     for project_dir in _registered_project_dirs():
-        candidate = project_dir / ".anton" / "artifacts"
+        candidate = artifact_root_for_project(project_dir)
         if candidate.is_dir():
             dirs[str(candidate.resolve())] = candidate
     return list(dirs.values())
 
 
 def _iter_artifact_folders(project_path: str | None = None) -> Iterator[Path]:
-    """Yield every direct subfolder of every project's .anton/artifacts/ dir.
+    """Yield every direct subfolder of every project's canonical artifacts dir.
 
     Only folders containing a readable `metadata.json` are passed
     through to callers; bare folders are skipped (incomplete writes,
     or user-stashed dirs the agent hasn't claimed).
 
     When `project_path` is provided, restrict the walk to that single
-    project's `<base>/.anton/artifacts/`. The argument arrives from
+    project's `<base>/artifacts/`. The argument arrives from
     an unauthenticated query parameter, so it's treated as untrusted:
     it must resolve to one of the directories in
     `_registered_project_dirs()` (allowlist match against the canonical
@@ -200,7 +200,7 @@ def _iter_artifact_folders(project_path: str | None = None) -> Iterator[Path]:
         registered = {p for p in _registered_project_dirs()}
         if requested not in registered:
             return
-        candidate = requested / ".anton" / "artifacts"
+        candidate = artifact_root_for_project(requested)
         if not candidate.is_dir():
             return
         roots = [candidate]
@@ -234,23 +234,7 @@ def _user_files(folder: Path) -> list[Path]:
     `dashboard.html`). Sorted by mtime descending so the "primary"
     pick lands on whatever was written most recently.
     """
-    out: list[Path] = []
-    try:
-        for p in folder.rglob("*"):
-            if not p.is_file() or p.is_symlink():
-                continue
-            rel = p.relative_to(folder)
-            top = rel.parts[0] if rel.parts else ""
-            if top in _HOUSEKEEPING_FILES:
-                continue
-            out.append(p)
-    except OSError:
-        return []
-    try:
-        out.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    except OSError:
-        pass
-    return out
+    return _runtime_user_files(folder)
 
 
 def _pick_primary(folder: Path, files: list[Path], primary_hint: str | None = None) -> Path | None:
@@ -268,25 +252,7 @@ def _pick_primary(folder: Path, files: list[Path], primary_hint: str | None = No
     just claimed, no writes), or when the agent's declared primary
     points at a missing file AND no fallback exists.
     """
-    # Honor the agent's declared primary when the file actually
-    # exists. Path-traversal guard: must resolve inside `folder`.
-    if primary_hint:
-        try:
-            target = (folder / primary_hint).resolve()
-            target.relative_to(folder.resolve())
-            if target.is_file():
-                return target
-        except (ValueError, OSError):
-            pass
-    if not files:
-        return None
-    index = next((f for f in files if f.name == "index.html"), None)
-    if index is not None:
-        return index
-    html = next((f for f in files if f.suffix.lower() == ".html"), None)
-    if html is not None:
-        return html
-    return files[0]
+    return _runtime_pick_primary(folder, files, primary_hint)
 
 
 def _published_url_for(folder: Path, primary: Path | None) -> str:
@@ -325,7 +291,7 @@ async def list_artifacts(project_path: str | None = Query(default=None)):
     about `path` / `kind` / `updated` keep working.
 
     `project_path` scopes the response to one project's
-    `<base>/.anton/artifacts/` tree. The rail card uses this so each
+    `<base>/artifacts/` tree. The rail card uses this so each
     project-detail mount doesn't pay for reading every other
     project's metadata.json.
     """
@@ -391,10 +357,11 @@ async def list_artifacts(project_path: str | None = Query(default=None)):
 
 
 def _candidate_relative_artifacts(raw_path: str) -> list[Path]:
-    """Resolve a relative path against every project's .anton/artifacts/ dir.
+    """Resolve a relative path against every project's canonical artifact dir.
 
     Accepts any of:
-      - `<slug>/dashboard.html`        → matches `<base>/.anton/artifacts/<slug>/dashboard.html`
+      - `<slug>/dashboard.html`        → matches `<base>/artifacts/<slug>/dashboard.html`
+      - `artifacts/<slug>/dashboard.html`
       - `.anton/artifacts/<slug>/dashboard.html` (legacy callers may include the prefix)
     """
     text = (raw_path or "").strip().replace("\\", "/")
@@ -403,6 +370,8 @@ def _candidate_relative_artifacts(raw_path: str) -> list[Path]:
     parts = [p for p in text.split("/") if p]
     if not text or any(p in (".", "..") for p in parts):
         raise HTTPException(status_code=400, detail="Invalid artifact path")
+    if text.startswith(".anton/artifacts/"):
+        text = text[len(".anton/artifacts/"):]
     if text.startswith("artifacts/"):
         text = text[len("artifacts/"):]
     matches: dict[str, Path] = {}
@@ -421,9 +390,9 @@ def _resolve_artifact_path(raw_path: str) -> Path:
     """Turn an artifact request path into an absolute path on disk.
 
     Accepts:
-      - Absolute paths under any registered project's `.anton/artifacts/` dir.
+      - Absolute paths under any registered project's canonical `artifacts/` dir.
       - Relative paths anchored at any artifact root (slug-prefixed or
-        with a leading `.anton/artifacts/`).
+        with a leading `artifacts/` or `.anton/artifacts/`).
     Path-traversal guarded; non-existent files yield 404.
     """
     # Reject null bytes, which are used in path injection attacks.

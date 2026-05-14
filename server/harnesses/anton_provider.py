@@ -15,7 +15,7 @@ from anton_api.models import (
     ResponseOutputContent,
     ResponseStatus,
 )
-from runtime.events import iter_sse_payloads, normalize_legacy_payload
+from runtime.events import iter_sse_payloads, normalize_legacy_payloads
 from runtime.schemas import (
     CoworkEvent,
     HarnessCapabilities,
@@ -61,15 +61,21 @@ class AntonHarnessProvider:
         return HarnessReadiness.ok()
 
     async def start_turn(self, request: HarnessTurnRequest) -> AsyncIterator[CoworkEvent]:
-        async for chunk in self.stream_response(
+        async for chunk in self._stream_legacy_sse(
             user_input=request.user_input,
             conversation_id=request.conversation_id,
             project=request.project_context.name,
             model=request.inference.planning_model,
             disabled_connections=request.disabled_connections,
+            inference_profile=request.inference.safe_dump(),
         ):
             for _event_type, payload in iter_sse_payloads(chunk):
-                yield normalize_legacy_payload(payload, request.turn_id)
+                for event in normalize_legacy_payloads(
+                    payload,
+                    request.turn_id,
+                    project_root=request.project_context.path,
+                ):
+                    yield event
 
     async def cancel_turn(self, turn_id: str) -> None:
         del turn_id
@@ -120,6 +126,26 @@ class AntonHarnessProvider:
         model: str | None,
         disabled_connections: list[dict] | None,
     ) -> AsyncIterator[str]:
+        async for chunk in self._stream_legacy_sse(
+            user_input=user_input,
+            conversation_id=conversation_id,
+            project=project,
+            model=model,
+            disabled_connections=disabled_connections,
+            inference_profile=None,
+        ):
+            yield chunk
+
+    async def _stream_legacy_sse(
+        self,
+        *,
+        user_input: str,
+        conversation_id: str | None,
+        project: str | None,
+        model: str | None,
+        disabled_connections: list[dict] | None,
+        inference_profile: dict | None,
+    ) -> AsyncIterator[str]:
         cid: str | None = None
         recorded_events: list[dict] = []
         started_at_ms: int | None = None
@@ -137,6 +163,7 @@ class AntonHarnessProvider:
                 project=project,
                 model=model if model and model != "anton" else None,
                 disabled_connections=disabled_connections,
+                inference_profile=inference_profile,
             )
             async for chunk in format_responses_stream(
                 event_stream,

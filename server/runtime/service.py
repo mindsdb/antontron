@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import AsyncIterator, Any
 
 from anton_api import projects_store
@@ -10,6 +11,7 @@ from harnesses.config import selected_harness_id
 from harnesses.registry import get_harness_by_id
 
 from .conversations import store
+from .artifacts import ensure_artifact_root, scan_updated_artifacts, snapshot_artifacts
 from .events import cowork_event_to_legacy_sse, iter_sse_payloads
 from .inference import resolve_inference_profile, validate_inference_profile
 from .schemas import (
@@ -35,7 +37,51 @@ class RuntimeService:
         return ProjectContext(id=name, name=name, path=str(base))
 
     def _artifact_root(self, project_name: str) -> str:
-        return str(projects_store.project_path(project_name) / "artifacts")
+        return str(ensure_artifact_root(projects_store.project_path(project_name)))
+
+    def _artifact_key(self, artifact: dict[str, Any]) -> str:
+        return str(artifact.get("folder") or artifact.get("path") or artifact.get("file_path") or artifact.get("id") or "")
+
+    def _artifact_event(self, turn_id: str, artifact: dict[str, Any]) -> CoworkEvent:
+        title = str(artifact.get("title") or artifact.get("name") or "Artifact")
+        legacy = {
+            "type": "response.in_progress",
+            "thought_role": "thought.progress",
+            "phase": "artifact",
+            "progress_status": "completed",
+            "message": f"Created artifact: {title}",
+            "content": title,
+            "artifact": artifact,
+        }
+        return CoworkEvent(
+            type="artifact.created",
+            turn_id=turn_id,
+            payload={
+                "legacy": legacy,
+                "legacy_type": "response.in_progress",
+                "label": title,
+                "status": "completed",
+                "artifact": artifact,
+            },
+        )
+
+    def _new_artifact_events(
+        self,
+        *,
+        turn_id: str,
+        artifact_root: str,
+        before: dict[str, float],
+        emitted: set[str],
+    ) -> list[CoworkEvent]:
+        events: list[CoworkEvent] = []
+        for artifact in scan_updated_artifacts(Path(artifact_root), before):
+            key = self._artifact_key(artifact)
+            if key and key in emitted:
+                continue
+            if key:
+                emitted.add(key)
+            events.append(self._artifact_event(turn_id, artifact))
+        return events
 
     def _failed_event(self, turn_id: str, code: str, message: str) -> CoworkEvent:
         legacy = {"type": "response.failed", "code": code, "error": message}
@@ -65,14 +111,19 @@ class RuntimeService:
         inference_override: dict[str, Any] | None = None,
     ) -> AsyncIterator[str]:
         del model, attachment_ids
+        conv = store.get(conversation_id) if conversation_id else None
         if inference_override:
             try:
                 inference = ResolvedInferenceProfile.model_validate(inference_override)
             except Exception:
                 inference = resolve_inference_profile()
+        elif conv is not None and conv.inference_profile:
+            try:
+                inference = ResolvedInferenceProfile.model_validate(conv.inference_profile)
+            except Exception:
+                inference = resolve_inference_profile()
         else:
             inference = resolve_inference_profile()
-        conv = store.get(conversation_id) if conversation_id else None
         if conv is None:
             harness_id = harness_override or selected_harness_id()
             project_context = self._project_context(project)
@@ -90,6 +141,7 @@ class RuntimeService:
 
         harness = get_harness_by_id(harness_id)
         inference_ok, inference_error = validate_inference_profile(inference)
+        artifact_root = self._artifact_root(project_context.name)
         readiness = harness.validate_request(
             HarnessTurnRequest(
                 conversation_id=conv.id,
@@ -99,7 +151,7 @@ class RuntimeService:
                 project_context=project_context,
                 disabled_connections=disabled_connections,
                 inference=inference,
-                artifact_root=self._artifact_root(project_context.name),
+                artifact_root=artifact_root,
                 harness_state=conv.harness_state,
             )
         )
@@ -124,19 +176,43 @@ class RuntimeService:
             project_context=project_context,
             disabled_connections=disabled_connections,
             inference=inference,
-            artifact_root=self._artifact_root(project_context.name),
+            artifact_root=artifact_root,
             harness_state=conv.harness_state,
             runtime_options={"cowork_canonical": True},
         )
         terminal_seen = False
+        artifact_snapshot = snapshot_artifacts(Path(artifact_root))
+        emitted_artifacts: set[str] = set()
         try:
             async for event in harness.start_turn(request):
                 conv = store.get(conv.id) or conv
                 store.append_event(conv, turn.id, event)
+                if event.type == "artifact.created":
+                    artifact = event.payload.get("artifact")
+                    if isinstance(artifact, dict):
+                        key = self._artifact_key(artifact)
+                        if key:
+                            emitted_artifacts.add(key)
                 if event.type == "response.completed":
+                    for artifact_event in self._new_artifact_events(
+                        turn_id=turn.id,
+                        artifact_root=artifact_root,
+                        before=artifact_snapshot,
+                        emitted=emitted_artifacts,
+                    ):
+                        store.append_event(conv, turn.id, artifact_event)
+                        yield cowork_event_to_legacy_sse(artifact_event)
                     terminal_seen = True
                     store.finish_turn(conv, turn.id, "completed")
                 elif event.type == "response.failed":
+                    for artifact_event in self._new_artifact_events(
+                        turn_id=turn.id,
+                        artifact_root=artifact_root,
+                        before=artifact_snapshot,
+                        emitted=emitted_artifacts,
+                    ):
+                        store.append_event(conv, turn.id, artifact_event)
+                        yield cowork_event_to_legacy_sse(artifact_event)
                     terminal_seen = True
                     message = str(event.payload.get("message") or event.payload.get("error") or "Response failed")
                     store.finish_turn(conv, turn.id, "failed", message)
@@ -149,6 +225,14 @@ class RuntimeService:
         except Exception as exc:
             logger.exception("Cowork runtime turn failed")
             conv = store.get(conv.id) or conv
+            for artifact_event in self._new_artifact_events(
+                turn_id=turn.id,
+                artifact_root=artifact_root,
+                before=artifact_snapshot,
+                emitted=emitted_artifacts,
+            ):
+                store.append_event(conv, turn.id, artifact_event)
+                yield cowork_event_to_legacy_sse(artifact_event)
             failed = self._failed_event(turn.id, "runtime_error", str(exc) or "Runtime error")
             store.append_event(conv, turn.id, failed)
             store.finish_turn(conv, turn.id, "failed", str(exc))
@@ -157,6 +241,13 @@ class RuntimeService:
         finally:
             if not terminal_seen:
                 conv = store.get(conv.id) or conv
+                for artifact_event in self._new_artifact_events(
+                    turn_id=turn.id,
+                    artifact_root=artifact_root,
+                    before=artifact_snapshot,
+                    emitted=emitted_artifacts,
+                ):
+                    store.append_event(conv, turn.id, artifact_event)
                 last = next((t for t in conv.turns if t.id == turn.id), None)
                 if last and last.status == "running":
                     store.finish_turn(conv, turn.id, "partial")

@@ -30,12 +30,25 @@ from anton_api.models import (
     ResponseStatus,
     Role,
 )
-from runtime.events import iter_sse_payloads, normalize_legacy_payload
+from runtime.artifacts import (
+    artifact_payload_from_folder,
+    artifact_root_for_project,
+    ensure_artifact_root,
+    scan_updated_artifacts,
+    snapshot_artifacts,
+    user_files as artifact_user_files,
+)
+from runtime.events import (
+    iter_sse_payloads,
+    normalize_legacy_payloads,
+)
+from runtime.inference import resolve_inference_profile
 from runtime.schemas import (
     CoworkEvent,
     HarnessCapabilities,
     HarnessReadiness,
     HarnessTurnRequest,
+    ResolvedInferenceProfile,
 )
 
 from .base import HarnessConfigurationError, HarnessRuntimeError
@@ -89,6 +102,10 @@ def _ensure_dir(path: Path) -> Path:
     return path
 
 
+def _hermes_home() -> Path:
+    return Path(os.environ.get("HERMES_HOME") or (Path.home() / ".hermes")).expanduser()
+
+
 class HermesHarnessProvider:
     id = "hermes"
     label = "Hermes Agent"
@@ -127,19 +144,58 @@ class HermesHarnessProvider:
             }
 
     def validate_request(self, request: HarnessTurnRequest) -> HarnessReadiness:
-        del request
+        if not self.base_url:
+            return HarnessReadiness.fail("hermes_base_url_missing", "Hermes Agent base URL is not configured.")
+        try:
+            project_path = Path(request.project_context.path).expanduser().resolve(strict=False)
+            artifact_root = Path(request.artifact_root).expanduser().resolve(strict=False)
+            artifact_root.relative_to(project_path)
+        except Exception:
+            return HarnessReadiness.fail(
+                "hermes_artifact_root_invalid",
+                "Hermes artifact root must live inside the active project.",
+            )
+        try:
+            ensure_artifact_root(project_path)
+            _ensure_dir(project_path / ".cowork" / "hermes" / "episodes")
+            _ensure_dir(_hermes_home() / "memories")
+            _ensure_dir(_hermes_home() / "skills")
+        except Exception as exc:
+            return HarnessReadiness.fail(
+                "hermes_workspace_not_ready",
+                f"Could not prepare Hermes workspace directories: {exc}",
+            )
+        try:
+            health = self._get_json("/health", 2.0)
+            if isinstance(health, dict) and health.get("status") not in (None, "", "ok", "healthy", "running"):
+                return HarnessReadiness.fail(
+                    "hermes_unhealthy",
+                    f"Hermes Agent health check returned {health.get('status')}.",
+                )
+        except Exception as exc:
+            return HarnessReadiness.fail(
+                "hermes_unreachable",
+                f"Hermes Agent is not reachable at {self.base_url}: {exc}",
+            )
         return HarnessReadiness.ok()
 
     async def start_turn(self, request: HarnessTurnRequest) -> AsyncIterator[CoworkEvent]:
-        async for chunk in self.stream_response(
+        async for chunk in self._stream_legacy_sse(
             user_input=request.user_input,
             conversation_id=request.conversation_id,
             project=request.project_context.name,
             model=request.inference.planning_model,
             disabled_connections=request.disabled_connections,
+            inference=request.inference,
+            artifact_root=request.artifact_root,
         ):
             for _event_type, payload in iter_sse_payloads(chunk):
-                yield normalize_legacy_payload(payload, request.turn_id)
+                for event in normalize_legacy_payloads(
+                    payload,
+                    request.turn_id,
+                    project_root=request.project_context.path,
+                ):
+                    yield event
 
     async def cancel_turn(self, turn_id: str) -> None:
         del turn_id
@@ -552,6 +608,35 @@ class HermesHarnessProvider:
         model: str | None,
         disabled_connections: list[dict] | None,
     ) -> AsyncIterator[str]:
+        inference = resolve_inference_profile()
+        if model:
+            inference = inference.model_copy(update={
+                "planning_model": model,
+                "id": f"{inference.provider_type}:{model}:{inference.coding_model}",
+            })
+        async for chunk in self._stream_legacy_sse(
+            user_input=user_input,
+            conversation_id=conversation_id,
+            project=project,
+            model=model,
+            disabled_connections=disabled_connections,
+            inference=inference,
+            artifact_root=None,
+        ):
+            yield chunk
+
+    async def _stream_legacy_sse(
+        self,
+        *,
+        user_input: str,
+        conversation_id: str | None,
+        project: str | None,
+        model: str | None,
+        disabled_connections: list[dict] | None,
+        inference: ResolvedInferenceProfile | None,
+        artifact_root: str | None,
+    ) -> AsyncIterator[str]:
+        inference = inference or resolve_inference_profile()
         cid, project_name, _meta, history_before = self._ensure_conversation(
             conversation_id=conversation_id,
             project=project,
@@ -560,8 +645,8 @@ class HermesHarnessProvider:
         )
         prompt = self._build_prompt(history_before, user_input)
         self._append_message(project_name, cid, "user", user_input)
-        self._ensure_artifact_root(project_name)
-        artifact_snapshot = self._artifact_snapshot(project_name)
+        artifact_dir = self._ensure_artifact_root(project_name, artifact_root=artifact_root)
+        artifact_snapshot = snapshot_artifacts(artifact_dir)
 
         recorded_events: list[dict] = []
         started_at_ms: int | None = None
@@ -586,7 +671,8 @@ class HermesHarnessProvider:
                     f"Hermes Agent is not reachable at {self.base_url}: {health.get('error') or 'unknown error'}"
                 )
 
-            resp = ResponseObject(id=resp_id, model="hermes-agent", status=ResponseStatus.created)
+            response_model = inference.planning_model or "hermes-agent"
+            resp = ResponseObject(id=resp_id, model=response_model, status=ResponseStatus.created)
             seq += 1
             yield _event(
                 "response.created",
@@ -601,8 +687,10 @@ class HermesHarnessProvider:
             run_id = await self._create_run(
                 prompt=prompt,
                 session_id=cid,
+                inference=inference,
                 model=model,
                 project_name=project_name,
+                artifact_root=artifact_dir,
             )
             async for event in self._iter_run_events(run_id):
                 event_name = str(event.get("event") or event.get("type") or "")
@@ -689,7 +777,7 @@ class HermesHarnessProvider:
                         )
                     full_text = "".join(collected_text)
                     self._append_message(project_name, cid, "assistant", full_text)
-                    for artifact in self._scan_updated_artifacts(project_name, artifact_snapshot):
+                    for artifact in scan_updated_artifacts(artifact_dir, artifact_snapshot):
                         seq += 1
                         yield _event(
                             "response.in_progress",
@@ -706,7 +794,7 @@ class HermesHarnessProvider:
                         )
                     completed = ResponseObject(
                         id=resp_id,
-                        model="hermes-agent",
+                        model=response_model,
                         status=ResponseStatus.completed,
                         output=[
                             ResponseOutput(
@@ -801,26 +889,20 @@ class HermesHarnessProvider:
         )
 
     def _artifact_root(self, project_name: str | None) -> Path:
-        return self._project_base(project_name) / "artifacts"
+        return artifact_root_for_project(self._project_base(project_name))
 
-    def _ensure_artifact_root(self, project_name: str | None) -> Path:
-        return _ensure_dir(self._artifact_root(project_name))
+    def _ensure_artifact_root(self, project_name: str | None, *, artifact_root: str | None = None) -> Path:
+        if artifact_root:
+            root = Path(artifact_root).expanduser()
+            root.mkdir(parents=True, exist_ok=True)
+            return root
+        return ensure_artifact_root(self._project_base(project_name))
 
     def _artifact_snapshot(self, project_name: str | None) -> dict[str, float]:
-        root = self._artifact_root(project_name)
-        if not root.is_dir():
-            return {}
-        snapshot: dict[str, float] = {}
-        for metadata_path in root.glob("*/metadata.json"):
-            if metadata_path.is_file():
-                try:
-                    snapshot[str(metadata_path.parent.resolve())] = self._artifact_folder_mtime(metadata_path.parent)
-                except OSError:
-                    continue
-        return snapshot
+        return snapshot_artifacts(self._artifact_root(project_name))
 
-    def _artifact_instructions(self, project_name: str | None) -> str:
-        root = self._artifact_root(project_name)
+    def _artifact_instructions(self, project_name: str | None, *, artifact_root: Path | None = None) -> str:
+        root = artifact_root or self._artifact_root(project_name)
         return (
             "\n\nCowork artifact bridge:\n"
             "When the user asks for an artifact-worthy output such as a report, dashboard, app, "
@@ -835,17 +917,7 @@ class HermesHarnessProvider:
         )
 
     def _artifact_user_files(self, folder: Path) -> list[Path]:
-        ignored = {"metadata.json", "README.md", ".published.json"}
-        files: list[Path] = []
-        for path in folder.rglob("*"):
-            if not path.is_file():
-                continue
-            if path.name in ignored:
-                continue
-            if ".cowork-preview" in path.parts:
-                continue
-            files.append(path)
-        return sorted(files)
+        return artifact_user_files(folder)
 
     def _artifact_folder_mtime(self, folder: Path) -> float:
         latest = 0.0
@@ -859,69 +931,10 @@ class HermesHarnessProvider:
         return latest
 
     def _artifact_payload_from_folder(self, folder: Path) -> dict[str, Any] | None:
-        metadata_path = folder / "metadata.json"
-        if not metadata_path.is_file():
-            return None
-        try:
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except Exception:
-            logger.warning("Ignoring Hermes artifact with invalid metadata JSON: %s", metadata_path)
-            return None
-        if not isinstance(metadata, dict):
-            logger.warning("Ignoring Hermes artifact metadata that is not an object: %s", metadata_path)
-            return None
-
-        primary: Path | None = None
-        primary_hint = metadata.get("primary") or metadata.get("primaryFile") or metadata.get("entrypoint")
-        if isinstance(primary_hint, str) and primary_hint.strip():
-            candidate = (folder / primary_hint).resolve()
-            try:
-                candidate.relative_to(folder.resolve())
-            except ValueError:
-                logger.warning("Ignoring Hermes artifact primary outside artifact folder: %s", candidate)
-                return None
-            if candidate.is_file():
-                primary = candidate
-        if primary is None:
-            user_files = self._artifact_user_files(folder)
-            primary = user_files[0] if user_files else None
-        if primary is None:
-            logger.warning("Ignoring Hermes artifact without a primary file: %s", folder)
-            return None
-
-        title = str(metadata.get("name") or metadata.get("title") or folder.name).strip() or folder.name
-        description = str(metadata.get("description") or "").strip()
-        return {
-            "title": title,
-            "name": title,
-            "description": description,
-            "type": str(metadata.get("type") or "mixed"),
-            "slug": str(metadata.get("slug") or folder.name),
-            "folder": str(folder.resolve()),
-            "path": str(primary.resolve()),
-            "file_path": str(primary.resolve()),
-            "primary": str(primary.relative_to(folder.resolve())),
-            "metadata_path": str(metadata_path.resolve()),
-        }
+        return artifact_payload_from_folder(folder, root=folder.parent)
 
     def _scan_updated_artifacts(self, project_name: str | None, before: dict[str, float]) -> list[dict[str, Any]]:
-        root = self._artifact_root(project_name)
-        if not root.is_dir():
-            return []
-        artifacts: list[dict[str, Any]] = []
-        for metadata_path in sorted(root.glob("*/metadata.json")):
-            folder = metadata_path.parent
-            try:
-                folder_key = str(folder.resolve())
-            except OSError:
-                continue
-            current_mtime = self._artifact_folder_mtime(folder)
-            if folder_key in before and current_mtime <= before[folder_key]:
-                continue
-            payload = self._artifact_payload_from_folder(folder)
-            if payload:
-                artifacts.append(payload)
-        return artifacts
+        return scan_updated_artifacts(self._artifact_root(project_name), before)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
@@ -965,20 +978,26 @@ class HermesHarnessProvider:
         *,
         prompt: str,
         session_id: str,
+        inference: ResolvedInferenceProfile,
         model: str | None,
         project_name: str | None,
+        artifact_root: Path,
     ) -> str:
+        selected_model = model or inference.planning_model
         payload: dict[str, Any] = {
             "input": prompt,
             "session_id": session_id,
             "instructions": (
                 "You are powering Anton Cowork through Hermes Agent. "
                 "Use supplied context when useful and answer the latest user message directly."
-                + self._artifact_instructions(project_name)
+                f"\nCowork inference profile: provider={inference.planning_provider_label or inference.provider_label}, "
+                f"planning_model={inference.planning_model}, coding_model={inference.coding_model}."
+                + self._artifact_instructions(project_name, artifact_root=artifact_root)
             ),
+            "inference": inference.safe_dump(),
         }
-        if model:
-            payload["model"] = model
+        if selected_model:
+            payload["model"] = selected_model
         data = await asyncio.to_thread(self._post_json, "/v1/runs", payload, 20.0)
         run_id = data.get("run_id") or data.get("id")
         if not run_id:

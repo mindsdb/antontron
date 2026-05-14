@@ -22,6 +22,20 @@ def _provider_capabilities(provider_type: str) -> dict[str, bool]:
     return base
 
 
+def _api_key_ref_for(provider_type: str) -> str:
+    if provider_type == "anthropic":
+        return "ANTON_ANTHROPIC_API_KEY"
+    if provider_type == "minds-cloud":
+        return "ANTON_MINDS_API_KEY"
+    if provider_type in {"openai", "gemini", "openai-compatible"}:
+        return "ANTON_OPENAI_API_KEY"
+    return ""
+
+
+def _provider_label(settings_route: Any, provider_type: str) -> str:
+    return settings_route.PROVIDER_TYPE_LABELS.get(provider_type, provider_type or "Unknown")
+
+
 def resolve_inference_profile() -> ResolvedInferenceProfile:
     """Resolve the active Cowork inference profile from Settings state.
 
@@ -47,17 +61,16 @@ def resolve_inference_profile() -> ResolvedInferenceProfile:
         "coding",
         default_provider,
     )
-    provider = planning_provider or default_provider or {}
-    provider_type = str(provider.get("type") or "unknown")
-    label = settings_route.PROVIDER_TYPE_LABELS.get(provider_type, provider_type)
-    base_url = settings_route._base_url_for(provider) if provider else ""
-    api_key_ref = ""
-    if provider_type == "anthropic":
-        api_key_ref = "ANTON_ANTHROPIC_API_KEY"
-    elif provider_type == "minds-cloud":
-        api_key_ref = "ANTON_MINDS_API_KEY"
-    elif provider_type in {"openai", "gemini", "openai-compatible"}:
-        api_key_ref = "ANTON_OPENAI_API_KEY"
+    planning_provider = planning_provider or default_provider or {}
+    coding_provider = coding_provider or planning_provider
+    provider_type = str(planning_provider.get("type") or "unknown")
+    coding_provider_type = str(coding_provider.get("type") or provider_type)
+    label = _provider_label(settings_route, provider_type)
+    coding_label = _provider_label(settings_route, coding_provider_type)
+    base_url = settings_route._base_url_for(planning_provider) if planning_provider else ""
+    coding_base_url = settings_route._base_url_for(coding_provider) if coding_provider else base_url
+    api_key_ref = _api_key_ref_for(provider_type)
+    coding_api_key_ref = _api_key_ref_for(coding_provider_type)
 
     return ResolvedInferenceProfile(
         id=f"{provider_type}:{planning_model}:{coding_model}",
@@ -65,9 +78,23 @@ def resolve_inference_profile() -> ResolvedInferenceProfile:
         provider_label=label,
         base_url=base_url,
         api_key_ref=api_key_ref,
+        planning_provider_type=provider_type,
+        planning_provider_label=label,
+        planning_base_url=base_url,
+        planning_api_key_ref=api_key_ref,
+        coding_provider_type=coding_provider_type,
+        coding_provider_label=coding_label,
+        coding_base_url=coding_base_url,
+        coding_api_key_ref=coding_api_key_ref,
         planning_model=planning_model or "",
         coding_model=coding_model or "",
-        capabilities=_provider_capabilities(provider_type),
+        capabilities={
+            **_provider_capabilities(provider_type),
+            **{
+                f"coding_{key}": value
+                for key, value in _provider_capabilities(coding_provider_type).items()
+            },
+        },
     )
 
 
@@ -82,4 +109,6 @@ def validate_inference_profile(profile: ResolvedInferenceProfile) -> tuple[bool,
         return False, "No planning model is configured."
     if profile.provider_type == "openai-compatible" and not profile.base_url:
         return False, "OpenAI-compatible inference requires a base URL."
+    if profile.coding_model and profile.coding_provider_type == "openai-compatible" and not profile.coding_base_url:
+        return False, "OpenAI-compatible coding inference requires a base URL."
     return True, ""

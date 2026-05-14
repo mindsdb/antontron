@@ -23,12 +23,20 @@ class ResolvedInferenceProfile(BaseModel):
     provider_label: str = "Unknown"
     base_url: str = ""
     api_key_ref: str = ""
+    planning_provider_type: str = ""
+    planning_provider_label: str = ""
+    planning_base_url: str = ""
+    planning_api_key_ref: str = ""
+    coding_provider_type: str = ""
+    coding_provider_label: str = ""
+    coding_base_url: str = ""
+    coding_api_key_ref: str = ""
     planning_model: str = ""
     coding_model: str = ""
     capabilities: dict[str, bool] = Field(default_factory=dict)
 
     def safe_dump(self) -> dict[str, Any]:
-        return self.model_dump(exclude={"api_key_ref"})
+        return self.model_dump()
 
 
 class HarnessCapabilities(BaseModel):

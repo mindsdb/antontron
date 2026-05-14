@@ -948,10 +948,90 @@ def _reconcile_artifacts_after_turn(
 # ---------------------------------------------------------------------------
 
 
+def _anton_provider_for_cowork(provider_type: object) -> str:
+    """Map Cowork provider ids to the provider names Anton core accepts."""
+    if provider_type == "anthropic":
+        return "anthropic"
+    if provider_type == "openai":
+        return "openai"
+    return "openai-compatible"
+
+
+def _env_value(ref: object) -> str:
+    if not isinstance(ref, str) or not ref:
+        return ""
+    return os.environ.get(ref) or ""
+
+
+def _apply_inference_profile(settings: object, profile: Optional[dict[str, Any]]) -> None:
+    """Project Cowork's resolved inference profile onto Anton settings.
+
+    Cowork owns model/provider selection; Anton still expects settings-shaped
+    values internally. This keeps runtime turns from drifting back to stale
+    process/env defaults when the user hot-swaps harnesses or providers.
+    """
+    if not isinstance(profile, dict):
+        return
+    planning_provider_type = (
+        profile.get("planning_provider_type")
+        or profile.get("provider_type")
+        or ""
+    )
+    coding_provider_type = profile.get("coding_provider_type") or planning_provider_type
+    planning_model = str(profile.get("planning_model") or "").strip()
+    coding_model = str(profile.get("coding_model") or "").strip()
+
+    if planning_provider_type:
+        setattr(settings, "planning_provider", _anton_provider_for_cowork(planning_provider_type))
+    if coding_provider_type:
+        setattr(settings, "coding_provider", _anton_provider_for_cowork(coding_provider_type))
+    if planning_model:
+        setattr(settings, "planning_model", planning_model)
+    if coding_model:
+        setattr(settings, "coding_model", coding_model)
+
+    openai_profile = None
+    for prefix, provider_type in (
+        ("planning", planning_provider_type),
+        ("coding", coding_provider_type),
+    ):
+        if provider_type in {"minds-cloud", "openai", "openai-compatible", "gemini"}:
+            openai_profile = prefix
+            break
+    if openai_profile:
+        base_url = (
+            profile.get(f"{openai_profile}_base_url")
+            or profile.get("base_url")
+            or ""
+        )
+        api_key = _env_value(
+            profile.get(f"{openai_profile}_api_key_ref")
+            or profile.get("api_key_ref")
+        )
+        if base_url:
+            setattr(settings, "openai_base_url", str(base_url))
+        if api_key:
+            setattr(settings, "openai_api_key", api_key)
+
+    anthropic_prefix = None
+    if planning_provider_type == "anthropic":
+        anthropic_prefix = "planning"
+    elif coding_provider_type == "anthropic":
+        anthropic_prefix = "coding"
+    if anthropic_prefix:
+        api_key = _env_value(
+            profile.get(f"{anthropic_prefix}_api_key_ref")
+            or profile.get("api_key_ref")
+        )
+        if api_key:
+            setattr(settings, "anthropic_api_key", api_key)
+
+
 async def _build_chat_session(
     conversation_id: str,
     project: Optional[str],
     model: Optional[str],
+    inference_profile: Optional[dict[str, Any]] = None,
 ):
     """Build the same core runtime the Anton CLI uses, scoped to one project."""
     from anton.chat_session import build_runtime_context
@@ -1010,6 +1090,7 @@ async def _build_chat_session(
                     os.environ[_k] = _v.strip().strip('"').strip("'")
     settings = AntonSettings()
     settings.resolve_workspace(str(base))
+    _apply_inference_profile(settings, inference_profile)
     if model:
         # Minds Cloud sentinels (`_reason_`, `_code_`) only resolve at
         # the openai-compatible router. If the active provider is
@@ -1028,10 +1109,6 @@ async def _build_chat_session(
         else:
             settings.planning_model = model
 
-    workspace = Workspace(base)
-    workspace.initialize()
-    workspace.apply_env_to_process()
-
     anton_dir = base / ".anton"
     def _settings_path(value: object, fallback: Path) -> Path:
         raw = str(value or "").strip()
@@ -1040,10 +1117,24 @@ async def _build_chat_session(
         path = Path(raw).expanduser()
         return path if path.is_absolute() else base / path
 
-    artifacts_dir = anton_dir / "artifacts"
+    artifacts_dir = base / "artifacts"
     context_dir = _settings_path(getattr(settings, "context_dir", None), anton_dir / "context")
     episodes_dir = anton_dir / "episodes"
     project_memory_dir = anton_dir / "memory"
+    setattr(settings, "artifacts_dir", str(artifacts_dir))
+    setattr(settings, "context_dir", str(context_dir))
+
+    workspace = Workspace(base)
+    # Anton's Workspace currently defaults to `<project>/.anton/artifacts`;
+    # Cowork's artifact rail is deliberately harness-neutral at
+    # `<project>/artifacts`, so pin the live workspace to the canonical root.
+    try:
+        setattr(workspace, "_artifacts_dir", artifacts_dir)
+    except Exception:
+        logger.debug("Could not pin Anton workspace artifact root", exc_info=True)
+    workspace.initialize()
+    workspace.apply_env_to_process()
+
     for directory in (artifacts_dir, context_dir, episodes_dir, project_memory_dir):
         directory.mkdir(parents=True, exist_ok=True)
 
@@ -1222,6 +1313,23 @@ def _evict_session(conversation_id: str) -> None:
     _live.pop(conversation_id, None)
 
 
+def _inference_cache_key(profile: Optional[dict[str, Any]]) -> str:
+    if not isinstance(profile, dict):
+        return ""
+    keys = (
+        "id",
+        "provider_type",
+        "planning_provider_type",
+        "coding_provider_type",
+        "base_url",
+        "planning_base_url",
+        "coding_base_url",
+        "planning_model",
+        "coding_model",
+    )
+    return json.dumps({key: profile.get(key) for key in keys}, sort_keys=True, default=str)
+
+
 def _session_base_is_stale(entry: dict) -> bool:
     """Return True when the cached session was built against a base
     directory that no longer exists or now resolves elsewhere.
@@ -1263,13 +1371,21 @@ async def _resolve_session(
     conversation_id: str,
     project: Optional[str],
     model: Optional[str],
+    inference_profile: Optional[dict[str, Any]] = None,
 ):
+    inference_key = _inference_cache_key(inference_profile)
     entry = _live.get(conversation_id)
     if entry is not None:
         if _session_base_is_stale(entry):
             logger.info(
                 "Conversation %s session was built against a stale base path; "
                 "rebuilding so the new turn doesn't ENOENT.",
+                conversation_id,
+            )
+            _evict_session(conversation_id)
+        elif entry.get("inference_key", "") != inference_key:
+            logger.info(
+                "Conversation %s inference profile changed; rebuilding Anton session.",
                 conversation_id,
             )
             _evict_session(conversation_id)
@@ -1280,8 +1396,13 @@ async def _resolve_session(
         _evict_oldest()
 
     base = _project_base(project)
-    session = await _build_chat_session(conversation_id, project, model)
-    _live[conversation_id] = {"session": session, "project": project, "base": str(base)}
+    session = await _build_chat_session(conversation_id, project, model, inference_profile)
+    _live[conversation_id] = {
+        "session": session,
+        "project": project,
+        "base": str(base),
+        "inference_key": inference_key,
+    }
     return session
 
 
@@ -1297,6 +1418,7 @@ async def chat_stream(
     project: Optional[str] = None,
     model: Optional[str] = None,
     disabled_connections: Optional[list[dict[str, str]]] = None,
+    inference_profile: Optional[dict[str, Any]] = None,
 ) -> tuple[AsyncIterator, str]:
     """Run one turn against a conversation, returning (event_stream, conversation_id).
 
@@ -1342,7 +1464,7 @@ async def chat_stream(
     except Exception:
         logger.debug("History repair pass failed", exc_info=True)
 
-    session = await _resolve_session(cid, project, model)
+    session = await _resolve_session(cid, project, model, inference_profile)
 
     def _is_tool_use_error(exc: Exception) -> bool:
         """Detect either of Anthropic's two tool-pairing 400s:
@@ -1467,7 +1589,7 @@ async def chat_stream(
                     retried = True
                     # Re-resolve a fresh session against the repaired
                     # history and replay the same user input.
-                    session = await _resolve_session(cid, project, model)
+                    session = await _resolve_session(cid, project, model, inference_profile)
                     try:
                         async for event in _drain_one_attempt(session, user_input):
                             if _StreamTextDelta is not None and isinstance(event, _StreamTextDelta):

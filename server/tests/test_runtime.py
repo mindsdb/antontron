@@ -4,6 +4,7 @@ import os
 import sys
 import tempfile
 import unittest
+import json
 from pathlib import Path
 
 
@@ -17,7 +18,9 @@ from runtime.events import (
     cowork_event_to_legacy_sse,
     iter_sse_payloads,
     normalize_legacy_payload,
+    normalize_legacy_payloads,
 )
+from runtime.artifacts import scan_updated_artifacts, snapshot_artifacts
 from runtime.schemas import (
     CoworkMessage,
     HarnessReadiness,
@@ -46,6 +49,14 @@ class RuntimeSchemaTests(unittest.TestCase):
         profile = ResolvedInferenceProfile(
             provider_type="minds-cloud",
             provider_label="MindsHub",
+            planning_provider_type="minds-cloud",
+            planning_provider_label="MindsHub",
+            planning_base_url="https://mdb.ai/api/v1",
+            planning_api_key_ref="ANTON_MINDS_API_KEY",
+            coding_provider_type="minds-cloud",
+            coding_provider_label="MindsHub",
+            coding_base_url="https://mdb.ai/api/v1",
+            coding_api_key_ref="ANTON_MINDS_API_KEY",
             planning_model="_reason_",
             coding_model="_code_",
         )
@@ -62,6 +73,8 @@ class RuntimeSchemaTests(unittest.TestCase):
 
         self.assertTrue(ready.model_dump()["ready"])
         self.assertEqual(request.model_dump()["inference"]["planning_model"], "_reason_")
+        self.assertEqual(request.model_dump()["inference"]["coding_provider_type"], "minds-cloud")
+        self.assertEqual(request.inference.safe_dump()["planning_api_key_ref"], "ANTON_MINDS_API_KEY")
 
     def test_tool_and_artifact_progress_normalize(self) -> None:
         tool = normalize_legacy_payload(
@@ -88,6 +101,54 @@ class RuntimeSchemaTests(unittest.TestCase):
         self.assertEqual(tool.payload["tool_name"], "browser_navigate")
         self.assertEqual(artifact.type, "artifact.created")
         self.assertEqual(artifact.payload["artifact"]["title"], "Deck")
+
+    def test_typed_file_source_and_approval_events_normalize_to_progress(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "notes.md"
+            source.write_text("hello", encoding="utf-8")
+            events = normalize_legacy_payloads(
+                {
+                    "type": "response.in_progress",
+                    "phase": "tool",
+                    "progress_status": "completed",
+                    "tool_name": "read_file",
+                    "message": f"Read {source}; approval required before editing",
+                },
+                "turn_1",
+                project_root=str(root),
+            )
+
+        types = [event.type for event in events]
+        self.assertIn("file.accessed", types)
+        self.assertIn("source.used", types)
+        self.assertIn("approval.required", types)
+        file_event = next(event for event in events if event.type == "file.accessed")
+        emitted = cowork_event_to_legacy_sse(file_event)
+        payloads = iter_sse_payloads(emitted)
+        self.assertEqual(payloads[0][1]["type"], "response.in_progress")
+        self.assertEqual(payloads[0][1]["phase"], "file")
+
+    def test_artifact_scan_uses_canonical_project_root(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "artifacts"
+            root.mkdir()
+            before = snapshot_artifacts(root)
+            folder = root / "deck"
+            folder.mkdir()
+            (folder / "metadata.json").write_text(json.dumps({
+                "name": "Deck",
+                "type": "document",
+                "primary": "deck.md",
+            }), encoding="utf-8")
+            (folder / "README.md").write_text("# Deck", encoding="utf-8")
+            (folder / "deck.md").write_text("Hello", encoding="utf-8")
+
+            artifacts = scan_updated_artifacts(root, before)
+
+        self.assertEqual(len(artifacts), 1)
+        self.assertEqual(artifacts[0]["title"], "Deck")
+        self.assertTrue(artifacts[0]["path"].endswith("deck.md"))
 
 
 class CoworkConversationStoreTests(unittest.TestCase):

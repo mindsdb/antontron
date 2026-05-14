@@ -12,6 +12,7 @@ from typing import Any
 from anton_api import projects_store
 
 from .inference import profile_for_storage
+from .events import cowork_event_to_legacy_sse, iter_sse_payloads
 from .schemas import (
     CoworkConversation,
     CoworkEvent,
@@ -250,6 +251,9 @@ class CoworkConversationStore:
                 legacy_events = []
                 for event in events_by_turn.get(msg.turn_id, []):
                     legacy = event.payload.get("legacy")
+                    if not isinstance(legacy, dict):
+                        payloads = iter_sse_payloads(cowork_event_to_legacy_sse(event))
+                        legacy = payloads[0][1] if payloads else None
                     if isinstance(legacy, dict) and legacy.get("type") != "response.output_text.delta":
                         legacy_events.append(legacy)
                 if legacy_events:
