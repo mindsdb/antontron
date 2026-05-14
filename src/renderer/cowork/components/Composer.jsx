@@ -1,4 +1,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import Placeholder from '@tiptap/extension-placeholder';
+import { Markdown } from 'tiptap-markdown';
 import Ico from './Icons';
 
 function AttachmentChip({ attachment, onRemove }) {
@@ -68,7 +72,7 @@ export default function Composer({
   // of the same text still re-fill the input.
   prefill = null,
 }) {
-  const [value, setValue] = useState('');
+  const [isEmpty, setIsEmpty] = useState(true);
   const [focused, setFocused] = useState(false);
   const [openMenu, setOpenMenu] = useState(null);
   /** Attach menu opens above the composer by default; flip down when clipped (e.g. project view composer at scroll top). */
@@ -77,9 +81,10 @@ export default function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [listening, setListening] = useState(false);
-  const taRef = useRef(null);
   const fileRef = useRef(null);
   const wrapRef = useRef(null);
+  /** Latest handleSend, exposed via ref so the editor's stable keymap can call the current send fn. */
+  const handleSendRef = useRef(null);
   /** Positioning context for the attach (+) menu — tight box around the + control so the menu aligns with the activator. */
   const attachAnchorRef = useRef(null);
   const attachMenuRef = useRef(null);
@@ -121,31 +126,59 @@ export default function Composer({
   }, []);
   const recognitionRef = useRef(null);
 
+  // TipTap editor — Slack-style inline markdown. Typing `**bold**` collapses
+  // to bold; ``` opens a code block; lists/headings/blockquotes work via
+  // standard markdown input rules. On send we serialize back to markdown
+  // so the receiver sees the same wire format the textarea produced.
+  const editor = useEditor({
+    extensions: [
+      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
+      Placeholder.configure({ placeholder }),
+      Markdown.configure({
+        html: false,
+        linkify: false,
+        breaks: false,
+        transformPastedText: false,
+        transformCopiedText: true,
+      }),
+    ],
+    editorProps: {
+      attributes: { class: 'composer-textarea', role: 'textbox', 'aria-multiline': 'true' },
+      handleKeyDown(_view, event) {
+        if (event.key === 'Enter' && !event.shiftKey) {
+          event.preventDefault();
+          handleSendRef.current?.();
+          return true;
+        }
+        return false;
+      },
+    },
+    onUpdate({ editor: ed }) {
+      bumpTyping();
+      setIsEmpty(ed.isEmpty);
+    },
+    onFocus() { setFocused(true); },
+    onBlur() { setFocused(false); },
+  }, []);
+
   useEffect(() => {
-    if (!taRef.current) return;
-    taRef.current.style.height = 'auto';
-    taRef.current.style.height = Math.min(220, taRef.current.scrollHeight) + 'px';
-  }, [value]);
+    if (editor) editor.setEditable(!disabled);
+  }, [editor, disabled]);
 
   // Edit-and-resend: when ChatView bumps `prefill`, drop the supplied
-  // text into the composer and focus the textarea so the user can
-  // immediately tweak + send. Guarded on `bump > 0` so the initial
+  // markdown into the editor and put the caret at the end so the user
+  // can immediately tweak + send. Guarded on `bump > 0` so the initial
   // `{text: '', bump: 0}` doesn't clobber a draft on mount.
   useEffect(() => {
     if (!prefill || !prefill.bump) return;
-    setValue(prefill.text || '');
+    if (!editor) return;
+    editor.commands.setContent(prefill.text || '');
     setError('');
     requestAnimationFrame(() => {
-      const ta = taRef.current;
-      if (!ta) return;
-      ta.focus();
-      try {
-        const end = (prefill.text || '').length;
-        ta.setSelectionRange(end, end);
-      } catch {}
+      editor.commands.focus('end');
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefill?.bump]);
+  }, [prefill?.bump, editor]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -210,19 +243,22 @@ export default function Composer({
   }
 
   const handleSend = async () => {
-    if (disabled || !value.trim()) return;
+    if (disabled || !editor) return;
+    const markdown = editor.storage.markdown.getMarkdown().trim();
+    if (!markdown) return;
     setError('');
     setBusy(true);
     try {
-      await Promise.resolve(onSend(value.trim()));
-      setValue('');
-      if (taRef.current) taRef.current.style.height = 'auto';
+      await Promise.resolve(onSend(markdown));
+      editor.commands.clearContent();
+      setIsEmpty(true);
     } catch (err) {
       setError(err?.message || 'Could not send.');
     } finally {
       setBusy(false);
     }
   };
+  handleSendRef.current = handleSend;
 
   useEffect(() => () => {
     const rec = recognitionRef.current;
@@ -249,22 +285,9 @@ export default function Composer({
             </div>
           )}
 
-          <textarea
-            ref={taRef}
-            className="composer-textarea"
-            placeholder={placeholder}
-            disabled={disabled}
-            value={value}
-            onChange={(e) => { setValue(e.target.value); bumpTyping(); }}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onKeyDown={(e) => {
-              if (!disabled && e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                handleSend();
-              }
-            }}
-            rows={1}
+          <EditorContent
+            editor={editor}
+            className={`composer-editor${disabled ? ' is-disabled' : ''}`}
           />
 
           <div className="composer-toolbar">
@@ -429,7 +452,7 @@ export default function Composer({
             ) : (
               <button
                 className="send-btn"
-                disabled={disabled || !value.trim() || busy}
+                disabled={disabled || isEmpty || busy}
                 onClick={handleSend}
                 title="Send"
               >
