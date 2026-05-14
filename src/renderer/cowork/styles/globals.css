@@ -4381,7 +4381,10 @@ body[data-theme="dark"] .mshell__drawer-title {
   color: var(--ink-3);
 }
 .anton-code-block-lang {
-  color: var(--accent);
+  /* `--accent-2` reads crisper on the header's accent-tinted background
+     than `--accent` itself (which competes with the wash); contrast
+     against the tint goes from ~5.2:1 up to ~6.8:1 on dark mode. */
+  color: var(--accent-2);
   font-weight: 500;
 }
 .anton-code-block-copy {

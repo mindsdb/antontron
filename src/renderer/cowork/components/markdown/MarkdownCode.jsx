@@ -214,7 +214,12 @@ export function MarkdownCode(props) {
             <span className="anton-code-block-copy-icon anton-code-block-copy-icon--done" aria-hidden="true">
               {Ico.check(12)}
             </span>
-            <span className="anton-code-block-copy-label">Copy</span>
+            {/* aria-live="polite" so screen readers announce the Copy →
+                Copied → Copy transition without interrupting whatever
+                they were reading. The delegated click listener in
+                MarkdownContent mutates this span's textContent, which
+                is what the live region picks up. */}
+            <span className="anton-code-block-copy-label" aria-live="polite">Copy</span>
           </button>
         </div>
         <pre className="anton-code-block-pre">
