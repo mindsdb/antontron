@@ -1,21 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useEditor, EditorContent } from '@tiptap/react';
-import StarterKit from '@tiptap/starter-kit';
-import Placeholder from '@tiptap/extension-placeholder';
-import { TextSelection } from '@tiptap/pm/state';
-import { Markdown } from 'tiptap-markdown';
 import Ico from './Icons';
-
-// True when the selection sits anywhere inside a codeBlock node in the
-// editor's document — used to decide whether a plain Enter should send
-// the message or insert a newline inside the code block.
-function _isInCodeBlock(state) {
-  const { $from } = state.selection;
-  for (let d = $from.depth; d >= 0; d -= 1) {
-    if ($from.node(d).type.name === 'codeBlock') return true;
-  }
-  return false;
-}
 
 function AttachmentChip({ attachment, onRemove }) {
   const src = attachment.source || attachment.kind || 'file';
@@ -84,7 +68,7 @@ export default function Composer({
   // of the same text still re-fill the input.
   prefill = null,
 }) {
-  const [isEmpty, setIsEmpty] = useState(true);
+  const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   const [openMenu, setOpenMenu] = useState(null);
   /** Attach menu opens above the composer by default; flip down when clipped (e.g. project view composer at scroll top). */
@@ -93,10 +77,9 @@ export default function Composer({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [listening, setListening] = useState(false);
+  const taRef = useRef(null);
   const fileRef = useRef(null);
   const wrapRef = useRef(null);
-  /** Latest handleSend, exposed via ref so the editor's stable keymap can call the current send fn. */
-  const handleSendRef = useRef(null);
   /** Positioning context for the attach (+) menu — tight box around the + control so the menu aligns with the activator. */
   const attachAnchorRef = useRef(null);
   const attachMenuRef = useRef(null);
@@ -138,103 +121,32 @@ export default function Composer({
   }, []);
   const recognitionRef = useRef(null);
 
-  // TipTap editor — Slack-style inline markdown. Typing `**bold**` collapses
-  // to bold; ``` opens a code block; lists/headings/blockquotes work via
-  // standard markdown input rules. On send we serialize back to markdown
-  // so the receiver sees the same wire format the textarea produced.
-  const editor = useEditor({
-    extensions: [
-      StarterKit.configure({ heading: { levels: [1, 2, 3] } }),
-      Placeholder.configure({ placeholder }),
-      Markdown.configure({
-        html: false,
-        linkify: false,
-        breaks: false,
-        transformPastedText: false,
-        transformCopiedText: true,
-      }),
-    ],
-    editorProps: {
-      attributes: { class: 'composer-textarea', role: 'textbox', 'aria-multiline': 'true' },
-      handleKeyDown(view, event) {
-        if (event.key !== 'Enter') return false;
-
-        // Cmd/Ctrl+Enter always sends — works from anywhere, including
-        // inside a code block where plain Enter is reserved for newlines.
-        if (event.metaKey || event.ctrlKey) {
-          event.preventDefault();
-          handleSendRef.current?.();
-          return true;
-        }
-
-        // Shift+Enter is a hard break inside flowing text. Default handler.
-        if (event.shiftKey) return false;
-
-        // Inside a code block, plain Enter inserts a newline so the user
-        // can compose multi-line code. They send with Cmd/Ctrl+Enter.
-        if (_isInCodeBlock(view.state)) return false;
-
-        // Outside a code block: if the current paragraph is exactly ```
-        // (optionally with a language tag), convert it to a real codeBlock
-        // node and put the cursor inside. This mirrors TipTap's built-in
-        // "``` + space" input rule but on Enter, which is closer to the
-        // muscle memory most chat apps train.
-        const { state } = view;
-        const { $from } = state.selection;
-        if ($from.parent.type.name === 'paragraph') {
-          const text = $from.parent.textContent;
-          const match = /^```([a-zA-Z0-9_+-]*)$/.exec(text);
-          if (match) {
-            const codeBlockType = state.schema.nodes.codeBlock;
-            if (codeBlockType) {
-              event.preventDefault();
-              const lang = match[1] || null;
-              const start = $from.before();
-              const end = $from.after();
-              const tr = state.tr.replaceRangeWith(
-                start,
-                end,
-                codeBlockType.create(lang ? { language: lang } : null),
-              );
-              tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
-              view.dispatch(tr);
-              return true;
-            }
-          }
-        }
-
-        // Default: send.
-        event.preventDefault();
-        handleSendRef.current?.();
-        return true;
-      },
-    },
-    onUpdate({ editor: ed }) {
-      bumpTyping();
-      setIsEmpty(ed.isEmpty);
-    },
-    onFocus() { setFocused(true); },
-    onBlur() { setFocused(false); },
-  }, []);
-
+  // Auto-resize the textarea up to a max height; past that it scrolls.
   useEffect(() => {
-    if (editor) editor.setEditable(!disabled);
-  }, [editor, disabled]);
+    if (!taRef.current) return;
+    taRef.current.style.height = 'auto';
+    taRef.current.style.height = Math.min(220, taRef.current.scrollHeight) + 'px';
+  }, [value]);
 
   // Edit-and-resend: when ChatView bumps `prefill`, drop the supplied
-  // markdown into the editor and put the caret at the end so the user
-  // can immediately tweak + send. Guarded on `bump > 0` so the initial
+  // text into the composer and focus the textarea so the user can
+  // immediately tweak + send. Guarded on `bump > 0` so the initial
   // `{text: '', bump: 0}` doesn't clobber a draft on mount.
   useEffect(() => {
     if (!prefill || !prefill.bump) return;
-    if (!editor) return;
-    editor.commands.setContent(prefill.text || '');
+    setValue(prefill.text || '');
     setError('');
     requestAnimationFrame(() => {
-      editor.commands.focus('end');
+      const ta = taRef.current;
+      if (!ta) return;
+      ta.focus();
+      try {
+        const end = (prefill.text || '').length;
+        ta.setSelectionRange(end, end);
+      } catch {}
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefill?.bump, editor]);
+  }, [prefill?.bump]);
 
   useEffect(() => {
     const handler = (e) => {
@@ -299,41 +211,19 @@ export default function Composer({
   }
 
   const handleSend = async () => {
-    if (disabled || !editor) return;
-    // tiptap-markdown's hardBreak serializer emits "\<newline>" (a
-    // CommonMark backslash hard break). That's valid in the middle of a
-    // paragraph, but the moment the next line is a paragraph-interrupting
-    // block (a code fence, heading, list, etc.) the `\` becomes the last
-    // char of the paragraph and renders as a literal backslash. Convert
-    // every hard break to a paragraph break before sending — slightly
-    // larger visual gap than a `<br>`, but robust for the mixed
-    // text-then-codeblock case the chat sees most often.
-    //
-    // Second pass: tiptap-markdown's text serializer (via prosemirror-
-    // markdown's `esc`) backslash-escapes every backtick the user typed
-    // as plain text, so a fence the user typed inline (rather than via
-    // the codeBlock node) goes on the wire as `\`\`\`` and CommonMark
-    // renders three literal backticks instead of opening a fence. For
-    // chat we want the markdown rendered, not round-tripped, so drop
-    // those escapes.
-    const markdown = editor.storage.markdown.getMarkdown()
-      .replace(/\\\n/g, '\n\n')
-      .replace(/\\`/g, '`')
-      .trim();
-    if (!markdown) return;
+    if (disabled || !value.trim()) return;
     setError('');
     setBusy(true);
     try {
-      await Promise.resolve(onSend(markdown));
-      editor.commands.clearContent();
-      setIsEmpty(true);
+      await Promise.resolve(onSend(value.trim()));
+      setValue('');
+      if (taRef.current) taRef.current.style.height = 'auto';
     } catch (err) {
       setError(err?.message || 'Could not send.');
     } finally {
       setBusy(false);
     }
   };
-  handleSendRef.current = handleSend;
 
   useEffect(() => () => {
     const rec = recognitionRef.current;
@@ -360,9 +250,22 @@ export default function Composer({
             </div>
           )}
 
-          <EditorContent
-            editor={editor}
-            className={`composer-editor${disabled ? ' is-disabled' : ''}`}
+          <textarea
+            ref={taRef}
+            className="composer-textarea"
+            placeholder={placeholder}
+            disabled={disabled}
+            value={value}
+            onChange={(e) => { setValue(e.target.value); bumpTyping(); }}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
+            onKeyDown={(e) => {
+              if (!disabled && e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                handleSend();
+              }
+            }}
+            rows={1}
           />
 
           <div className="composer-toolbar">
@@ -527,7 +430,7 @@ export default function Composer({
             ) : (
               <button
                 className="send-btn"
-                disabled={disabled || isEmpty || busy}
+                disabled={disabled || !value.trim() || busy}
                 onClick={handleSend}
                 title="Send"
               >
