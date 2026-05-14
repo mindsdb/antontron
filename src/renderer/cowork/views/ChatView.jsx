@@ -410,10 +410,15 @@ function UserTurn({ content, attachments, time, onDelete, onEdit }) {
           fontFamily: FONT_BODY,
           fontSize: 14.5, lineHeight: 1.55, color: T.ink,
           boxShadow: '0 1px 0 rgba(15,16,17,0.02)',
-          whiteSpace: 'pre-wrap',
           userSelect: 'text',
         }}>
-          {content}
+          {/* User messages now flow through the same markdown pipeline as
+              assistant turns so fenced code blocks, bold/italic, lists,
+              etc. typed in the composer render properly (previously we
+              dumped raw text under white-space: pre-wrap, which left
+              backslash-escaped backticks and inline ``` showing as
+              literal characters). */}
+          <MarkdownContent text={content} complete />
         </div>
         {attachments?.map((a) => (
           <div key={a.id} style={{

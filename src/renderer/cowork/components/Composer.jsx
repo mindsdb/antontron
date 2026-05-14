@@ -2,8 +2,20 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Placeholder from '@tiptap/extension-placeholder';
+import { TextSelection } from '@tiptap/pm/state';
 import { Markdown } from 'tiptap-markdown';
 import Ico from './Icons';
+
+// True when the selection sits anywhere inside a codeBlock node in the
+// editor's document — used to decide whether a plain Enter should send
+// the message or insert a newline inside the code block.
+function _isInCodeBlock(state) {
+  const { $from } = state.selection;
+  for (let d = $from.depth; d >= 0; d -= 1) {
+    if ($from.node(d).type.name === 'codeBlock') return true;
+  }
+  return false;
+}
 
 function AttachmentChip({ attachment, onRemove }) {
   const src = attachment.source || attachment.kind || 'file';
@@ -144,13 +156,57 @@ export default function Composer({
     ],
     editorProps: {
       attributes: { class: 'composer-textarea', role: 'textbox', 'aria-multiline': 'true' },
-      handleKeyDown(_view, event) {
-        if (event.key === 'Enter' && !event.shiftKey) {
+      handleKeyDown(view, event) {
+        if (event.key !== 'Enter') return false;
+
+        // Cmd/Ctrl+Enter always sends — works from anywhere, including
+        // inside a code block where plain Enter is reserved for newlines.
+        if (event.metaKey || event.ctrlKey) {
           event.preventDefault();
           handleSendRef.current?.();
           return true;
         }
-        return false;
+
+        // Shift+Enter is a hard break inside flowing text. Default handler.
+        if (event.shiftKey) return false;
+
+        // Inside a code block, plain Enter inserts a newline so the user
+        // can compose multi-line code. They send with Cmd/Ctrl+Enter.
+        if (_isInCodeBlock(view.state)) return false;
+
+        // Outside a code block: if the current paragraph is exactly ```
+        // (optionally with a language tag), convert it to a real codeBlock
+        // node and put the cursor inside. This mirrors TipTap's built-in
+        // "``` + space" input rule but on Enter, which is closer to the
+        // muscle memory most chat apps train.
+        const { state } = view;
+        const { $from } = state.selection;
+        if ($from.parent.type.name === 'paragraph') {
+          const text = $from.parent.textContent;
+          const match = /^```([a-zA-Z0-9_+-]*)$/.exec(text);
+          if (match) {
+            const codeBlockType = state.schema.nodes.codeBlock;
+            if (codeBlockType) {
+              event.preventDefault();
+              const lang = match[1] || null;
+              const start = $from.before();
+              const end = $from.after();
+              const tr = state.tr.replaceRangeWith(
+                start,
+                end,
+                codeBlockType.create(lang ? { language: lang } : null),
+              );
+              tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1)));
+              view.dispatch(tr);
+              return true;
+            }
+          }
+        }
+
+        // Default: send.
+        event.preventDefault();
+        handleSendRef.current?.();
+        return true;
       },
     },
     onUpdate({ editor: ed }) {
