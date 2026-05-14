@@ -459,11 +459,18 @@ export default function TasksView({
   //              run's title if the schedule isn't in the registry)
   //   project:   the schedule's project (or the runs' shared project)
   //   updatedAt: max(updatedAt across all runs)
+  // Orphan-schedule fallback: any task or schedule run that traces
+  // back to a schedule without an explicit project resolves to the
+  // `general` project — matches the server's _run_schedule fallback so
+  // the UI doesn't dangle scheduled tasks under a missing project.
+  const ORPHAN_SCHEDULE_PROJECT = 'general';
   const rowMeta = (row) => {
     if (row.kind === 'task') {
+      const explicit = row.task.projectName || row.task.project || '';
+      const isScheduled = !!row.task.scheduledId;
       return {
         title:    row.task.title || '',
-        project:  row.task.projectName || row.task.project || '',
+        project:  explicit || (isScheduled ? ORPHAN_SCHEDULE_PROJECT : ''),
         updatedAt: row.task.updatedAt || row.task.subtitle,
       };
     }
@@ -473,7 +480,7 @@ export default function TasksView({
     row.runs[0]);
     return {
       title: sched?.title || latest?.title || 'Scheduled task',
-      project: sched?.project || latest?.projectName || latest?.project || '',
+      project: sched?.project || latest?.projectName || latest?.project || ORPHAN_SCHEDULE_PROJECT,
       updatedAt: latest?.updatedAt || latest?.subtitle || sched?.lastRunAt,
     };
   };
