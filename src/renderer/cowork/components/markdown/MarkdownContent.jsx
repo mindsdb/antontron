@@ -361,17 +361,33 @@ export function MarkdownContent({
       }
       // Unsafe / unsupported schemes (file:, data:, javascript:, etc.)
       // render as plain text so a stray malicious link can't navigate
-      // the renderer to a privileged location.
+      // the renderer to a privileged location. We add `title` so users
+      // who hover get a hint about why the link is inert instead of
+      // wondering why nothing happens — WCAG 3.3.1 (Error
+      // Identification) in spirit.
       if (!isSafeExternalHref(href)) {
-        return <span>{props.children}</span>;
+        return (
+          <span title="Link blocked: unsupported URL scheme">
+            {props.children}
+          </span>
+        );
       }
       // Safe external link — keep it focusable and announce-able by
       // screen readers, but intercept the click and route through the
       // host bridge so Electron opens it via the OS shell instead of
       // navigating the renderer.
+      //
+      // WCAG notes:
+      //   - 2.4.7 Focus Visible: `focus-visible:` adds a visible
+      //     ring + underline when reached via keyboard.
+      //   - 2.4.4 Link Purpose / 4.1.2 Name, Role, Value: the
+      //     visually-hidden span announces "(opens in new window)" so
+      //     SR users know the link navigates externally.
+      //   - 2.1.1 Keyboard: native <a> handles Enter (browsers fire
+      //     click on Enter for focused anchors).
       return (
         <a
-          className="text-accent underline-offset-2 hover:underline"
+          className="text-accent underline-offset-2 hover:underline focus-visible:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent rounded-sm"
           href={href}
           target="_blank"
           rel="noopener noreferrer"
@@ -381,6 +397,7 @@ export function MarkdownContent({
           }}
         >
           {props.children}
+          <span className="sr-only"> (opens in new window)</span>
         </a>
       );
     },

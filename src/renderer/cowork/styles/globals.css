@@ -594,6 +594,19 @@ a[href],
   border-radius: 3px;
 }
 .composer-textarea-overlay::-webkit-scrollbar { display: none; }
+
+/* WCAG 2.3.3 Animation from Interactions — users who prefer reduced
+   motion shouldn't see the Copy button hover/focus colour ease or the
+   composer focus-ring transition. Static state changes still apply;
+   only the transition timing is removed. */
+@media (prefers-reduced-motion: reduce) {
+  .anton-code-block-copy,
+  .composer-wrap,
+  .composer-textarea-overlay {
+    transition: none !important;
+  }
+}
+
 body[data-theme="light"] .overlay-fence-marker {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
@@ -4633,6 +4646,17 @@ body[data-theme="light"] .anton-inline-code {
 }
 .anton-code-block-copy:hover {
   background: color-mix(in srgb, var(--ink) 8%, transparent);
+  color: var(--ink);
+}
+/* WCAG 2.4.7 Focus Visible / 1.4.11 Non-text Contrast — keyboard users
+   need a visible focus indicator on the icon-only Copy button.
+   color-mix on --accent stays theme-adaptive (cyan on dark, deeper on
+   light) and clears the 3:1 non-text contrast threshold against the
+   neighbouring surface tokens. */
+.anton-code-block-copy:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
   color: var(--ink);
 }
 .anton-code-block-copy.is-copied {
