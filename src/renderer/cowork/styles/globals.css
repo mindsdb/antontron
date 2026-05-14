@@ -524,6 +524,86 @@ a[href],
   user-select: text;
 }
 .composer-textarea::placeholder { color: var(--frost-500); }
+
+/* Source-mode highlight overlay.
+   The textarea is the real input — the overlay sits behind it and
+   mirrors its content with the same font, padding, line-height and
+   wrapping rules so each char lines up pixel-for-pixel. The textarea
+   is z-stacked above with a transparent background so the overlay
+   shows through. We DO NOT change font-weight/style or add per-span
+   padding/margin — any of that would change wrapping and the overlay
+   would drift out of alignment. */
+.composer-input-shell {
+  position: relative;
+  width: 100%;
+}
+.composer-textarea-overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* Match textarea defaults exactly. Surface-specific overrides
+     (chat-floating-composer) re-declare the bits that differ. */
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  padding: 16px 18px 4px;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  /* `auto` (not hidden) so programmatic scrollTop sync works — user
+     interaction is already blocked by pointer-events:none. Hide the
+     scrollbar visually so the overlay doesn't show one alongside the
+     textarea's. */
+  overflow: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  color: transparent;
+  background: transparent;
+  border: 0;
+  user-select: none;
+  z-index: 0;
+  /* Cap text rendering twiddles — we want the overlay and textarea
+     to lay text out identically. */
+  -webkit-font-smoothing: inherit;
+  text-rendering: inherit;
+  tab-size: inherit;
+}
+.composer-input-shell .composer-textarea {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+/* Fence-marker line — full-width tint of the ``` line itself,
+   accent-coloured text so the marker reads as syntax-significant
+   even while the textarea text sits on top. */
+.overlay-fence-marker {
+  color: color-mix(in srgb, var(--accent) 75%, var(--ink));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+/* Fence body — subtle wash that runs from end of opener to start of
+   closer, no border (would shift wrapping). */
+.overlay-fence-body {
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+/* Inline `code` — narrow tinted run on a single line. No padding,
+   no border — they'd shift char position. The text below stays
+   readable through the wash because the textarea sits above. */
+.overlay-inline-code {
+  background: color-mix(in srgb, rgb(232, 132, 110) 16%, transparent);
+  color: color-mix(in srgb, rgb(232, 132, 110) 70%, var(--ink));
+  border-radius: 3px;
+}
+.composer-textarea-overlay::-webkit-scrollbar { display: none; }
+body[data-theme="light"] .overlay-fence-marker {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+body[data-theme="light"] .overlay-fence-body {
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+body[data-theme="light"] .overlay-inline-code {
+  background: color-mix(in srgb, rgb(168, 76, 60) 16%, transparent);
+  color: color-mix(in srgb, rgb(168, 76, 60) 70%, var(--ink));
+}
 .composer-toolbar {
   display: flex; align-items: center; gap: 6px;
   padding: 8px 10px 10px;
@@ -3628,6 +3708,14 @@ body[data-theme="dark"] .chat-shell .chat-composer-dock > div {
      don't stack 12px + 10px and leave a tall band under the input line. */
   padding: 2px 8px 6px;
   min-height: 22px;
+}
+/* Mirror the chat-floating textarea's metrics on the overlay so the
+   highlighted spans wrap and align identically. */
+.chat-floating-composer .composer-textarea-overlay {
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.45;
+  padding: 2px 8px 6px;
 }
 .chat-floating-composer .composer-toolbar {
   /* Horizontal inset comes from .composer-wrap; no bottom padding — wrap's

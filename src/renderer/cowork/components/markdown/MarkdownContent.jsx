@@ -19,6 +19,35 @@ import {
   TableHeader,
   TableBody,
 } from './MarkdownTable';
+import { host } from '../../../platform/host';
+
+// Allowlist of URL schemes our `MarkdownLink` will open. We deliberately
+// do NOT include javascript:, file:, data:, or anything that could
+// navigate the Electron renderer to a privileged location. mailto: is
+// allowed because `host.openExternal` routes it through the OS handler.
+const _SAFE_HREF_SCHEMES = new Set(['http:', 'https:', 'mailto:']);
+
+function isSafeExternalHref(href) {
+  if (!href || typeof href !== 'string') return false;
+  let url;
+  try {
+    url = new URL(href, 'http://_local');
+  } catch {
+    return false;
+  }
+  return _SAFE_HREF_SCHEMES.has(url.protocol);
+}
+
+function openMarkdownHref(href) {
+  if (!isSafeExternalHref(href)) return;
+  // Prefer the host bridge (Electron routes through shell.openExternal;
+  // web falls back to window.open with noopener,noreferrer).
+  if (host && typeof host.openExternal === 'function') {
+    Promise.resolve(host.openExternal(href)).catch(() => {});
+    return;
+  }
+  try { window.open(href, '_blank', 'noopener,noreferrer'); } catch {}
+}
 
 // Allow the extra attributes our chart blocks need on <code>, and
 // permit the `engram:` URL scheme on links so the engram-comment
@@ -198,11 +227,33 @@ const _SIZES = {
   },
 };
 
-export function MarkdownContent({ text, id, complete = true, conversationId = null, dense = false }) {
+export function MarkdownContent({
+  text,
+  id,
+  complete = true,
+  conversationId = null,
+  dense = false,
+  // Variant + capability flags — assistant turns default to the full
+  // feature set (forms, charts, engram chips). User turns pass
+  // `variant="user"` with forms/charts off so a user typing
+  // ```data-vault-form or ```chart in their composer doesn't
+  // accidentally pop the form panel / a chart in the chat column.
+  variant = 'assistant',
+  enableForms = true,
+  enableCharts = true,
+}) {
   const rootRef = useRef(null);
+  // Only run the form-fence normalization pass when forms are enabled.
+  // User messages bypass it so a typed ```data-vault-form block stays
+  // a normal fenced code block instead of getting auto-tidied for the
+  // form renderer.
   const normalized = useMemo(
-    () => _renderEngramComments(_normalizeFormFences(_mergeInlineCodeLines(text))),
-    [text],
+    () => {
+      const merged = _mergeInlineCodeLines(text);
+      const formNormalized = enableForms ? _normalizeFormFences(merged) : merged;
+      return _renderEngramComments(formNormalized);
+    },
+    [text, enableForms],
   );
   const sz = dense ? _SIZES.dense : _SIZES.default;
 
@@ -264,7 +315,17 @@ export function MarkdownContent({ text, id, complete = true, conversationId = nu
   }, []);
 
   const components = useMemo(() => ({
-    code: (props) => <MarkdownCode id={id} complete={complete} conversationId={conversationId} {...props} />,
+    code: (props) => (
+      <MarkdownCode
+        id={id}
+        complete={complete}
+        conversationId={conversationId}
+        variant={variant}
+        enableForms={enableForms}
+        enableCharts={enableCharts}
+        {...props}
+      />
+    ),
     table: (props) => <MarkdownTable {...props} />,
     thead: TableHeader,
     tbody: TableBody,
@@ -298,13 +359,29 @@ export function MarkdownContent({ text, id, complete = true, conversationId = nu
           </span>
         );
       }
+      // Unsafe / unsupported schemes (file:, data:, javascript:, etc.)
+      // render as plain text so a stray malicious link can't navigate
+      // the renderer to a privileged location.
+      if (!isSafeExternalHref(href)) {
+        return <span>{props.children}</span>;
+      }
+      // Safe external link — keep it focusable and announce-able by
+      // screen readers, but intercept the click and route through the
+      // host bridge so Electron opens it via the OS shell instead of
+      // navigating the renderer.
       return (
         <a
           className="text-accent underline-offset-2 hover:underline"
+          href={href}
           target="_blank"
-          rel="noreferrer"
-          {...props}
-        />
+          rel="noopener noreferrer"
+          onClick={(e) => {
+            e.preventDefault();
+            openMarkdownHref(href);
+          }}
+        >
+          {props.children}
+        </a>
       );
     },
     blockquote: (props) => <blockquote className={sz.blockquote} {...props} />,
@@ -325,7 +402,7 @@ export function MarkdownContent({ text, id, complete = true, conversationId = nu
       return <pre className="my-2 overflow-x-auto" {...props} />;
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [id, complete, conversationId, dense]);
+  }), [id, complete, conversationId, dense, variant, enableForms, enableCharts]);
 
   return (
     <div ref={rootRef} className={sz.root}>

@@ -21,6 +21,13 @@ export function MarkdownCode(props) {
   const id = props?.id;
   const complete = props?.complete !== false; // assume complete unless told otherwise
   const conversationId = props?.conversationId || null;
+  // Capability flags. Assistant turns leave these defaulted to true so
+  // existing behavior (forms, charts, parse-error pointers) is
+  // unchanged. User turns pass `false` so a typed ```data-vault-form
+  // / ```chart / ```chartjs fence falls through to the ordinary code
+  // block branch and never triggers a side-effect renderer.
+  const enableForms = props?.enableForms !== false;
+  const enableCharts = props?.enableCharts !== false;
 
   // ── ALL HOOKS FIRST ───────────────────────────────────────────────
   // Critical: every useMemo/useEffect must run on every render of
@@ -37,7 +44,7 @@ export function MarkdownCode(props) {
   // (partial update) parse the same way — just a JSON object. The
   // difference is in how the form store consumes them: setForm
   // replaces, patchForm merges.
-  const isFormLang = lang === 'data-vault-form' || lang === 'data-vault-form-patch';
+  const isFormLang = enableForms && (lang === 'data-vault-form' || lang === 'data-vault-form-patch');
   const parseAttempt = useMemo(() => {
     if (!isFormLang) return { spec: null, error: null };
     if (!complete) return { spec: null, error: null };
@@ -47,23 +54,26 @@ export function MarkdownCode(props) {
   const parseError = parseAttempt.error;
 
   const chartIntent = useMemo(() => {
-    if (lang === 'chart' && text) return parseChartIntent(text);
+    if (enableCharts && lang === 'chart' && text) return parseChartIntent(text);
     return null;
-  }, [lang, text]);
+  }, [enableCharts, lang, text]);
 
   // Highlighted output for ordinary fenced blocks. We skip the special
   // langs (chartjs/chart/data-vault-form*) so we don't pay the hljs
   // cost on blocks that have their own renderer. Computed unconditionally
   // (i.e. always returning `null` for the special branches) keeps the
   // hook count stable across renders, in line with the comment above
-  // about rules-of-hooks discipline.
+  // about rules-of-hooks discipline. When charts/forms are disabled the
+  // special langs flow through here so they render as plain highlighted
+  // code blocks (and `lang` is preserved as a header label).
   const highlighted = useMemo(() => {
-    const isSpecial = isFormLang || lang === 'chart' || lang === 'chartjs';
+    const isChartLang = lang === 'chart' || lang === 'chartjs';
+    const isSpecial = isFormLang || (enableCharts && isChartLang);
     if (!lang || isSpecial) return null;
     // Strip a single trailing newline left by remark — keeps Copy output
     // clean and avoids a phantom blank line at the bottom of the block.
     return highlightCode(text.replace(/\n$/, ''), lang);
-  }, [lang, isFormLang, text]);
+  }, [lang, isFormLang, enableCharts, text]);
 
   useEffect(() => {
     if (!isFormLang || !conversationId || !complete) return;
@@ -177,7 +187,9 @@ export function MarkdownCode(props) {
 
   // Intent format — needs a server endpoint to compile JSON into a real
   // Chart.js config. We don't have that yet, so surface a clear message.
-  if (lang === 'chart') {
+  // Gated on `enableCharts`; when disabled (user turns), fall through to
+  // the ordinary highlighted code block below.
+  if (enableCharts && lang === 'chart') {
     if (!complete) return <ChartLoadingState />;
     if (!chartIntent || chartIntent.error) {
       return <ChartErrorState error={chartIntent?.error || 'Invalid chart specification'} />;
@@ -188,7 +200,7 @@ export function MarkdownCode(props) {
   }
 
   // Legacy / direct chartjs format — full Chart.js config in the block.
-  if (lang === 'chartjs') {
+  if (enableCharts && lang === 'chartjs') {
     return complete ? <MessageChart id={id || 'chart'} text={text} /> : <ChartLoadingState />;
   }
 

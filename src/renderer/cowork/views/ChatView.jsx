@@ -368,8 +368,16 @@ function UserTurn({ content, attachments, time, onDelete, onEdit }) {
         <div className="user-turn-bubble">
           {/* User messages flow through the same markdown pipeline as
               assistant turns so fenced code blocks, bold/italic, lists,
-              etc. typed in the composer render properly. */}
-          <MarkdownContent text={content} />
+              etc. typed in the composer render properly. Forms and
+              charts are gated off so a user typing a special fence in
+              the composer can't trigger the side-effect renderers
+              reserved for assistant output. */}
+          <MarkdownContent
+            text={content}
+            variant="user"
+            enableForms={false}
+            enableCharts={false}
+          />
         </div>
         {attachments?.map((a) => (
           <div key={a.id} className="user-turn-attachment">
