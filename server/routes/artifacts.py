@@ -417,6 +417,47 @@ def _candidate_relative_artifacts(raw_path: str) -> list[Path]:
     return list(matches.values())
 
 
+def _project_for_artifact(artifact: Path) -> tuple[str, Path, Path] | None:
+    """Find the registered project that owns `artifact`.
+
+    Returns `(project_name, project_dir, rel_under_artifacts)` when the
+    file resolves under `<project_dir>/.anton/artifacts/` for a project
+    in `projects_store.list_projects()`. Returns None if the artifact
+    is orphaned (e.g. ad-hoc, or under a project that's no longer
+    registered).
+
+    The third tuple element is the artifact's path RELATIVE to the
+    project's `.anton/artifacts/` dir — that's the substring the
+    `/serve/{project}/{rel_path}` endpoint uses to locate the file.
+    Typically `<slug>/<filename>`.
+    """
+    try:
+        resolved = artifact.resolve(strict=False)
+    except OSError:
+        return None
+    name_by_path: dict[str, str] = {}
+    try:
+        for project in projects_store.list_projects():
+            try:
+                p_path = Path(project["path"]).resolve(strict=False)
+            except (OSError, KeyError, ValueError):
+                continue
+            name_by_path[str(p_path)] = project.get("name") or ""
+    except Exception:
+        return None
+    for project_dir in _registered_project_dirs():
+        artifacts_root = (project_dir / ".anton" / "artifacts").resolve(strict=False)
+        try:
+            rel = resolved.relative_to(artifacts_root)
+        except ValueError:
+            continue
+        name = name_by_path.get(str(project_dir.resolve(strict=False))) or ""
+        if not name:
+            continue
+        return name, project_dir, rel
+    return None
+
+
 def _resolve_artifact_path(raw_path: str) -> Path:
     """Turn an artifact request path into an absolute path on disk.
 
@@ -519,8 +560,6 @@ async def preview_mount(req: PreviewMountRequest):
     if artifact.suffix.lower() != ".html":
         raise HTTPException(status_code=415, detail="Preview mount is only available for HTML artifacts")
     parent = artifact.parent.resolve()
-    token = hashlib.sha256(str(parent).encode("utf-8")).hexdigest()[:16]
-    _PREVIEW_MOUNTS[token] = parent
 
     published_url = ""
     published_path = parent / ".published.json"
@@ -533,12 +572,113 @@ async def preview_mount(req: PreviewMountRequest):
         except Exception:
             published_url = ""
 
+    # Prefer the project-rooted stable URL when the artifact belongs to
+    # a registered project. The URL hierarchy mirrors the on-disk
+    # `<slug>/index.html → chart.js` layout so relative refs resolve
+    # naturally, and `/serve` sets no-cache + ETag so re-runs aren't
+    # masked by stale browser cache (the token-mount route caches for
+    # 5 min, which silently hid agent updates). Token-mount stays as
+    # a fallback for orphan artifacts (deleted-project rescue cases).
+    proj_match = _project_for_artifact(artifact)
+    if proj_match is not None:
+        project_name, _project_dir, rel = proj_match
+        # `entry` is just the leaf filename; the iframe needs the full
+        # `<slug>/<file>` path so relative siblings line up.
+        from urllib.parse import quote as _q
+        rel_url = (
+            "/artifacts/serve/"
+            f"{_q(project_name, safe='')}/{_q(str(rel), safe='/')}"
+        )
+        return {
+            # Token + entry retained for backwards-compat with any
+            # caller that reads them directly; they're inert in the
+            # /serve flow.
+            "token": "",
+            "entry": artifact.name,
+            "relUrl": rel_url,
+            "publishedUrl": published_url,
+        }
+
+    # Orphan fallback — register a token mount so the iframe can still
+    # load the artifact. Same path-relative semantics as before.
+    token = hashlib.sha256(str(parent).encode("utf-8")).hexdigest()[:16]
+    _PREVIEW_MOUNTS[token] = parent
     return {
         "token": token,
         "entry": artifact.name,
         "relUrl": f"/artifacts/preview-asset/{token}/{artifact.name}",
         "publishedUrl": published_url,
     }
+
+
+def _no_cache_headers(target: Path) -> dict[str, str]:
+    """Headers that make the browser revalidate on every request.
+
+    The server still benefits from ETag/Last-Modified: FastAPI's
+    `FileResponse` handles `If-None-Match` / `If-Modified-Since`
+    automatically and returns 304 when the file hasn't changed. The
+    `no-cache` directive (despite the name) doesn't forbid caching —
+    it forbids *serving from cache without revalidation*, which is
+    exactly what we want when Anton rewrites an artifact in place.
+    """
+    try:
+        st = target.stat()
+        # Strong validator from mtime_ns + size. Stable across reads,
+        # changes the moment the file is touched in place.
+        etag = f'"{st.st_mtime_ns:x}-{st.st_size:x}"'
+    except OSError:
+        etag = ""
+    headers = {
+        "Cache-Control": "no-cache, must-revalidate",
+    }
+    if etag:
+        headers["ETag"] = etag
+    return headers
+
+
+@router.get("/serve/{project_name}/{rel_path:path}")
+async def serve_artifact(project_name: str, rel_path: str):
+    """Stable, project-rooted artifact serving.
+
+    URL hierarchy mirrors `<project>/.anton/artifacts/<rel_path>`, so a
+    multi-file HTML artifact's relative `<script>` / `<link>` refs
+    resolve naturally against this prefix. Path-traversal guarded:
+    the resolved target must live under the project's artifacts dir
+    AND that dir must be inside the registered projects root.
+
+    Cache headers force revalidation on every request so Anton's
+    in-place rewrites are immediately visible — but the response
+    still goes through ETag/Last-Modified, so unchanged files come
+    back as 304 (no payload).
+    """
+    if "\x00" in project_name or "\x00" in rel_path:
+        raise HTTPException(status_code=400, detail="Invalid path")
+    try:
+        _name, project_dir = projects_store.resolve_project(project_name)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Unknown project") from None
+    # Re-gate the resolved project_dir through the registered allowlist
+    # so a hand-crafted projects_store entry pointing outside the root
+    # can't be used to serve arbitrary files.
+    registered = {p.resolve(strict=False) for p in _registered_project_dirs()}
+    project_dir_resolved = project_dir.resolve(strict=False)
+    if project_dir_resolved not in registered:
+        raise HTTPException(status_code=404, detail="Unknown project")
+    artifacts_root = (project_dir_resolved / ".anton" / "artifacts").resolve(strict=False)
+    if not artifacts_root.is_dir():
+        raise HTTPException(status_code=404, detail="Project has no artifacts")
+    try:
+        target = (artifacts_root / rel_path).resolve(strict=False)
+    except (OSError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid asset path") from None
+    try:
+        target.relative_to(artifacts_root)
+    except ValueError:
+        raise HTTPException(status_code=403, detail="Asset is outside the artifacts directory")
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Artifact file not found")
+    media_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
+    return FileResponse(target, media_type=media_type, headers=_no_cache_headers(target))
 
 
 @router.get("/preview-asset/{token}/{rel_path:path}")
@@ -557,9 +697,10 @@ async def preview_asset(token: str, rel_path: str):
     if not target.is_file():
         raise HTTPException(status_code=404, detail="Asset not found")
     media_type = mimetypes.guess_type(str(target))[0] or "application/octet-stream"
-    return FileResponse(target, media_type=media_type, headers={
-        "Cache-Control": "private, max-age=300",
-    })
+    # Same no-cache headers as /serve — token mounts are rare (orphan
+    # fallback) but should follow the same freshness contract so users
+    # don't get a stale preview after Anton rewrites the file.
+    return FileResponse(target, media_type=media_type, headers=_no_cache_headers(target))
 
 
 class ArtifactAction(BaseModel):
