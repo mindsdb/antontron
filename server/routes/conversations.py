@@ -19,9 +19,102 @@ from fastapi import APIRouter, HTTPException
 from anton_api import projects_store
 from anton_api.models import ConversationPatch
 from harnesses.registry import get_active_harness
+from .cowork_state import load_state
 
 
 router = APIRouter(tags=["conversations"])
+
+
+def _schedule_runs_index() -> dict[str, str]:
+    """Flat map: conversation_id → schedule_id, built from
+    state["schedule_runs"]. Used to backfill `scheduled_id` on each
+    listed conversation so the sidebar can group scheduled tasks
+    even before /v1/schedules has been refetched."""
+    index: dict[str, str] = {}
+    try:
+        state = load_state() or {}
+    except Exception:
+        return index
+    runs = state.get("schedule_runs")
+    if not isinstance(runs, dict):
+        return index
+    for schedule_id, bucket in runs.items():
+        if not isinstance(bucket, list):
+            continue
+        for record in bucket:
+            if not isinstance(record, dict):
+                continue
+            # Run records use camelCase (`sessionId`) per the writer in
+            # routes/schedules.py:_append_run_record. Accept snake_case
+            # too so a future writer change can't silently break this.
+            sid = record.get("sessionId") or record.get("session_id")
+            if sid:
+                index[sid] = schedule_id
+    return index
+
+
+def _schedule_prompt_index() -> dict[tuple[str, str], str]:
+    """Fallback (title, project) → schedule_id map. Catches the case
+    where a schedule run errored before chat_stream returned a real
+    conversation_id — the schedule recorded a synthetic `sched_xxxxx`
+    in `schedule_runs`, but a real conversation file still exists and
+    its title matches the schedule's prompt. Without this fallback the
+    UI shows those errored runs as ungrouped duplicates."""
+    out: dict[tuple[str, str], str] = {}
+    try:
+        state = load_state() or {}
+    except Exception:
+        return out
+    schedules = state.get("schedules")
+    if not isinstance(schedules, list):
+        return out
+    for s in schedules:
+        if not isinstance(s, dict):
+            continue
+        sid = s.get("id")
+        prompt = (s.get("prompt") or "").strip()
+        if not sid or not prompt:
+            continue
+        project = (s.get("project") or "").strip() or "general"
+        # Anton stores conversation titles from the first 60 chars of
+        # the user message, so match on `startswith` of either side to
+        # be robust to truncation in either direction.
+        out[(prompt[:60], project)] = sid
+        out[(prompt, project)] = sid
+    return out
+
+
+def _annotate_with_schedule_id(conversations: list[dict]) -> list[dict]:
+    """Tag each conversation entry with `scheduled_id` if it's a known
+    schedule run (by registered sessionId, or by matching the
+    schedule's prompt and project). Idempotent — preserves any
+    existing field."""
+    if not conversations:
+        return conversations
+    by_id = _schedule_runs_index()
+    by_prompt = _schedule_prompt_index() if conversations else {}
+    if not by_id and not by_prompt:
+        return conversations
+    for conv in conversations:
+        if not isinstance(conv, dict) or conv.get("scheduled_id"):
+            continue
+        cid = conv.get("id")
+        # Primary: the sessionId that the schedule writer recorded.
+        if cid and cid in by_id:
+            conv["scheduled_id"] = by_id[cid]
+            continue
+        # Fallback: title + project match against a known schedule's
+        # prompt. Covers orphan conversations whose run record holds a
+        # synthetic id (errored runs) but whose real conversation file
+        # still exists on disk.
+        title = (conv.get("title") or "").strip()
+        project = (conv.get("project") or "").strip() or "general"
+        if not title:
+            continue
+        match = by_prompt.get((title, project)) or by_prompt.get((title[:60], project))
+        if match:
+            conv["scheduled_id"] = match
+    return conversations
 
 
 _ATTACHMENT_MARKER = "\n\nAttached context supplied by the user:"
@@ -169,8 +262,8 @@ async def list_conversations(limit: int = 200, project: str | None = None):
     return {
         "project": target,
         "harness": harness.id,
-        "conversations": harness.list_conversations(
-            limit=limit, project=target
+        "conversations": _annotate_with_schedule_id(
+            harness.list_conversations(limit=limit, project=target)
         ),
     }
 
@@ -181,8 +274,8 @@ async def list_project_conversations(name: str, limit: int = 200):
     return {
         "project": name,
         "harness": harness.id,
-        "conversations": harness.list_conversations(
-            limit=limit, project=name
+        "conversations": _annotate_with_schedule_id(
+            harness.list_conversations(limit=limit, project=name)
         ),
     }
 

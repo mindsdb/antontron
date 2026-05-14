@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import Ico from '../components/Icons';
 import { validateSettings, revealSettingKey, testProviders } from '../api';
 
@@ -180,7 +180,11 @@ function Section({ title, subtitle, children }) {
       alignItems: 'flex-start',
     }}>
       <div>
-        <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{title}</div>
+        <h4 style={{
+          margin: 0, padding: 0,
+          fontSize: 14, fontWeight: 600, color: 'var(--text-strong)',
+          fontFamily: 'inherit', lineHeight: 1.3,
+        }}>{title}</h4>
         {subtitle && <div style={{ fontSize: 12.5, color: 'var(--text-muted)', marginTop: 4 }}>{subtitle}</div>}
       </div>
       <div>{children}</div>
@@ -192,6 +196,8 @@ function Section({ title, subtitle, children }) {
 // toggle. Uses the theme tokens so it reads well in light + dark.
 function CollapsibleGroup({ title, defaultOpen = true, children }) {
   const [open, setOpen] = useState(defaultOpen);
+  const panelId = useId();
+  const headingId = useId();
   return (
     <div style={{
       border: '1px solid var(--border-subtle)',
@@ -202,52 +208,78 @@ function CollapsibleGroup({ title, defaultOpen = true, children }) {
       marginBottom: 14,
       overflow: 'hidden',
     }}>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        style={{
-          width: '100%', display: 'flex', alignItems: 'center', gap: 8,
-          padding: '14px 18px', background: 'transparent', border: 0,
-          fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600,
-          letterSpacing: '0.04em', textTransform: 'uppercase',
-          color: 'var(--text-muted)', cursor: 'pointer', textAlign: 'left',
-        }}
-      >
-        <span style={{
-          display: 'inline-flex', width: 14, height: 14,
-          color: 'var(--text-muted)',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
-        }}>{Ico.chevronRight ? Ico.chevronRight(12) : '›'}</span>
-        <span style={{ flex: 1 }}>{title}</span>
-      </button>
+      {/* W3C "Accordion" pattern: heading wraps the toggle button so the
+          group surfaces in SR heading navigation, while the button still
+          owns interaction. h3 margin reset to keep the visual layout. */}
+      <h3 id={headingId} style={{ margin: 0, padding: 0, fontWeight: 'inherit', fontSize: 'inherit' }}>
+        <button
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-controls={panelId}
+          style={{
+            width: '100%', display: 'flex', alignItems: 'center', gap: 8,
+            padding: '14px 18px', background: 'transparent', border: 0,
+            fontFamily: 'var(--font-sans)', fontSize: 12.5, fontWeight: 600,
+            letterSpacing: '0.04em', textTransform: 'uppercase',
+            color: 'var(--text-muted)', cursor: 'pointer', textAlign: 'left',
+          }}
+        >
+          <span aria-hidden="true" style={{
+            display: 'inline-flex', width: 14, height: 14,
+            color: 'var(--text-muted)',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 180ms cubic-bezier(0.32, 0.72, 0, 1)',
+          }}>{Ico.chevronRight ? Ico.chevronRight(12) : '›'}</span>
+          <span style={{ flex: 1 }}>{title}</span>
+        </button>
+      </h3>
       {open && (
-        <div style={{ padding: '0 18px 8px' }}>{children}</div>
+        <div id={panelId} role="region" aria-labelledby={headingId} style={{ padding: '0 18px 8px' }}>{children}</div>
       )}
     </div>
   );
 }
 
-function Segmented({ value, onChange, options, style }) {
+function Segmented({ value, onChange, options, style, groupLabel }) {
+  // Use radiogroup semantics when a label is supplied — AT announces the
+  // group and reads each option's checked state. Without a label, fall
+  // back to a plain group so AT users at least hear the boundary.
+  const groupRole = groupLabel ? 'radiogroup' : 'group';
   return (
-    <div className="segmented" style={style}>
-      {options.map((o) => (
-        <button
-          key={o.value}
-          className={value === o.value ? 'active' : ''}
-          onClick={() => onChange(o.value)}
-        >
-          {o.label}
-        </button>
-      ))}
+    <div
+      className="segmented"
+      role={groupRole}
+      aria-label={groupLabel}
+      style={style}
+    >
+      {options.map((o) => {
+        const selected = value === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={selected}
+            className={selected ? 'active' : ''}
+            onClick={() => onChange(o.value)}
+            title={o.title}
+            aria-label={o.ariaLabel || o.title}
+          >
+            {o.label}
+          </button>
+        );
+      })}
     </div>
   );
 }
 
-function Toggle({ value, onChange }) {
+function Toggle({ value, onChange, title, ariaLabel }) {
   return (
     <button
       role="switch"
       aria-checked={value}
+      aria-label={ariaLabel}
+      title={title}
       className={`toggle${value ? ' on' : ''}`}
       onClick={() => onChange(!value)}
     >
@@ -256,13 +288,15 @@ function Toggle({ value, onChange }) {
   );
 }
 
-function TextInput({ value, onChange, placeholder }) {
+function TextInput({ value, onChange, placeholder, title, ariaLabel }) {
   return (
     <input
       className="field-input"
       value={value ?? ''}
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
+      title={title}
+      aria-label={ariaLabel}
     />
   );
 }
@@ -271,7 +305,7 @@ function TextInput({ value, onChange, placeholder }) {
 // field that empties the value — pairs with the trash icon on the API
 // key fields so the whole Credentials card uses one clear gesture.
 // Save settings still has to be clicked to commit the deletion to env.
-function ClearableTextInput({ value, onChange, placeholder }) {
+function ClearableTextInput({ value, onChange, placeholder, ariaLabel }) {
   const v = value ?? '';
   const hasValue = v.length > 0;
   return (
@@ -281,6 +315,7 @@ function ClearableTextInput({ value, onChange, placeholder }) {
         value={v}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
+        aria-label={ariaLabel}
         style={hasValue ? { paddingRight: 36 } : undefined}
       />
       {hasValue && (
@@ -326,6 +361,13 @@ function ApiKeyInput({ value, onChange, placeholder, disabled, revealName }) {
   // After a successful reveal we show the fetched value.
   const v = revealedValue ?? stored;
   const hasValue = v.length > 0;
+  // Copy is gated on what the input is *displaying* — not the prop. After
+  // a reveal, `v` is the real key (held locally; we never push it up to
+  // the parent) so `stored` still equals "***" but the user can copy the
+  // resolved value. Using `v === '***'` here keeps the "reveal first"
+  // hint while the field still shows the masked sentinel.
+  const isDisplayingSentinel = v === '***';
+  const canCopy = hasValue && !isDisplayingSentinel;
 
   const onCopy = async () => {
     if (!hasValue) return;
@@ -383,37 +425,70 @@ function ApiKeyInput({ value, onChange, placeholder, disabled, revealName }) {
   };
   const btnStyleActive = { ...btnStyle, color: 'var(--text-strong)', background: 'var(--surface-2, rgba(255,255,255,0.04))' };
 
+  // When the field is holding the server sentinel and the user hasn't
+  // toggled reveal, render the input as empty + a long bullet placeholder.
+  // The literal "***" rendered as type=password is only 3 dots wide, which
+  // looks like an almost-empty field rather than "a stored key is here."
+  // Typing replaces the (empty) value cleanly — no asterisk contamination.
+  const showSentinelAsMask = !show && v === '***';
+
   return (
     <div style={{ position: 'relative' }}>
       <input
         className="field-input mono"
         type={show ? 'text' : 'password'}
-        value={v}
+        value={showSentinelAsMask ? '' : v}
         onChange={(e) => onInput(e.target.value)}
-        placeholder={placeholder || '••••••••••••••••••'}
+        placeholder={showSentinelAsMask ? '••••••••••••••••' : (placeholder || '••••••••••••••••••')}
         disabled={disabled}
         autoComplete="off"
         spellCheck={false}
+        aria-label={revealName ? `${revealName} API key` : 'API key'}
         style={{ paddingRight: 108 }}
       />
       <div style={{
         position: 'absolute', right: 4, top: '50%', transform: 'translateY(-50%)',
         display: 'inline-flex', alignItems: 'center', gap: 2,
       }}>
-        <button
-          type="button"
-          onClick={onCopy}
-          disabled={!hasValue || isSentinel}
-          title={
-            isSentinel ? 'Reveal the key first to copy it'
-            : copied  ? 'Copied'
-            : 'Copy to clipboard'
-          }
-          aria-label={copied ? 'Copied to clipboard' : 'Copy key to clipboard'}
-          style={(hasValue && !isSentinel) ? btnStyle : { ...btnStyle, opacity: 0.35, cursor: 'not-allowed' }}
-        >
-          {copied ? Ico.check(13) : Ico.copy(13)}
-        </button>
+        <span style={{ position: 'relative', display: 'inline-flex' }}>
+          <button
+            type="button"
+            onClick={onCopy}
+            disabled={!canCopy}
+            title={
+              isDisplayingSentinel ? 'Reveal the key first to copy it'
+              : copied              ? 'Copied'
+              :                       'Copy to clipboard'
+            }
+            aria-label={copied ? 'Copied to clipboard' : 'Copy key to clipboard'}
+            style={canCopy ? btnStyle : { ...btnStyle, opacity: 0.35, cursor: 'not-allowed' }}
+          >
+            {copied ? Ico.check(13) : Ico.copy(13)}
+          </button>
+          {copied && (
+            <span
+              role="status"
+              aria-live="polite"
+              style={{
+                position: 'absolute',
+                bottom: 'calc(100% + 6px)',
+                left: '50%',
+                padding: '3px 8px',
+                fontSize: 10.5, fontWeight: 600, letterSpacing: '0.04em',
+                textTransform: 'uppercase',
+                color: '#7CC4B6',
+                background: 'rgba(20,28,28,0.92)',
+                border: '1px solid rgba(124,196,182,0.45)',
+                borderRadius: 6,
+                whiteSpace: 'nowrap',
+                pointerEvents: 'none',
+                boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+                animation: 'copied-pop 1.5s ease forwards',
+                zIndex: 5,
+              }}
+            >Copied</span>
+          )}
+        </span>
         <button
           type="button"
           onClick={onToggleShow}
@@ -433,7 +508,7 @@ function ApiKeyInput({ value, onChange, placeholder, disabled, revealName }) {
           aria-label="Clear key"
           style={hasValue ? btnStyle : { ...btnStyle, opacity: 0.35, cursor: 'not-allowed' }}
         >
-          {Ico.trash(13)}
+          {Ico.close(13)}
         </button>
       </div>
     </div>
@@ -693,6 +768,20 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [providers.length, providers.some((p) => p.type === 'minds-cloud')]);
 
+  // Auto-dismiss the status banner ~3s after a clean success. Failures
+  // stay sticky so the user actually sees what's broken. Cancelled on
+  // re-test by the dependency change.
+  useEffect(() => {
+    if (!bannerVisible || testing || !tested) return;
+    const activeStatuses = Array.from(activeProviderTypes)
+      .map((t) => (settings.providerStatus || {})[t] || 'untested');
+    const allActiveOk = activeStatuses.length > 0 && activeStatuses.every((s) => s === 'ok');
+    if (!(configReady && allActiveOk)) return;
+    const t = setTimeout(() => setBannerVisible(false), 3000);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bannerVisible, testing, tested, configReady, settings.providerStatus]);
+
   const updateProviderField = (type, key, value) => {
     setLlmDirty(true);
     updateProviders(providers.map((p) => (p.type === type ? { ...p, [key]: value } : p)));
@@ -887,17 +976,26 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
               const icon = testing
                 ? (<span className="spinner" style={{ width: 15, height: 15 }} />)
                 : effectiveReady ? Ico.check(15) : Ico.key(15);
+              // Failure states use role="alert" (assertive) so AT users hear
+              // them immediately; success/progress use role="status"
+              // (polite) so they queue behind in-progress speech.
+              const bannerRole = anyActiveFail || (tested && !effectiveReady) ? 'alert' : 'status';
               return (
-                <div style={{
-                  padding: 14, marginBottom: 22,
-                  border: `1px solid ${tone.border}`,
-                  background: tone.bg,
-                  borderRadius: 10,
-                  display: 'flex', alignItems: 'center', gap: 12,
-                  animation: tested && !testing ? 'set-badge-pulse 1.6s ease-out 1' : 'none',
-                  transition: 'background .2s ease, border-color .2s ease',
-                }}>
-                  <span style={{
+                <div
+                  role={bannerRole}
+                  aria-live={bannerRole === 'alert' ? 'assertive' : 'polite'}
+                  aria-atomic="true"
+                  style={{
+                    padding: 14, marginBottom: 22,
+                    border: `1px solid ${tone.border}`,
+                    background: tone.bg,
+                    borderRadius: 10,
+                    display: 'flex', alignItems: 'center', gap: 12,
+                    animation: tested && !testing ? 'set-badge-pulse 1.6s ease-out 1' : 'none',
+                    transition: 'background .2s ease, border-color .2s ease',
+                  }}
+                >
+                  <span aria-hidden="true" style={{
                     width: 30, height: 30, borderRadius: 8,
                     display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
                     color: tone.icoFg, background: tone.icoBg,
@@ -912,6 +1010,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     onClick={validate}
                     disabled={testing}
                     aria-busy={testing}
+                    title="Re-run the configuration and active-provider tests."
                     style={testing ? { opacity: 0.7, cursor: 'progress' } : undefined}
                   >{testButtonLabel}</button>
                   <button
@@ -973,10 +1072,13 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   : status === 'fail' ? '#E07060'
                   : status === 'testing' ? '#E5B57A'
                   : 'rgba(127,127,127,0.6)';
+                // Glow for active states (ok/fail/testing); untested rows get
+                // a subtle 1px ring instead so the dot still reads as an
+                // intentional indicator rather than a blob of grey.
                 const dotGlow = status === 'ok' ? '0 0 6px rgba(124,196,182,0.7)'
                   : status === 'fail' ? '0 0 6px rgba(224,112,96,0.6)'
                   : status === 'testing' ? '0 0 6px rgba(229,181,122,0.7)'
-                  : 'none';
+                  : 'inset 0 0 0 1px rgba(255,255,255,0.08), 0 0 0 1px var(--border-subtle)';
                 const dotTitle = status === 'ok' ? `Last test passed${detail ? ` (${detail})` : ''}`
                   : status === 'fail' ? `Last test failed${detail ? `: ${detail}` : ''}`
                   : status === 'testing' ? 'Testing…'
@@ -987,7 +1089,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     aria-label={dotTitle}
                     style={{
                       display: 'inline-block',
-                      width: 9, height: 9, borderRadius: 999,
+                      width: 10, height: 10, borderRadius: 999,
                       background: dotColor,
                       boxShadow: dotGlow,
                       flexShrink: 0,
@@ -995,27 +1097,51 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                     }}
                   />
                 );
+                // Each provider row is a sub-section in the Providers group,
+                // so every row gets an <h4> for SR heading navigation. Known
+                // types render the label visibly; the openai-compatible row
+                // already shows an editable name input as its title, so the
+                // <h4> uses the `.sr-only` utility (its text is the current
+                // name or a sensible fallback) — keeps the visual unchanged
+                // while making the row reachable by H/4 navigation.
+                const headingBaseStyle = {
+                  margin: 0, padding: 0, fontFamily: 'inherit', lineHeight: 1.3,
+                  fontSize: 14, fontWeight: 600, color: 'var(--text-strong)',
+                };
+                const customHeadingText = p.type === 'openai-compatible'
+                  ? ((p.name || '').trim() || 'Custom OpenAI-compatible provider')
+                  : null;
                 const titleNode = (
                   <span style={{ display: 'inline-flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
                     {dot}
-                    {p.type === 'openai-compatible' ? (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                        <input
-                          className="field-input"
-                          value={p.name ?? ''}
-                          onChange={(e) => updateProviderField('openai-compatible', 'name', e.target.value)}
-                          placeholder="Custom provider name"
-                          style={{
-                            width: 220, fontSize: 13.5, fontWeight: 600,
-                            borderColor: !(p.name || '').trim() ? 'rgba(224,112,96,0.55)' : undefined,
-                          }}
-                        />
-                        {!(p.name || '').trim() && (
-                          <span style={{ fontSize: 10.5, color: '#E07060' }}>Name required</span>
-                        )}
-                      </div>
-                    ) : (
-                      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-strong)' }}>{label}</span>
+                    {p.type === 'openai-compatible' ? (() => {
+                      const nameEmpty = !(p.name || '').trim();
+                      const errorId = `provider-name-error-${p.type}`;
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          <h4 className="sr-only">{customHeadingText}</h4>
+                          <input
+                            className="field-input"
+                            value={p.name ?? ''}
+                            onChange={(e) => updateProviderField('openai-compatible', 'name', e.target.value)}
+                            placeholder="Custom provider name"
+                            title="Display name for this custom provider — shown in the model dropdowns below."
+                            aria-label="Custom provider name"
+                            aria-invalid={nameEmpty || undefined}
+                            aria-describedby={nameEmpty ? errorId : undefined}
+                            aria-required="true"
+                            style={{
+                              width: 220, fontSize: 13.5, fontWeight: 600,
+                              borderColor: nameEmpty ? 'rgba(224,112,96,0.55)' : undefined,
+                            }}
+                          />
+                          {nameEmpty && (
+                            <span id={errorId} style={{ fontSize: 10.5, color: '#E07060' }}>Name required</span>
+                          )}
+                        </div>
+                      );
+                    })() : (
+                      <h4 style={headingBaseStyle}>{label}</h4>
                     )}
                   </span>
                 );
@@ -1030,13 +1156,15 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   }}>
                     <div>
                       {titleNode}
-                      {p.type === 'minds-cloud' && (
+                      {PROVIDER_TYPE_DESC[p.type] && (
                         <div style={{
                           fontSize: 12, color: 'var(--text-muted)',
                           marginTop: 6, maxWidth: 380, lineHeight: 1.45,
                         }}>
-                          <div>Router to all major LLMs.</div>
-                          <div>Required to publish artifacts to the web.</div>
+                          <div>{PROVIDER_TYPE_DESC[p.type]}</div>
+                          {p.type === 'minds-cloud' && (
+                            <div>Required to publish artifacts to the web.</div>
+                          )}
                         </div>
                       )}
                     </div>
@@ -1057,6 +1185,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                           value={p.baseUrl ?? ''}
                           onChange={(v) => updateProviderField('openai-compatible', 'baseUrl', v)}
                           placeholder="https://example.com/v1"
+                          ariaLabel="Base URL"
                         />
                       )}
                       {GET_KEY_URL[p.type] && (
@@ -1066,6 +1195,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                             href={GET_KEY_URL[p.type]}
                             target="_blank"
                             rel="noreferrer noopener"
+                            title={`Open ${GET_KEY_URL[p.type].replace(/^https?:\/\//, '')} in your browser.`}
                             style={{ color: 'var(--accent-500, #7CC4B6)' }}
                           >{GET_KEY_URL[p.type].replace(/^https?:\/\//, '')} →</a>
                         </div>
@@ -1077,6 +1207,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                             href="https://mindshub.ai"
                             target="_blank"
                             rel="noreferrer noopener"
+                            title="Open mindshub.ai sign-up in your browser."
                             style={{ color: 'var(--accent-500, #7CC4B6)' }}
                           >Sign up at mindshub.ai →</a>
                         </div>
@@ -1126,13 +1257,14 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   title={availableTypesForAdd.length === 0 ? 'All provider types are already configured' : 'Add another provider'}
                   style={{
                     position: 'absolute', top: 14, left: 0,
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
                     opacity: addPickerOpen ? 0 : (availableTypesForAdd.length === 0 ? 0.45 : 1),
                     transform: addPickerOpen ? 'translateY(6px)' : 'translateY(0)',
                     transition: 'opacity 200ms ease, transform 200ms ease',
                     pointerEvents: addPickerOpen ? 'none' : (availableTypesForAdd.length === 0 ? 'none' : 'auto'),
                     cursor: availableTypesForAdd.length === 0 ? 'not-allowed' : 'pointer',
                   }}
-                >+ Add provider</button>
+                >{Ico.plus(13)} Add provider</button>
 
                 {/* Open: Choose Provider: <chip> <chip> · Cancel.
                     Fades + slides up from below as it appears. */}
@@ -1153,20 +1285,22 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                       type="button"
                       onClick={() => addProviderOfType(t)}
                       className="btn-secondary"
+                      title={PROVIDER_TYPE_DESC[t]}
                       style={{ fontSize: 12.5, padding: '4px 10px', fontWeight: 400 }}
                     >{typeLabels[t] || t}</button>
                   ))}
-                  <span style={{ color: 'var(--text-muted)', padding: '0 4px' }}>·</span>
                   <button
                     type="button"
                     onClick={() => setAddPickerOpen(false)}
+                    title="Hide the provider picker."
+                    aria-label="Close provider picker"
                     style={{
-                      fontSize: 12.5, padding: '4px 8px',
+                      display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                      width: 26, height: 26, marginLeft: 4, borderRadius: 6,
                       background: 'transparent', border: 0,
                       color: 'var(--text-muted)', cursor: 'pointer',
-                      fontWeight: 400,
                     }}
-                  >Cancel</button>
+                  >{Ico.close(13)}</button>
                 </div>
               </div>
             </CollapsibleGroup>
@@ -1212,6 +1346,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                               setModelInputMode((m) => ({ ...m, [role]: false }));
                               writeOverride({ providerType: t, model: newModel });
                             }}
+                            title={`Choose which provider powers the ${role} role.`}
                             style={{ width: '100%' }}
                           >
                             {providers.map((p) => (
@@ -1249,6 +1384,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                                       writeOverride({ providerType: curType, model: e.target.value });
                                     }
                                   }}
+                                  title={`Pick the model used for ${role}. Choose Other… to type a custom model id.`}
                                   style={{ width: '100%' }}
                                 >
                                   {modelList.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -1259,6 +1395,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                                     value={curModel}
                                     onChange={(v) => writeOverride({ providerType: curType, model: v })}
                                     placeholder="Type a model id"
+                                    title="Free-form model id sent verbatim to the provider."
                                   />
                                 )}
                               </>
@@ -1269,6 +1406,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                             value={curModel}
                             onChange={(v) => writeOverride({ providerType: curType, model: v })}
                             placeholder="model-id"
+                            title="Model id sent verbatim to this provider."
                           />
                         )}
                         {!provider && curType && (
@@ -1292,23 +1430,46 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                 <Segmented
                   value={theme || 'dark'}
                   onChange={(v) => onThemeChange?.(v)}
+                  groupLabel="Theme"
                   options={[
-                    { value: 'light', label: 'Light' },
-                    { value: 'dark',  label: 'Dark' },
+                    {
+                      value: 'light',
+                      label: (<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{Ico.sun(13)} Light</span>),
+                      ariaLabel: 'Light theme',
+                      title: 'Use the light theme.',
+                    },
+                    {
+                      value: 'dark',
+                      label: (<span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{Ico.moon(13)} Dark</span>),
+                      ariaLabel: 'Dark theme',
+                      title: 'Use the dark theme.',
+                    },
                   ]}
                 />
               </Section>
               <Section title="Greeting" subtitle="The line shown when you start a new task.">
-                <TextInput value={settings.greeting} onChange={(v) => setSetting('greeting', v)} />
+                <TextInput
+                  value={settings.greeting}
+                  onChange={(v) => setSetting('greeting', v)}
+                  title="Shown above the task input when you start a new task."
+                  ariaLabel="Greeting text"
+                />
               </Section>
               <div className="settings-hide-mobile">
                 <Section title="Animated background" subtitle="Toggle off if you prefer a flat surface instead of an animated grid.">
-                  <Toggle value={settings.showDots} onChange={(v) => setSetting('showDots', v)} />
+                  <Toggle
+                    value={settings.showDots}
+                    onChange={(v) => setSetting('showDots', v)}
+                    title="Toggle the animated grid background."
+                    ariaLabel="Animated background"
+                  />
                 </Section>
                 <Section title="Show nav-panel counters" subtitle="Badge counts on Projects / Scheduled / Artifacts / Connected apps, plus the time-since label on each Recent row.">
                   <Toggle
                     value={settings.showCounters !== false}
                     onChange={(v) => setSetting('showCounters', v)}
+                    title="Show badge counts on Projects, Scheduled, Artifacts and Connected apps."
+                    ariaLabel="Nav-panel counters"
                   />
                 </Section>
               </div>
@@ -1548,18 +1709,29 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                 <Segmented
                   value={settings.memoryMode ?? 'autopilot'}
                   onChange={(v) => setSetting('memoryMode', v)}
+                  groupLabel="Memory mode"
                   options={[
-                    { value: 'autopilot', label: 'Autopilot' },
-                    { value: 'copilot', label: 'Copilot' },
-                    { value: 'off', label: 'Off' },
+                    { value: 'autopilot', label: 'Autopilot', title: 'Anton updates long-term memory automatically.' },
+                    { value: 'copilot',   label: 'Copilot',   title: 'Anton suggests memory updates for you to confirm.' },
+                    { value: 'off',       label: 'Off',       title: 'Disable long-term memory updates.' },
                   ]}
                 />
               </Section>
               <Section title="Episodic memory" subtitle="Save conversation history for future recall.">
-                <Toggle value={settings.episodicMemory ?? true} onChange={(v) => setSetting('episodicMemory', v)} />
+                <Toggle
+                  value={settings.episodicMemory ?? true}
+                  onChange={(v) => setSetting('episodicMemory', v)}
+                  title="Save conversation history so Anton can recall past tasks."
+                  ariaLabel="Episodic memory"
+                />
               </Section>
               <Section title="Proactive dashboards" subtitle="Auto-generate HTML reports from scratchpad output.">
-                <Toggle value={settings.proactiveDashboards ?? false} onChange={(v) => setSetting('proactiveDashboards', v)} />
+                <Toggle
+                  value={settings.proactiveDashboards ?? false}
+                  onChange={(v) => setSetting('proactiveDashboards', v)}
+                  title="Auto-generate HTML reports from scratchpad output."
+                  ariaLabel="Proactive dashboards"
+                />
               </Section>
             </CollapsibleGroup>
 
@@ -1571,9 +1743,10 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                 <Segmented
                   value={settings.uiUpdateMode ?? 'manual'}
                   onChange={(v) => setSetting('uiUpdateMode', v)}
+                  groupLabel="UI update mode"
                   options={[
-                    { value: 'auto', label: 'Auto' },
-                    { value: 'manual', label: 'Manual' },
+                    { value: 'auto',   label: 'Auto',   title: 'Download and apply UI updates automatically.' },
+                    { value: 'manual', label: 'Manual', title: 'Only apply UI updates when triggered manually.' },
                   ]}
                 />
               </Section>
@@ -1593,25 +1766,53 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
           backdropFilter: 'blur(var(--surface-glass-blur))',
           borderTop: '1px solid var(--border-subtle)',
         }}>
-          <div style={{ flex: 1, fontSize: 12.5, color: 'var(--text-muted)' }}>
-            {testing
-              ? 'Testing configuration…'
-              : tested
-                ? (configReady ? 'Test passed — provider, model, and credentials look good.' : (configError || 'Test reported a problem.'))
-                : saved
-                  ? 'Settings saved.'
-                  : configError
-                    ? configError
-                    : 'Changes apply on save.'}
+          <div
+            role="status"
+            aria-live="polite"
+            aria-atomic="true"
+            style={{
+              flex: 1, fontSize: 13, fontWeight: 500,
+              color: 'var(--text-muted)',
+              display: 'inline-flex', alignItems: 'center', gap: 6,
+            }}
+          >
+            {testing && (<span aria-hidden="true" className="spinner" style={{ width: 12, height: 12 }} />)}
+            {!testing && tested && configReady && (
+              <span aria-hidden="true" style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
+            )}
+            {!testing && saved && !tested && (
+              <span aria-hidden="true" style={{ color: 'var(--sage-500, #5d9287)', display: 'inline-flex' }}>{Ico.check(13)}</span>
+            )}
+            <span>
+              {testing
+                ? 'Testing configuration…'
+                : tested
+                  ? (configReady ? 'Test passed — provider, model, and credentials look good.' : (configError || 'Test reported a problem.'))
+                  : saved
+                    ? 'Settings saved.'
+                    : configError
+                      ? configError
+                      : 'Changes apply on save.'}
+            </span>
           </div>
-          <button className="btn-secondary" onClick={validate}>Test</button>
+          <button
+            className="btn-secondary"
+            onClick={validate}
+            title="Re-run the configuration and active-provider tests."
+          >Test</button>
           <button
             className="btn-primary"
             onClick={save}
             disabled={!settingsDirty || testing || missingCustomNames}
-            title={missingCustomNames ? 'Each custom provider needs a name' : undefined}
+            title={
+              missingCustomNames ? 'Each custom provider needs a name'
+              : testing ? 'Saving…'
+              : !settingsDirty ? 'No unsaved changes'
+              : 'Save changes and re-run provider tests.'
+            }
             style={{
-              minWidth: 132,
+              width: 140,
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               opacity: (!settingsDirty || testing || missingCustomNames) ? 0.55 : 1,
               cursor: (!settingsDirty || testing || missingCustomNames) ? 'default' : 'pointer',
             }}

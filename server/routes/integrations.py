@@ -143,19 +143,40 @@ GMAIL_BLOCK = dedent(
     ```yaml
     engine: gmail
     display_name: Gmail
+    name_from: email
     pip: google-api-python-client google-auth google-auth-httplib2 google-auth-oauthlib
     popular: true
-    fields:
-      - { name: access_token, required: false, secret: true, description: "OAuth access token (managed by Anton)" }
+    auth_method: choice
+    auth_methods:
+      - name: app-password
+        display: App password
+        fields:
+          - { name: email,        required: true,  secret: false, description: "your Gmail address (e.g. you@gmail.com)" }
+          - { name: app_password, required: true,  secret: true,  description: "16-character app password from myaccount.google.com/apppasswords" }
+      - name: oauth
+        display: OAuth (managed by Anton)
+        fields:
+          - { name: access_token, required: false, secret: true, description: "OAuth access token (managed by Anton)" }
     test_snippet: |
       import os
-      from google.oauth2.credentials import Credentials
-      from googleapiclient.discovery import build
-
-      creds = Credentials(token=os.environ.get('DS_ACCESS_TOKEN', ''))
-      service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
-      result = service.users().getProfile(userId='me').execute()
-      print('ok — email:', result.get('emailAddress', ''))
+      email = os.environ.get('DS_EMAIL', '')
+      app_password = os.environ.get('DS_APP_PASSWORD', '')
+      access_token = os.environ.get('DS_ACCESS_TOKEN', '')
+      if email and app_password:
+          import imaplib
+          imap = imaplib.IMAP4_SSL("imap.gmail.com")
+          imap.login(email, app_password)
+          imap.logout()
+          print("ok")
+      elif access_token:
+          from google.oauth2.credentials import Credentials
+          from googleapiclient.discovery import build
+          creds = Credentials(token=access_token)
+          service = build('gmail', 'v1', credentials=creds, cache_discovery=False)
+          result = service.users().getProfile(userId='me').execute()
+          print('ok — email:', result.get('emailAddress', ''))
+      else:
+          raise RuntimeError('No valid Gmail credentials found')
     ```
     """
 ).strip()

@@ -336,6 +336,25 @@ a[href],
   -webkit-app-region: no-drag;
 }
 
+/* ─── Accessibility utilities ────────────────────────────────────────────
+   .sr-only — content visible only to assistive tech. Standard W3C
+   pattern: zero-sized, clipped, and unselectable, so the node stays in
+   the accessibility tree (announced by screen readers, discoverable by
+   heading/landmark navigation) but never renders pixels or steals
+   layout. Use for headings/labels/instructions that don't have a
+   visible counterpart on the page. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* ─── Scrollbars ───────────────────────────────────────────────────────────
    Theme-aware. `color-mix` against --ink lets the same rule work in
    light + dark — without it the hard rgba(0,0,0,…) thumb was nearly
@@ -2770,6 +2789,16 @@ body[data-theme="dark"] .orbit-morph[data-state="done"] {
       0 0 34px rgba(93,146,135,0.32);
   }
 }
+
+/* Queue strip drops in above the composer with a soft fade + slide. */
+@keyframes queue-pop-in {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.985); }
+  60%  { opacity: 1; transform: translateY(0)   scale(1.005); }
+  100% { opacity: 1; transform: translateY(0)   scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  @keyframes queue-pop-in { 0%, 100% { opacity: 1; transform: none; } }
+}
 @media (prefers-reduced-motion: reduce) {
   /* Honour OS-level reduced-motion. Hold the mid-pulse state so the
      badge still reads as "active" without animating. */
@@ -2781,6 +2810,17 @@ body[data-theme="dark"] .orbit-morph[data-state="done"] {
         0 0 28px rgba(93,146,135,0.25);
     }
   }
+}
+
+/* ─── Copied toast ───────────────────────────────────────────────────────
+   Floating "Copied" pill that briefly pops above the copy button. Drives
+   the whole 1.5s lifecycle from one animation so the React side just has
+   to render the element while `copied` is true. */
+@keyframes copied-pop {
+  0%   { opacity: 0; transform: translate(-50%, 4px) scale(0.92); }
+  12%  { opacity: 1; transform: translate(-50%, 0)   scale(1);    }
+  78%  { opacity: 1; transform: translate(-50%, 0)   scale(1);    }
+  100% { opacity: 0; transform: translate(-50%, -2px) scale(0.98);}
 }
 
 /* ─── Coming soon banner ─────────────────────────────────────────────────── */
@@ -4199,9 +4239,17 @@ body[data-theme="dark"] .mshell__drawer-title {
 
   /* Grid/list view toggle — list mode breaks at phone widths
      (5-column row), and the toggle takes up header space we don't
-     have. Force grid (see effectiveView in ProjectsView) and hide
-     the switch. */
-  .proj-view-toggle { display: none !important; }
+     have. Force grid (see effectiveView in ProjectsView /
+     ArtifactsView) and hide the switch. */
+  .proj-view-toggle,
+  .artifacts-view-toggle { display: none !important; }
+
+  /* Artifacts grid — desktop uses 32px horizontal gutters which
+     waste half the screen on a phone. Tighten to 14px and reserve
+     bottom space for the safe area. */
+  .artifacts-grid {
+    padding: 6px 14px calc(80px + env(safe-area-inset-bottom, 0)) !important;
+  }
 
   /* Chat right-hand rail — only hide the FLOATING expand button on
      mobile (.chat-rail-toggle). The CLOSE button inside the rail

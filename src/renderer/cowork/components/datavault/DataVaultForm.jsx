@@ -179,7 +179,10 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
   // definitions, each with their own fields+actions). The user picks
   // a method first, then fills in fields, then submits with an
   // `auth_method` tag so the server probe knows which to test.
-  const isMultiMethod = Array.isArray(spec?.methods) && spec.methods.length > 0;
+  const visibleMethods = Array.isArray(spec?.methods)
+    ? spec.methods.filter((m) => !m.hidden)
+    : [];
+  const isMultiMethod = visibleMethods.length > 0;
   // Local override (user picked a method client-side). Falls back to
   // whatever the server set in `spec.selected_method`. Cleared when
   // a brand-new form arrives (new form_id) and when the user clicks
@@ -208,12 +211,12 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
   // on that method's fields. We pretend the spec had `selected_method`
   // set; the breadcrumb header sees a single-method form and hides
   // itself (nothing to "go back" to).
-  const onlyMethodId = (isMultiMethod && spec.methods.length === 1)
-    ? spec.methods[0].id
+  const onlyMethodId = (isMultiMethod && visibleMethods.length === 1)
+    ? visibleMethods[0].id
     : null;
   const activeMethodId = localSelectedMethod || spec?.selected_method || onlyMethodId || null;
   const activeMethod = isMultiMethod
-    ? (spec.methods.find((m) => m.id === activeMethodId) || null)
+    ? (visibleMethods.find((m) => m.id === activeMethodId) || null)
     : null;
   // "How to" modal at the form-fill stage — surfaced from the
   // bottom-left of the actions row (opposite the primary submit
@@ -444,7 +447,7 @@ export function DataVaultForm({ spec, busy = false, onAction, onMethodChange, co
           server-pre-selected). User clicks a card to pick. */}
       {isMultiMethod && !activeMethod && (
         <MethodPicker
-          methods={spec.methods}
+          methods={visibleMethods}
           onPick={(id) => {
             setLocalSelectedMethod(id);
             onMethodChange?.(id);

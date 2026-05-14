@@ -327,9 +327,26 @@ function userTurnAttachmentLabel(a) {
   return 'File';
 }
 
-function UserTurn({ content, attachments, time, onDelete }) {
+function UserTurn({ content, attachments, time, onDelete, onEdit }) {
   const [hover, setHover] = useState(false);
   const [trashHover, setTrashHover] = useState(false);
+  const [editHover, setEditHover] = useState(false);
+  // Stack the action buttons just outside the bubble's left edge.
+  // Edit is always available on user messages so the user can pull
+  // any prior prompt back into the composer to refine + resend
+  // (matches what Stop+resend currently requires manually). Trash
+  // stays orphan-only — paired user→answer cycles delete via the
+  // assistant's MessageActions to keep the gesture in one place.
+  const baseBtn = {
+    position: 'absolute',
+    left: -32,
+    width: 24, height: 24, borderRadius: 6,
+    background: 'transparent',
+    border: 0,
+    display: 'inline-grid', placeItems: 'center',
+    cursor: 'pointer',
+    transition: 'opacity 140ms ease, color 140ms ease',
+  };
   return (
     <div
       style={{
@@ -345,6 +362,27 @@ function UserTurn({ content, attachments, time, onDelete }) {
         alignItems: 'flex-end',
         position: 'relative',
       }}>
+        {onEdit && (
+          <button
+            type="button"
+            onClick={() => onEdit(content)}
+            onMouseEnter={() => setEditHover(true)}
+            onMouseLeave={() => setEditHover(false)}
+            title="Edit and resend"
+            aria-label="Edit and resend this message"
+            style={{
+              ...baseBtn,
+              // Above the trash slot when both are present; otherwise
+              // sit at the bottom edge.
+              bottom: (onDelete ? 48 : (time ? 18 : 0)),
+              color: editHover ? 'var(--accent)' : 'var(--ink-4)',
+              opacity: hover ? 1 : 0,
+              pointerEvents: hover ? 'auto' : 'none',
+            }}
+          >
+            {Ico.edit ? Ico.edit(13) : Ico.pencil ? Ico.pencil(13) : Ico.code(13)}
+          </button>
+        )}
         {onDelete && (
           <button
             type="button"
@@ -354,20 +392,11 @@ function UserTurn({ content, attachments, time, onDelete }) {
             title="Delete this message"
             aria-label="Delete this message"
             style={{
-              position: 'absolute',
-              // Just outside the bubble's bottom-left edge.
-              left: -32,
+              ...baseBtn,
               bottom: time ? 18 : 0,
-              width: 24, height: 24, borderRadius: 6,
-              background: 'transparent',
-              border: 0,
-              display: 'inline-grid',
-              placeItems: 'center',
-              cursor: 'pointer',
               color: trashHover ? 'var(--danger)' : 'var(--ink-4)',
               opacity: hover ? 1 : 0,
               pointerEvents: hover ? 'auto' : 'none',
-              transition: 'opacity 140ms ease, color 140ms ease',
             }}
           >
             {Ico.trash(13)}
@@ -522,17 +551,23 @@ function ArtifactCard({ artifact, onOpen }) {
     statusTimerRef.current = setTimeout(() => setStatus(null), kind === 'ok' ? 1800 : 3200);
   };
 
-  // Match the Working folder card's behavior: HTML opens the in-app
-  // iframe viewer (so it can publish/unpublish + handle assets);
-  // anything else goes to the OS handler via the Electron bridge.
-  const isHtml = (artifact.ext || '').toLowerCase() === '.html'
-    || (path || '').toLowerCase().endsWith('.html');
+  // Match the Working folder card's behavior: HTML and text artifacts
+  // (.md/.txt/.csv) open the in-app viewer — HTML via sandboxed iframe,
+  // text via inline markdown / table / preformatted render. Anything
+  // else falls through to the OS handler via the Electron bridge.
+  const lcExt = (artifact.ext || '').toLowerCase();
+  const lcPath = (path || '').toLowerCase();
+  const isHtml = lcExt === '.html' || lcPath.endsWith('.html');
+  const _INLINE_TEXT_EXTS = ['.md', '.txt', '.csv'];
+  const isInlineText = _INLINE_TEXT_EXTS.includes(lcExt)
+    || _INLINE_TEXT_EXTS.some((e) => lcPath.endsWith(e));
+  const canPreviewInline = isHtml || isInlineText;
   const handleOpen = async () => {
     if (!canAct) {
       showStatus('error', disabledReason || 'No artifact file path is available.');
       return;
     }
-    if (isHtml && onOpen) {
+    if (canPreviewInline && onOpen) {
       onOpen(artifact);
       return;
     }
@@ -806,25 +841,36 @@ export default function ChatView({
   onStop,
   projects = [],
   sidebarCollapsed = false,
+  // Messages the user typed while Anton was mid-turn. Displayed as
+  // pills above the Composer; drain into onSend automatically when
+  // the active turn finishes.
+  queuedMessages = [],
+  onRemoveFromQueue,
 }) {
   const scrollRef = useRef(null);
   const { isNarrow } = useBreakpoint();
   // Wide: inline grid column. Narrow: fixed overlay from the right.
   const [railOpen, setRailOpen] = useState(true);
   const [railNarrowOpen, setRailNarrowOpen] = useState(false);
+  // Composer prefill — set by clicking Edit on a user message.
+  // `bump` is a monotonically-increasing nonce so the Composer's
+  // sync effect runs even when re-editing the same text.
+  const [composerPrefill, setComposerPrefill] = useState({ text: '', bump: 0 });
   // Inline rail only active on wide screens.
   const effectiveRailOpen = !isNarrow && railOpen;
   // Narrow-screen overlay rail.
   const railOverlayOpen = isNarrow && railNarrowOpen;
   // Step id whose scratchpad cells are visible in the modal. null = closed.
   const [openScratchpadStepId, setOpenScratchpadStepId] = useState(null);
-  // Inline ArtifactCard → viewer. HTML artifacts open in the in-app
-  // iframe modal (matching the Working folder card's behaviour); other
-  // types route through the Electron OS handler via openPath.
+  // Inline ArtifactCard → viewer. HTML artifacts open in the sandboxed
+  // iframe modal; text artifacts (.md/.txt/.csv) open the same viewer
+  // but render via the inline text path (no iframe, no OS handoff).
+  // Anything else still routes through the Electron OS handler via
+  // openPath inside the card.
   const [previewArt, setPreviewArt] = useState(null);
   const handleArtifactOpen = (artifact) => {
-    // The card already routes non-HTML artifacts to the OS; this only
-    // fires for HTML, so we can dispatch straight to the viewer.
+    // The card already filters: it only calls onOpen for previewable
+    // types (HTML / md / txt / csv). Dispatch straight to the viewer.
     setPreviewArt(artifact);
   };
   // Task settings menu (kebab in header).
@@ -1290,6 +1336,7 @@ export default function ChatView({
           marginBottom: 25,
           background: 'transparent',
           WebkitAppRegion: 'no-drag',
+          userSelect: 'text',
         }}>
           <div style={{
             maxWidth: 720, margin: '0 auto',
@@ -1330,6 +1377,16 @@ export default function ChatView({
                     attachments={m.attachments}
                     time={formatTime(m.createdAt)}
                     onDelete={orphan ? () => onDeleteTurn?.(turnIdxForThisUser) : null}
+                    onEdit={(text) => {
+                      // Pull the message text back into the composer
+                      // for refine-and-resend. Each click bumps the
+                      // nonce so identical text re-fills the input
+                      // even after the user has cleared it.
+                      setComposerPrefill((prev) => ({
+                        text,
+                        bump: (prev?.bump || 0) + 1,
+                      }));
+                    }}
                   />
                 );
               }
@@ -1486,10 +1543,88 @@ export default function ChatView({
             shadow give enough visual separation on its own. */}
         <div className="chat-floating-composer" style={{
           position: 'absolute', left: 28, right: 28, bottom: 22,
-          display: 'flex', justifyContent: 'center',
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          gap: 8,
           pointerEvents: 'auto',
           ['--composer-max-width']: '720px',
         }}>
+          {/* Queued-messages strip — pills with each waiting prompt
+              + a × to drop it. The pills cross-fade in/out so the
+              transition between queue states reads as deliberate. */}
+          {queuedMessages.length > 0 && (
+            <div style={{
+              width: '100%', maxWidth: 720,
+              display: 'flex', flexDirection: 'column',
+              gap: 6,
+              padding: '10px 12px',
+              borderRadius: 14,
+              background: 'color-mix(in srgb, var(--accent) 8%, var(--surface))',
+              border: '1px solid color-mix(in srgb, var(--accent) 22%, var(--line))',
+              boxShadow: '0 8px 24px rgba(0,0,0,0.10)',
+              animation: 'queue-pop-in 220ms cubic-bezier(0.32, 0.72, 0, 1)',
+            }}>
+              <div style={{
+                fontFamily: 'var(--font-mono)', fontSize: 10.5,
+                color: 'var(--accent)', letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                display: 'flex', alignItems: 'center', gap: 6,
+              }}>
+                <span className="pulse-dot" style={{
+                  width: 6, height: 6, borderRadius: '50%',
+                  background: 'var(--accent)',
+                  boxShadow: '0 0 6px var(--accent-glow)',
+                }} />
+                {queuedMessages.length} queued · waiting for Anton
+              </div>
+              <div style={{
+                display: 'flex', flexWrap: 'wrap', gap: 6,
+              }}>
+                {queuedMessages.map((q) => (
+                  <span
+                    key={q.id}
+                    title={q.text}
+                    style={{
+                      display: 'inline-flex', alignItems: 'center', gap: 6,
+                      maxWidth: '100%',
+                      padding: '5px 4px 5px 12px',
+                      borderRadius: 999,
+                      background: 'var(--surface)',
+                      border: '1px solid var(--line)',
+                      fontFamily: 'var(--font-body)', fontSize: 12.5,
+                      color: 'var(--ink-2)',
+                      transition: 'background 120ms ease, border-color 120ms ease',
+                    }}
+                  >
+                    <span style={{
+                      maxWidth: 360,
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>{q.text}</span>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveFromQueue?.(q.id)}
+                      title="Remove from queue"
+                      aria-label="Remove from queue"
+                      style={{
+                        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+                        width: 20, height: 20, borderRadius: 999,
+                        background: 'transparent', border: 0,
+                        color: 'var(--ink-4)', cursor: 'pointer',
+                        flexShrink: 0,
+                      }}
+                      onMouseOver={(e) => {
+                        e.currentTarget.style.background = 'color-mix(in srgb, var(--danger) 14%, transparent)';
+                        e.currentTarget.style.color = 'var(--danger)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.currentTarget.style.background = 'transparent';
+                        e.currentTarget.style.color = 'var(--ink-4)';
+                      }}
+                    >{Ico.close(11)}</button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <Composer
             onSend={onSend}
             project={project}
@@ -1510,6 +1645,7 @@ export default function ChatView({
             hideMeta
             streaming={isStreaming}
             onStop={onStop}
+            prefill={composerPrefill}
           />
         </div>
       </div>
