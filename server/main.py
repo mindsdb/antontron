@@ -165,7 +165,6 @@ _maybe_self_update_and_reexec()
 _heal_and_reexec_if_deps_missing()
 
 
-from fastapi import FastAPI
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -236,9 +235,6 @@ async def lifespan(app: FastAPI):
     projects_store.ensure_general_project()
     start_scheduler()
     await start_dispatch()
-    yield
-    await stop_dispatch()
-    await close_dispatch_repo()
     refresh_task = asyncio.create_task(_google_token_refresh_loop())
     yield
     refresh_task.cancel()
@@ -246,6 +242,8 @@ async def lifespan(app: FastAPI):
         await refresh_task
     except asyncio.CancelledError:
         pass
+    await stop_dispatch()
+    await close_dispatch_repo()
     await conversation_manager.close_all()
     await scratchpad_runtime.close_all()
 
