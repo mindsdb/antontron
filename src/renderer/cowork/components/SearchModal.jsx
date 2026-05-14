@@ -24,6 +24,13 @@ export default function SearchModal({ open, onClose, onSearch, onSelect }) {
 
   useEffect(() => {
     if (!open) return;
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
+  useEffect(() => {
+    if (!open) return;
     const timer = setTimeout(async () => {
       if (!query.trim()) {
         setResults([]);
@@ -53,9 +60,10 @@ export default function SearchModal({ open, onClose, onSearch, onSelect }) {
           <input
             ref={inputRef}
             value={query}
+            type="search"
             placeholder="Search Anton CoWork"
+            aria-label="Search Anton CoWork"
             onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Escape') onClose(); }}
           />
           <button className="mini-icon-btn" title="Close" onClick={onClose}>x</button>
         </div>
