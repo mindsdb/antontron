@@ -4342,9 +4342,12 @@ body[data-theme="dark"] .mshell__drawer-title {
 
 .anton-code-block {
   margin: 12px 0;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--accent) 18%, var(--line));
   border-radius: 10px;
-  background: var(--surface-2);
+  /* Same accent family as the header tint and the inline-code chip, so the
+     whole block reads as one cohesive accent-washed surface and pops out
+     of the surrounding bubble (which sits on plain `--surface`). */
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface-2));
   overflow: hidden;
   font-family: var(--font-mono);
 }
