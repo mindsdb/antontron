@@ -20,10 +20,9 @@ from anton_api.models import (
     ResponseStatus,
     ResponsesRequest,
 )
-from harnesses.base import HarnessConfigurationError, HarnessRuntimeError
-from harnesses.registry import get_active_harness
+from harnesses.registry import active_harness_id
+from runtime.service import runtime_service
 from .attachments import attachment_context
-from .settings import get_config_status
 
 
 logger = logging.getLogger(__name__)
@@ -51,21 +50,6 @@ def _assembled_user_input(content: str, project_name: str | None, session_id: st
 
 @router.post("/responses")
 async def create_response(req: ResponsesRequest):
-    harness = get_active_harness()
-    health = await harness.health()
-    if not health.get("available"):
-        raise HTTPException(
-            status_code=503,
-            detail=health.get("error") or f"{harness.label} is not available.",
-        )
-
-    config = get_config_status()
-    if not config["config_ready"]:
-        raise HTTPException(
-            status_code=400,
-            detail=config["config_error"] or "Anton is not configured.",
-        )
-
     user_text = _resolve_input(req)
     final_input = _assembled_user_input(
         user_text,
@@ -79,12 +63,13 @@ async def create_response(req: ResponsesRequest):
     
     if req.stream:
         return StreamingResponse(
-            harness.stream_response(
+            runtime_service.stream_response(
                 user_input=final_input,
                 conversation_id=req.conversation,
                 project=req.project,
                 model=req.model,
                 disabled_connections=dc_payload,
+                attachment_ids=req.attachment_ids,
             ),
             media_type="text/event-stream",
             headers={
@@ -96,22 +81,19 @@ async def create_response(req: ResponsesRequest):
 
     # Non-streaming: collect text and return a single ResponseObject.
     try:
-        text, _cid = await harness.complete_text(
+        text, _cid = await runtime_service.complete_text(
             user_input=final_input,
             conversation_id=req.conversation,
             project=req.project,
             model=req.model,
             disabled_connections=dc_payload,
         )
-    except HarnessConfigurationError as exc:
-        logger.warning("%s configuration error: %s", harness.label, exc)
-        raise HTTPException(status_code=400, detail=str(exc) or "Configuration error")
-    except HarnessRuntimeError as exc:
-        logger.error("%s runtime error: %s", harness.label, exc)
+    except RuntimeError as exc:
+        logger.error("Cowork runtime error: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc) or "An unexpected error occurred")
 
     return ResponseObject(
-        model="hermes-agent" if harness.id == "hermes" else (req.model or harness.id),
+        model=req.model or active_harness_id(),
         status=ResponseStatus.completed,
         output=[ResponseOutput(
             status=ResponseStatus.completed,

@@ -30,6 +30,13 @@ from anton_api.models import (
     ResponseStatus,
     Role,
 )
+from runtime.events import iter_sse_payloads, normalize_legacy_payload
+from runtime.schemas import (
+    CoworkEvent,
+    HarnessCapabilities,
+    HarnessReadiness,
+    HarnessTurnRequest,
+)
 
 from .base import HarnessConfigurationError, HarnessRuntimeError
 from .config import hermes_api_key, hermes_base_url
@@ -86,6 +93,17 @@ class HermesHarnessProvider:
     id = "hermes"
     label = "Hermes Agent"
 
+    def capabilities(self) -> HarnessCapabilities:
+        return HarnessCapabilities(
+            memory=True,
+            skills=True,
+            artifacts=True,
+            streaming=True,
+            tool_progress=True,
+            cancellation=False,
+            sidecar=True,
+        )
+
     async def health(self) -> dict:
         try:
             health_payload = await asyncio.to_thread(self._get_json, "/health", 2.0)
@@ -107,6 +125,25 @@ class HermesHarnessProvider:
                 "base_url": self.base_url,
                 "error": str(exc),
             }
+
+    def validate_request(self, request: HarnessTurnRequest) -> HarnessReadiness:
+        del request
+        return HarnessReadiness.ok()
+
+    async def start_turn(self, request: HarnessTurnRequest) -> AsyncIterator[CoworkEvent]:
+        async for chunk in self.stream_response(
+            user_input=request.user_input,
+            conversation_id=request.conversation_id,
+            project=request.project_context.name,
+            model=request.inference.planning_model,
+            disabled_connections=request.disabled_connections,
+        ):
+            for _event_type, payload in iter_sse_payloads(chunk):
+                yield normalize_legacy_payload(payload, request.turn_id)
+
+    async def cancel_turn(self, turn_id: str) -> None:
+        del turn_id
+        return None
 
     @property
     def base_url(self) -> str:

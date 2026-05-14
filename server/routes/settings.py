@@ -16,6 +16,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from harnesses.config import normalize_harness_id
 from .cowork_state import update_state, load_state
 
 router = APIRouter()
@@ -190,17 +191,7 @@ def _migrate_legacy_keys() -> list[str]:
 def get_config_status() -> dict[str, Any]:
     """Return safe readiness metadata for health checks and setup gates."""
     migrated = _migrate_legacy_keys()
-    harness_provider = (_get_env("COWORK_HARNESS_PROVIDER", "anton") or "anton").strip().lower()
-    if harness_provider in {"hermes", "hermes-agent", "hermes_agent"}:
-        return {
-            "config_ready": True,
-            "config_error": "",
-            "provider": "hermes",
-            "model": "hermes-agent",
-            "provider_label": PROVIDER_LABELS["hermes"],
-            "harness_provider": "hermes",
-            "migrated": migrated,
-        }
+    harness_provider = normalize_harness_id(_get_env("COWORK_HARNESS_PROVIDER", "anton"))
 
     provider = _get_env("ANTON_PLANNING_PROVIDER", "anthropic")
     model = _get_env("ANTON_PLANNING_MODEL", "claude-sonnet-4-6")
@@ -228,7 +219,7 @@ def get_config_status() -> dict[str, Any]:
         "provider": provider,
         "model": model,
         "provider_label": PROVIDER_LABELS.get(provider, provider),
-        "harness_provider": "anton",
+        "harness_provider": harness_provider,
         "migrated": migrated,
     }
 
@@ -847,8 +838,7 @@ async def update_settings(patch: SettingsPatch):
                 delete_keys.append("ANTON_MINDS_API_KEY")
 
     if patch.harnessProvider is not None:
-        harness = patch.harnessProvider.strip().lower()
-        writes["COWORK_HARNESS_PROVIDER"] = "hermes" if harness in {"hermes", "hermes-agent", "hermes_agent"} else "anton"
+        writes["COWORK_HARNESS_PROVIDER"] = normalize_harness_id(patch.harnessProvider)
     _stage_string_env(patch.hermesApiBaseUrl, "COWORK_HERMES_API_BASE_URL", writes, delete_keys)
     if patch.hermesAutoStart is not None:
         writes["COWORK_HERMES_AUTO_START"] = str(patch.hermesAutoStart).lower()

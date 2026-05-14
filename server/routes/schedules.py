@@ -10,7 +10,9 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from anton_api import projects_store
-from harnesses.registry import get_active_harness
+from harnesses.config import selected_harness_id
+from runtime.inference import profile_for_storage, resolve_inference_profile
+from runtime.service import runtime_service
 from .cowork_state import load_state, save_state, utc_now_iso
 
 
@@ -161,6 +163,7 @@ def _serialise_schedule(request: ScheduleRequest) -> dict:
     if not next_run:
         raise HTTPException(status_code=400, detail="Next run time must be a valid ISO datetime.")
     now = utc_now_iso()
+    inference = resolve_inference_profile()
     return {
         "id": _new_schedule_id(),
         "title": request.title.strip() or _task_title(request.prompt),
@@ -171,6 +174,8 @@ def _serialise_schedule(request: ScheduleRequest) -> dict:
         "enabled": request.enabled,
         "project": request.project,
         "model": request.model,
+        "harness": selected_harness_id(),
+        "inferenceProfile": profile_for_storage(inference),
         "lastRunAt": None,
         "lastResultSessionId": None,
         "lastError": None,
@@ -248,12 +253,14 @@ async def _run_schedule(schedule: dict, manual: bool = False, *, state: dict | N
 
     error_message: str | None = None
     try:
-        answer, returned_conversation_id = await get_active_harness().complete_text(
+        answer, returned_conversation_id = await runtime_service.complete_text(
             user_input=schedule.get("prompt", ""),
             conversation_id=conversation_id,
             project=project_name,
             model=schedule.get("model"),
             disabled_connections=None,
+            harness_override=schedule.get("harness") or selected_harness_id(),
+            inference_override=schedule.get("inferenceProfile"),
         )
         conversation_id = returned_conversation_id or conversation_id
         task["id"] = conversation_id

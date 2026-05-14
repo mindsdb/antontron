@@ -47,6 +47,8 @@ def normalize_harness_id(value: str | None) -> str:
     raw = (value or "anton").strip().lower()
     if raw in {"hermes", "hermes-agent", "hermes_agent"}:
         return "hermes"
+    if raw in {"nanoclaw", "nano-claw", "nano_claw"}:
+        return "nanoclaw"
     return "anton"
 
 

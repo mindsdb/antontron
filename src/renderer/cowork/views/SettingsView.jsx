@@ -1476,7 +1476,7 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
             </CollapsibleGroup>
 
             <CollapsibleGroup title="Harness">
-              <Section title="Runtime" subtitle="Choose the agent harness that powers new Cowork app sessions.">
+              <Section title="Runtime" subtitle="Choose the agent harness that powers new Cowork conversations.">
                 <Segmented
                   value={harnessProvider}
                   onChange={(v) => setSetting('harnessProvider', v)}

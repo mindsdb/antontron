@@ -4,6 +4,13 @@ from __future__ import annotations
 
 from typing import AsyncIterator, Protocol
 
+from runtime.schemas import (
+    CoworkEvent,
+    HarnessCapabilities,
+    HarnessReadiness,
+    HarnessTurnRequest,
+)
+
 
 class HarnessConfigurationError(RuntimeError):
     """Raised when the selected harness is missing required configuration."""
@@ -17,9 +24,23 @@ class HarnessProvider(Protocol):
     id: str
     label: str
 
+    def capabilities(self) -> HarnessCapabilities:
+        ...
+
     async def health(self) -> dict:
         ...
 
+    def validate_request(self, request: HarnessTurnRequest) -> HarnessReadiness:
+        ...
+
+    async def start_turn(self, request: HarnessTurnRequest) -> AsyncIterator[CoworkEvent]:
+        ...
+
+    async def cancel_turn(self, turn_id: str) -> None:
+        ...
+
+    # Compatibility methods still used by eval tooling and by routes that are
+    # being moved behind the Cowork-owned runtime store.
     def list_live(self) -> list[str]:
         ...
 

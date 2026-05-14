@@ -1,33 +1,33 @@
-"""Selected harness registry.
-
-The selected harness is intentionally latched at server startup. Changing the
-setting and restarting the backend gives a clear per-app-session swap without
-mid-stream runtime drift.
-"""
+"""Selected harness registry."""
 
 from __future__ import annotations
 
 from .anton_provider import AntonHarnessProvider
 from .config import selected_harness_id
 from .hermes_provider import HermesHarnessProvider
+from .nanoclaw_provider import NanoclawHarnessProvider
 
 
-_ACTIVE_ID = selected_harness_id()
 _ANTON = AntonHarnessProvider()
 _HERMES = HermesHarnessProvider()
+_NANOCLAW = NanoclawHarnessProvider()
 
 
 def active_harness_id() -> str:
-    return _ACTIVE_ID
+    return selected_harness_id()
 
 
 def get_active_harness():
-    if _ACTIVE_ID == "hermes":
-        return _HERMES
-    return _ANTON
+    return get_harness_by_id(active_harness_id())
 
 
 def get_harness_by_id(harness_id: str):
     if harness_id == "hermes":
         return _HERMES
+    if harness_id == "nanoclaw":
+        return _NANOCLAW
     return _ANTON
+
+
+def list_harnesses():
+    return [_ANTON, _HERMES, _NANOCLAW]

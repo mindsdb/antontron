@@ -1,0 +1,130 @@
+"""Typed runtime schemas for Cowork-owned conversations and harness turns."""
+
+from __future__ import annotations
+
+import time
+import uuid
+from typing import Any, Literal
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+def new_id(prefix: str) -> str:
+    return f"{prefix}_{uuid.uuid4().hex[:12]}"
+
+
+def now_ms() -> int:
+    return int(time.time() * 1000)
+
+
+class ResolvedInferenceProfile(BaseModel):
+    id: str = "default"
+    provider_type: str = "unknown"
+    provider_label: str = "Unknown"
+    base_url: str = ""
+    api_key_ref: str = ""
+    planning_model: str = ""
+    coding_model: str = ""
+    capabilities: dict[str, bool] = Field(default_factory=dict)
+
+    def safe_dump(self) -> dict[str, Any]:
+        return self.model_dump(exclude={"api_key_ref"})
+
+
+class HarnessCapabilities(BaseModel):
+    memory: bool = False
+    skills: bool = False
+    artifacts: bool = True
+    streaming: bool = True
+    tool_progress: bool = True
+    cancellation: bool = False
+    sidecar: bool = False
+
+
+class HarnessHealth(BaseModel):
+    id: str
+    label: str
+    available: bool
+    error: str = ""
+    details: dict[str, Any] = Field(default_factory=dict)
+
+
+class HarnessReadiness(BaseModel):
+    ready: bool
+    code: str = ""
+    message: str = ""
+
+    @classmethod
+    def ok(cls) -> "HarnessReadiness":
+        return cls(ready=True)
+
+    @classmethod
+    def fail(cls, code: str, message: str) -> "HarnessReadiness":
+        return cls(ready=False, code=code, message=message)
+
+
+class CoworkMessage(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("msg"))
+    role: Literal["user", "assistant", "system"] = "user"
+    content: str = ""
+    turn_id: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class CoworkEvent(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    schema_version: str = Field(default="cowork.event.v1", alias="schema")
+    type: str
+    turn_id: str
+    at_ms: int = Field(default_factory=now_ms)
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoworkTurn(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("turn"))
+    status: Literal["running", "completed", "failed", "cancelled", "partial"] = "running"
+    user_message_id: str
+    assistant_message_id: str | None = None
+    events: list[CoworkEvent] = Field(default_factory=list)
+    started_at: str = ""
+    completed_at: str | None = None
+    error: str | None = None
+
+
+class CoworkConversation(BaseModel):
+    id: str
+    project_id: str
+    harness: str
+    inference_profile: dict[str, Any] = Field(default_factory=dict)
+    title: str = ""
+    preview: str = ""
+    messages: list[CoworkMessage] = Field(default_factory=list)
+    turns: list[CoworkTurn] = Field(default_factory=list)
+    uploads: list[dict[str, Any]] = Field(default_factory=list)
+    artifacts: list[dict[str, Any]] = Field(default_factory=list)
+    harness_state: dict[str, Any] = Field(default_factory=dict)
+    disabled_connections: list[dict[str, Any]] = Field(default_factory=list)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+class ProjectContext(BaseModel):
+    id: str
+    name: str
+    path: str
+
+
+class HarnessTurnRequest(BaseModel):
+    conversation_id: str
+    turn_id: str
+    messages: list[CoworkMessage]
+    user_input: str
+    project_context: ProjectContext
+    uploads: list[dict[str, Any]] = Field(default_factory=list)
+    disabled_connections: list[dict[str, Any]] | None = None
+    inference: ResolvedInferenceProfile
+    artifact_root: str
+    runtime_options: dict[str, Any] = Field(default_factory=dict)
+    harness_state: dict[str, Any] = Field(default_factory=dict)

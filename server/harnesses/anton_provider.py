@@ -15,6 +15,13 @@ from anton_api.models import (
     ResponseOutputContent,
     ResponseStatus,
 )
+from runtime.events import iter_sse_payloads, normalize_legacy_payload
+from runtime.schemas import (
+    CoworkEvent,
+    HarnessCapabilities,
+    HarnessReadiness,
+    HarnessTurnRequest,
+)
 
 from .base import HarnessConfigurationError, HarnessRuntimeError
 
@@ -26,12 +33,47 @@ class AntonHarnessProvider:
     id = "anton"
     label = "Anton"
 
+    def capabilities(self) -> HarnessCapabilities:
+        return HarnessCapabilities(
+            memory=True,
+            skills=True,
+            artifacts=True,
+            streaming=True,
+            tool_progress=True,
+            cancellation=True,
+            sidecar=False,
+        )
+
     async def health(self) -> dict:
         return {
             "id": self.id,
             "label": self.label,
             "available": conversation_manager.is_anton_available(),
         }
+
+    def validate_request(self, request: HarnessTurnRequest) -> HarnessReadiness:
+        del request
+        if not conversation_manager.is_anton_available():
+            return HarnessReadiness.fail(
+                "anton_unavailable",
+                "Anton is not installed in this desktop environment.",
+            )
+        return HarnessReadiness.ok()
+
+    async def start_turn(self, request: HarnessTurnRequest) -> AsyncIterator[CoworkEvent]:
+        async for chunk in self.stream_response(
+            user_input=request.user_input,
+            conversation_id=request.conversation_id,
+            project=request.project_context.name,
+            model=request.inference.planning_model,
+            disabled_connections=request.disabled_connections,
+        ):
+            for _event_type, payload in iter_sse_payloads(chunk):
+                yield normalize_legacy_payload(payload, request.turn_id)
+
+    async def cancel_turn(self, turn_id: str) -> None:
+        del turn_id
+        return None
 
     def list_live(self) -> list[str]:
         return conversation_manager.list_live()

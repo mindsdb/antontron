@@ -18,7 +18,8 @@ from fastapi import APIRouter, HTTPException
 
 from anton_api import projects_store
 from anton_api.models import ConversationPatch
-from harnesses.registry import get_active_harness
+from harnesses.registry import active_harness_id
+from runtime.conversations import store as conversation_store
 from .cowork_state import load_state
 
 
@@ -258,48 +259,42 @@ def _parse_for_display(
 @router.get("/v1/conversations")
 async def list_conversations(limit: int = 200, project: str | None = None):
     target = project if project else projects_store.get_active()
-    harness = get_active_harness()
     return {
         "project": target,
-        "harness": harness.id,
+        "harness": active_harness_id(),
         "conversations": _annotate_with_schedule_id(
-            harness.list_conversations(limit=limit, project=target)
+            conversation_store.list(limit=limit, project=target)
         ),
     }
 
 
 @router.get("/v1/projects/{name}/conversations")
 async def list_project_conversations(name: str, limit: int = 200):
-    harness = get_active_harness()
     return {
         "project": name,
-        "harness": harness.id,
+        "harness": active_harness_id(),
         "conversations": _annotate_with_schedule_id(
-            harness.list_conversations(limit=limit, project=name)
+            conversation_store.list(limit=limit, project=name)
         ),
     }
 
 
 @router.get("/v1/conversations/{conversation_id}")
 async def get_conversation(conversation_id: str):
-    meta = get_active_harness().get_conversation(conversation_id)
-    if not meta:
+    conv = conversation_store.get(conversation_id)
+    if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    return meta
+    return conversation_store.meta(conv)
 
 
 @router.get("/v1/conversations/{conversation_id}/messages")
 async def get_conversation_messages(conversation_id: str):
-    harness = get_active_harness()
-    messages = harness.get_messages(conversation_id)
-    if messages is None:
+    conv = conversation_store.get(conversation_id)
+    if conv is None:
         raise HTTPException(status_code=404, detail="Conversation not found")
-    # Sidecar may not exist for older conversations — that's fine, the
-    # client just won't see events on those turns.
-    turns = harness.load_turns(conversation_id)
     return {
         "id": conversation_id,
-        "messages": _parse_for_display(messages, turns=turns),
+        "messages": conversation_store.display_messages(conv),
     }
 
 
@@ -313,17 +308,16 @@ async def update_conversation(conversation_id: str, patch: ConversationPatch):
     # it physically relocates the conversation between project dirs.
     target_project = updates.pop("project", None)
     meta = None
-    harness = get_active_harness()
     if target_project is not None:
         try:
-            meta = harness.move_conversation(conversation_id, target_project)
+            meta = conversation_store.move(conversation_id, target_project)
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc))
         if meta is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
     if updates:
-        meta = harness.update_conversation(conversation_id, **updates)
+        meta = conversation_store.update(conversation_id, **updates)
         if meta is None:
             raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -340,7 +334,7 @@ async def delete_conversation_turn(conversation_id: str, turn_index: int):
     """
     if turn_index < 0:
         raise HTTPException(status_code=400, detail="turn_index must be non-negative")
-    result = get_active_harness().delete_turn(conversation_id, turn_index)
+    result = conversation_store.delete_turn(conversation_id, turn_index)
     if result is None:
         raise HTTPException(status_code=404, detail="Turn not found")
     return result
@@ -348,7 +342,7 @@ async def delete_conversation_turn(conversation_id: str, turn_index: int):
 
 @router.delete("/v1/conversations/{conversation_id}")
 async def delete_conversation(conversation_id: str):
-    found = get_active_harness().delete_conversation(conversation_id)
+    found = conversation_store.delete(conversation_id)
     if not found:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {"status": "deleted", "id": conversation_id}

@@ -171,7 +171,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from anton_api import conversation_manager, projects_store, scratchpad_runtime
-from harnesses.registry import active_harness_id, get_active_harness
+from harnesses.registry import active_harness_id, get_active_harness, list_harnesses
 from routes.responses import router as responses_router
 from routes.conversations import router as conversations_router
 from routes.scratchpad import router as scratchpad_router
@@ -182,6 +182,7 @@ from routes.artifacts import router as artifacts_router
 from routes.utilities import router as utilities_router
 from routes.attachments import router as attachments_router
 from routes.search import router as search_router
+from routes.harnesses import router as harnesses_router
 from routes.pins import router as pins_router
 from routes.schedules import router as schedules_router, start_scheduler
 from routes.browse import router as browse_router
@@ -232,7 +233,8 @@ async def lifespan(app: FastAPI):
         await refresh_task
     except asyncio.CancelledError:
         pass
-    await get_active_harness().close_all()
+    for harness in list_harnesses():
+        await harness.close_all()
     await scratchpad_runtime.close_all()
 
 
@@ -264,6 +266,7 @@ app.include_router(artifacts_router, prefix="/v1/artifacts", tags=["artifacts"])
 app.include_router(utilities_router, prefix="/v1", tags=["utilities"])
 app.include_router(attachments_router)
 app.include_router(search_router)
+app.include_router(harnesses_router)
 app.include_router(pins_router)
 app.include_router(schedules_router)
 app.include_router(browse_router)
