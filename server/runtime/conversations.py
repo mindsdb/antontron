@@ -195,7 +195,7 @@ class CoworkConversationStore:
             if turn.id == turn_id:
                 turn.events.append(event)
                 break
-        if event.type == "response.delta":
+        if event.type == "message.delta":
             delta = str(event.payload.get("delta") or "")
             if delta:
                 self.append_assistant_delta(conv, turn_id, delta, save=False)

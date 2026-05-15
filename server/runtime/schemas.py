@@ -9,6 +9,29 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+CoworkEventType = Literal[
+    "response.created",
+    "response.completed",
+    "response.failed",
+    "response.cancelled",
+    "message.delta",
+    "reasoning",
+    "tool.requested",
+    "tool.started",
+    "tool.completed",
+    "tool.failed",
+    "file.accessed",
+    "source.used",
+    "approval.required",
+    "approval.granted",
+    "approval.denied",
+    "approval.bypassed",
+    "access.denied",
+    "artifact.created",
+    "artifact.ignored",
+]
+
+
 def new_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
@@ -90,7 +113,7 @@ class CoworkEvent(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     schema_version: str = Field(default="cowork.event.v1", alias="schema")
-    type: str
+    type: CoworkEventType
     turn_id: str
     at_ms: int = Field(default_factory=now_ms)
     payload: dict[str, Any] = Field(default_factory=dict)

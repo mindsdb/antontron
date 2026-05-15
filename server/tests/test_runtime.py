@@ -48,13 +48,25 @@ class RuntimeSchemaTests(unittest.TestCase):
             "turn_1",
         )
 
-        self.assertEqual(event.type, "response.delta")
+        self.assertEqual(event.type, "message.delta")
         self.assertEqual(event.payload["delta"], "hello")
 
         emitted = cowork_event_to_legacy_sse(event)
         payloads = iter_sse_payloads(emitted)
         self.assertEqual(payloads[0][0], "response.output_text.delta")
         self.assertEqual(payloads[0][1]["delta"], "hello")
+
+    def test_canonical_event_schema_rejects_unknown_types(self) -> None:
+        from pydantic import ValidationError
+        from runtime.schemas import CoworkEvent
+
+        event = CoworkEvent(type="message.delta", turn_id="turn_1", payload={"delta": "ok"})
+        dumped = event.model_dump(by_alias=True)
+
+        self.assertEqual(dumped["schema"], "cowork.event.v1")
+        self.assertEqual(dumped["type"], "message.delta")
+        with self.assertRaises(ValidationError):
+            CoworkEvent(type="legacy.random", turn_id="turn_1")
 
     def test_request_and_readiness_models_serialize(self) -> None:
         profile = ResolvedInferenceProfile(

@@ -49,14 +49,14 @@ def normalize_legacy_payloads(
     if not isinstance(at_ms, int):
         at_ms = now_ms()
 
-    event_type = legacy_type or "progress.reasoning"
+    event_type = legacy_type or "reasoning"
     event_payload: dict[str, Any] = {
         "legacy": payload,
         "legacy_type": legacy_type,
     }
 
     if legacy_type == "response.output_text.delta":
-        event_type = "response.delta"
+        event_type = "message.delta"
         event_payload.update({
             "delta": str(payload.get("delta") or ""),
             "label": "Response",
@@ -101,7 +101,7 @@ def normalize_legacy_payloads(
                 "artifact": artifact,
             })
         else:
-            event_type = "progress.reasoning"
+            event_type = "reasoning"
             event_payload.update({
                 "label": payload.get("message") or payload.get("content") or phase or "Progress",
                 "status": status,
@@ -121,6 +121,7 @@ def normalize_legacy_payloads(
         "approval.bypassed",
         "access.denied",
         "artifact.ignored",
+        "response.cancelled",
     }:
         event_type = legacy_type
         event_payload.update({
@@ -279,7 +280,7 @@ def _legacy_progress_payload(event: CoworkEvent) -> dict[str, Any] | None:
             "message": label or f"Created artifact: {artifact.get('title') or artifact.get('name') or 'Artifact'}",
             "artifact": artifact,
         }
-    if event.type == "progress.reasoning":
+    if event.type == "reasoning":
         return {**base, "phase": event.payload.get("phase") or "reasoning"}
     if event.type == "file.accessed":
         return {
@@ -345,6 +346,24 @@ def cowork_event_to_legacy_sse(event: CoworkEvent) -> str:
     progress = _legacy_progress_payload(event)
     if progress is not None:
         return f"event: response.in_progress\ndata: {json.dumps(progress)}\n\n"
+
+    if event.type == "message.delta":
+        payload = {
+            "type": "response.output_text.delta",
+            "at_ms": event.at_ms,
+            "delta": event.payload.get("delta") or "",
+            **{k: v for k, v in event.payload.items() if k not in {"delta", "legacy", "legacy_type"}},
+        }
+        return f"event: response.output_text.delta\ndata: {json.dumps(payload)}\n\n"
+
+    if event.type == "response.cancelled":
+        payload = {
+            "type": "response.failed",
+            "at_ms": event.at_ms,
+            "code": event.payload.get("code") or "cancelled",
+            "error": event.payload.get("message") or "Response cancelled",
+        }
+        return f"event: response.failed\ndata: {json.dumps(payload)}\n\n"
 
     payload = {
         "type": event.type,
