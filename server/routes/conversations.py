@@ -1,9 +1,9 @@
-"""GET /v1/conversations and friends — persistent conversation records.
+"""GET /v1/conversations and friends — Cowork-owned conversation records.
 
-Returns Anton-side data only (id, title, turns, preview, timestamps,
-project, messages). Cowork-side metadata (pinned, attachments) lives
-on the cowork-side routes (/v1/pins, /v1/attachments) and is merged
-client-side into the UI "task" object.
+New runtime conversations are loaded from Cowork's canonical store under
+each project's `.cowork/conversations` directory. Harness-native episode
+logs may still exist as adapter-private working state, but these routes do
+not read them as a source of truth.
 
 Conversations are scoped to a project (folder under projects_store):
   GET /v1/conversations                     → active project
@@ -116,144 +116,6 @@ def _annotate_with_schedule_id(conversations: list[dict]) -> list[dict]:
         if match:
             conv["scheduled_id"] = match
     return conversations
-
-
-_ATTACHMENT_MARKER = "\n\nAttached context supplied by the user:"
-
-
-def _strip_attachment_context(content: str) -> str:
-    if _ATTACHMENT_MARKER in content:
-        return content.split(_ATTACHMENT_MARKER, 1)[0].rstrip()
-    return content
-
-
-def _parse_for_display(
-    history: list[dict],
-    *,
-    turns: dict | None = None,
-) -> list[dict]:
-    """Filter raw history into one displayable entry per user→answer
-    cycle and attach per-turn event metadata.
-
-    Anton's history often contains MULTIPLE assistant messages between
-    two user messages (a brief acknowledgement, then a tool-use phase,
-    then the final answer). During live streaming the client only sees
-    the final composed assistant turn, but `_history.json` keeps each
-    intermediate text response as its own entry. If we surfaced each
-    as a separate bubble the conversation would render very differently
-    after a reload than during streaming — most visibly, a brief intro
-    gets its own bubble, then the actual answer (with thinking +
-    artifacts) gets ANOTHER, when they should be one.
-
-    So we merge consecutive assistant text messages into a single
-    bubble with content joined by blank lines. The events sidecar lives
-    per "displayable turn" (matching `record_turn_events`'s filter), so
-    a merged bubble inherits the events of its last segment — which is
-    where scratchpad cells and artifacts actually came from.
-    """
-    by_assistant_turn = (
-        turns.get("by_assistant_turn", {}) if isinstance(turns, dict) else {}
-    )
-
-    out: list[dict] = []
-    assistant_idx = 0
-    used_assistant_event_indices: set[int] = set()
-    for msg in history:
-        if not isinstance(msg, dict):
-            continue
-        role = msg.get("role")
-        content = msg.get("content", "")
-        if role not in ("user", "assistant") or not content:
-            continue
-        if isinstance(content, list):
-            content = "\n".join(
-                block.get("text", "")
-                for block in content
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
-        if not content:
-            continue
-        text = (
-            _strip_attachment_context(str(content))
-            if role == "user"
-            else str(content)
-        )
-        # Skip anton-core's auto-recovery prompts. When a tool call
-        # fails mid-stream, anton appends a synthetic
-        # `{role: "user", content: "SYSTEM: An error interrupted
-        # execution: …"}` message to history so the LLM can self-
-        # correct on the next turn (anton/core/session.py:952). They
-        # must remain in _history.json (anton needs them as context
-        # next turn) but rendering them as user bubbles in the chat
-        # is confusing — the user never typed them, they read like
-        # the conversation went off the rails. Two known prefixes:
-        #   "SYSTEM: An error interrupted execution: …" — single retry
-        #   "SYSTEM: The task has failed N times. Latest error: …" — retries exhausted
-        # Anything else starting with SYSTEM: is treated the same way
-        # to be safe; user-typed content that legitimately starts
-        # with that token is vanishingly unlikely.
-        if role == "user" and text.lstrip().startswith("SYSTEM:"):
-            continue
-        if role == "assistant":
-            # Merge with the previous bubble if it's also assistant —
-            # this is the same user→answer cycle, just split into
-            # multiple internal text emissions.
-            if out and out[-1]["role"] == "assistant":
-                prev = out[-1]
-                prev["content"] = f"{prev['content'].rstrip()}\n\n{text}"
-                # The events sidecar slot for this cycle is keyed by
-                # the merged bubble's index. record_turn_events writes
-                # at displayable_count - 1, which lines up with the
-                # current `assistant_idx - 1` since we just merged.
-                idx = max(0, assistant_idx - 1)
-                saved = by_assistant_turn.get(str(idx))
-                if isinstance(saved, dict):
-                    events = saved.get("events")
-                    started_at = saved.get("started_at")
-                    if isinstance(events, list) and events:
-                        prev["events"] = events
-                        used_assistant_event_indices.add(idx)
-                    if started_at is not None and "startedAt" not in prev:
-                        prev["startedAt"] = started_at
-                continue
-
-            entry: dict = {"role": role, "content": text}
-            saved = by_assistant_turn.get(str(assistant_idx))
-            current_assistant_idx = assistant_idx
-            assistant_idx += 1
-            if isinstance(saved, dict):
-                events = saved.get("events")
-                started_at = saved.get("started_at")
-                if isinstance(events, list) and events:
-                    entry["events"] = events
-                    used_assistant_event_indices.add(current_assistant_idx)
-                if started_at is not None:
-                    entry["startedAt"] = started_at
-            out.append(entry)
-        else:
-            out.append({"role": role, "content": text})
-    def _turn_key(item: tuple[object, object]) -> int:
-        try:
-            return int(item[0])
-        except (TypeError, ValueError):
-            return 10**9
-
-    for key, saved in sorted(by_assistant_turn.items(), key=_turn_key):
-        try:
-            idx = int(key)
-        except (TypeError, ValueError):
-            continue
-        if idx in used_assistant_event_indices or not isinstance(saved, dict):
-            continue
-        events = saved.get("events")
-        if not isinstance(events, list) or not events:
-            continue
-        entry: dict = {"role": "assistant", "content": "", "events": events}
-        started_at = saved.get("started_at")
-        if started_at is not None:
-            entry["startedAt"] = started_at
-        out.append(entry)
-    return out
 
 
 @router.get("/v1/conversations")
