@@ -40,14 +40,52 @@ const HOP_HEADERS = new Set([
   'upgrade',
 ]);
 
+// Any CORS headers emitted by the upstream backend are dropped so we can
+// inject our own consistent set — otherwise a backend that already sets
+// `Access-Control-Allow-Origin` would produce duplicate headers, which
+// browsers treat as an error.
+const CORS_RESPONSE_HEADERS = new Set([
+  'access-control-allow-origin',
+  'access-control-allow-methods',
+  'access-control-allow-headers',
+  'access-control-allow-credentials',
+  'access-control-expose-headers',
+  'access-control-max-age',
+]);
+
 function stripHopHeaders(headers: http.IncomingHttpHeaders): http.OutgoingHttpHeaders {
   const out: http.OutgoingHttpHeaders = {};
   for (const [key, value] of Object.entries(headers)) {
-    if (HOP_HEADERS.has(key.toLowerCase())) continue;
+    const lower = key.toLowerCase();
+    if (HOP_HEADERS.has(lower)) continue;
+    if (CORS_RESPONSE_HEADERS.has(lower)) continue;
     if (value === undefined) continue;
     out[key] = value;
   }
   return out;
+}
+
+// CORS headers we inject on every proxied response.
+//
+// Why: cowork mounts the preview in a sandboxed iframe without
+// `allow-same-origin`, so the document has an opaque origin and every
+// `fetch()` from artifact JS — even to its own backend on the same host
+// and port — is treated as cross-origin by the browser (Origin: null).
+// Without these headers, the response is blocked client-side as a CORS
+// error even though the request reached the backend successfully.
+//
+// `*` is safe here because the proxy listens on loopback only and the
+// iframe's opaque origin cannot carry cookies or credentials anyway.
+function corsHeaders(req: http.IncomingMessage): http.OutgoingHttpHeaders {
+  const requestedHeaders = req.headers['access-control-request-headers'];
+  return {
+    'Access-Control-Allow-Origin': '*',
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': Array.isArray(requestedHeaders)
+      ? requestedHeaders.join(', ')
+      : requestedHeaders || '*',
+    'Access-Control-Max-Age': '600',
+  };
 }
 
 function readBackendPort(artifactDir: string): number | null {
@@ -86,6 +124,17 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
     sendError(res, 401, 'Unauthorized');
     return;
   }
+
+  const cors = corsHeaders(req);
+
+  // Short-circuit CORS preflight at the proxy so artifact backends
+  // don't need to implement OPTIONS themselves.
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, cors);
+    res.end();
+    return;
+  }
+
   const dir = currentArtifactDir;
   if (!dir) {
     sendError(res, 503, 'No active artifact preview');
@@ -111,7 +160,7 @@ function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): voi
       headers,
     },
     (proxyRes) => {
-      const respHeaders = stripHopHeaders(proxyRes.headers);
+      const respHeaders = { ...stripHopHeaders(proxyRes.headers), ...cors };
       res.writeHead(proxyRes.statusCode ?? 502, respHeaders);
       proxyRes.pipe(res);
     }
