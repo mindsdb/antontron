@@ -65,7 +65,7 @@ PROVIDER_TYPE_LABELS = {
 # Server-owned so the UI doesn't drift from what each backend actually
 # accepts. Empty list = user must supply (openai-compatible).
 RECOMMENDED_MODELS: dict[str, list[str]] = {
-    # mdb.ai's router currently only accepts the `_reason_` / `_code_`
+    # MindsHub's router currently only accepts the `_reason_` / `_code_`
     # sentinel pair — every other model name returns
     # "Mind 'X' not found" (HTTP 500). The earlier expansion
     # (latest:sonnet, latest:gpt, gpt-low, …) was rolled back after
@@ -284,7 +284,7 @@ def _empty_provider(ptype: str) -> dict[str, Any]:
         base["name"] = ""
     if ptype == "minds-cloud":
         base.update({
-            "mindsUrl": "https://mdb.ai",
+            "mindsUrl": "https://api.mindshub.ai",
             "mindsMindName": "",
             "mindsDatasource": "",
             "mindsDatasourceEngine": "",
@@ -503,7 +503,7 @@ def _base_url_for(provider: dict[str, Any]) -> str:
     if provider["type"] == "gemini":
         return GEMINI_BASE_URL
     if provider["type"] == "minds-cloud":
-        url = (provider.get("mindsUrl") or "https://mdb.ai").rstrip("/")
+        url = (provider.get("mindsUrl") or "https://api.mindshub.ai").rstrip("/")
         return f"{url}{MINDS_API_PATH_SUFFIX}"
     if provider["type"] == "openai-compatible":
         return provider.get("baseUrl", "") or ""
@@ -560,7 +560,7 @@ def _env_from_providers(
             writes["ANTON_MINDS_API_KEY"] = m["apiKey"]
         else:
             deletes.append("ANTON_MINDS_API_KEY")
-        writes["ANTON_MINDS_URL"] = (m.get("mindsUrl") or "https://mdb.ai").rstrip("/")
+        writes["ANTON_MINDS_URL"] = (m.get("mindsUrl") or "https://api.mindshub.ai").rstrip("/")
         for key, env in (
             ("mindsMindName", "ANTON_MINDS_MIND_NAME"),
             ("mindsDatasource", "ANTON_MINDS_DATASOURCE"),
@@ -674,7 +674,7 @@ async def get_settings():
         "anthropicApiKey":  _masked("ANTON_ANTHROPIC_API_KEY"),
         "openaiApiKey":     _masked("ANTON_OPENAI_API_KEY"),
         "mindsApiKey":      _masked("ANTON_MINDS_API_KEY"),
-        "mindsUrl":         _get_env("ANTON_MINDS_URL", "https://mdb.ai"),
+        "mindsUrl":         _get_env("ANTON_MINDS_URL", "https://api.mindshub.ai"),
         "mindsMindName":    _get_env("ANTON_MINDS_MIND_NAME", ""),
         "mindsDatasource":  _get_env("ANTON_MINDS_DATASOURCE", ""),
         "mindsDatasourceEngine": _get_env("ANTON_MINDS_DATASOURCE_ENGINE", ""),
@@ -875,7 +875,7 @@ async def update_settings(patch: SettingsPatch):
     # the new endpoint. Catch the two unambiguous cases:
     #
     #   1. Active state = Minds Cloud, but ANTON_OPENAI_API_KEY holds a
-    #      non-Minds value → router auth will 401 against mdb.ai.
+    #      non-Minds value → router auth will 401 against MindsHub.
     #   2. Active state = OpenAI / non-Minds compatible, but
     #      ANTON_OPENAI_API_KEY holds an `mdb_…` Minds key → will 401
     #      against api.openai.com (or any non-Minds host).
@@ -992,8 +992,8 @@ async def _ping_provider(p: dict[str, Any]) -> tuple[str, str]:
         if ptype == "minds-cloud":
             if not key:
                 return "fail", "missing API key"
-            base = (p.get("mindsUrl") or "https://mdb.ai").rstrip("/")
-            # mdb.ai exposes `/api/v1/minds/` as the auth-checked list
+            base = (p.get("mindsUrl") or "https://api.mindshub.ai").rstrip("/")
+            # MindsHub exposes `/api/v1/minds/` as the auth-checked list
             # endpoint (the OpenAI-compatible `/models` route 401s even
             # for valid keys). This matches the URL used by the Electron
             # main process's validateMinds helper.
