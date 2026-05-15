@@ -104,6 +104,26 @@ class RuntimeSchemaTests(unittest.TestCase):
         self.assertEqual(request.model_dump()["inference"]["coding_provider_type"], "minds-cloud")
         self.assertEqual(request.inference.safe_dump()["planning_api_key_ref"], "ANTON_MINDS_API_KEY")
 
+    def test_nanoclaw_placeholder_proves_third_harness_contract(self) -> None:
+        from harnesses.nanoclaw_provider import NanoclawHarnessProvider
+
+        provider = NanoclawHarnessProvider()
+        caps = provider.capabilities()
+        readiness = provider.validate_request(HarnessTurnRequest(
+            conversation_id="conv_1",
+            turn_id="turn_1",
+            messages=[],
+            user_input="Hello",
+            project_context=ProjectContext(id="general", name="general", path="/tmp/general"),
+            inference=ResolvedInferenceProfile(provider_type="minds-cloud", provider_label="MindsHub"),
+            artifact_root="/tmp/general/artifacts",
+        ))
+
+        self.assertEqual(provider.id, "nanoclaw")
+        self.assertFalse(caps.streaming)
+        self.assertFalse(readiness.ready)
+        self.assertEqual(readiness.code, "unsupported_harness")
+
     def test_tool_and_artifact_progress_normalize(self) -> None:
         tool = normalize_legacy_payload(
             {
