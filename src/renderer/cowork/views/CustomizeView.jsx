@@ -254,7 +254,7 @@ function MetaRow({ label, value }) {
 
 const VAULT_KEEP = '__anton_vault_keep__';
 
-function ConnectionDetailPanel({ connection, onClose, onDisconnect }) {
+function ConnectionDetailPanel({ connection, onClose, onDisconnect, onReconnect }) {
   const [spec, setSpec] = useState(null);
   const [saved, setSaved] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -451,8 +451,24 @@ function ConnectionDetailPanel({ connection, onClose, onDisconnect }) {
         <div style={{
           padding: '14px 20px',
           borderTop: '1px solid var(--line)',
+          display: 'flex', flexDirection: 'column', gap: 8,
           flexShrink: 0,
         }}>
+          {spec && (
+            <button
+              type="button"
+              className="btn-primary"
+              onClick={() => {
+                if (!window.confirm(
+                  `The existing ${spec.label || connection.engine} connection will be removed and you'll connect it again from scratch. Continue?`
+                )) return;
+                onReconnect?.(connection, spec);
+              }}
+              style={{ width: '100%', justifyContent: 'center' }}
+            >
+              Reconnect
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -484,6 +500,7 @@ export default function CustomizeView({
   connectors: initialConnectors = [],
   onConnectNew,
   onModifyConnection,
+  onReconnect,
   /** Called with the fresh connections array so App can update the sidebar badge + composer list. */
   onConnectionsSynced,
 }) {
@@ -683,6 +700,11 @@ export default function CustomizeView({
           onDisconnect={async (conn) => {
             await handleDelete(conn);
             setSelectedConn(null);
+          }}
+          onReconnect={async (conn, spec) => {
+            await handleDelete(conn);
+            setSelectedConn(null);
+            onReconnect?.(spec);
           }}
         />
       )}
