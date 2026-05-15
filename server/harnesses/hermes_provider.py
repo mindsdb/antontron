@@ -34,8 +34,6 @@ from runtime.artifacts import (
     artifact_payload_from_folder,
     artifact_root_for_project,
     ensure_artifact_root,
-    scan_updated_artifacts,
-    snapshot_artifacts,
     user_files as artifact_user_files,
 )
 from runtime.events import (
@@ -647,7 +645,6 @@ class HermesHarnessProvider:
         prompt = self._build_prompt(history_before, user_input)
         self._append_message(project_name, cid, "user", user_input)
         artifact_dir = self._ensure_artifact_root(project_name, artifact_root=artifact_root)
-        artifact_snapshot = snapshot_artifacts(artifact_dir)
 
         recorded_events: list[dict] = []
         started_at_ms: int | None = None
@@ -775,24 +772,9 @@ class HermesHarnessProvider:
                                 "item_id": msg_id,
                                 "delta": output,
                             },
-                        )
+                    )
                     full_text = "".join(collected_text)
                     self._append_message(project_name, cid, "assistant", full_text)
-                    for artifact in scan_updated_artifacts(artifact_dir, artifact_snapshot):
-                        seq += 1
-                        yield _event(
-                            "response.in_progress",
-                            {
-                                "type": "response.in_progress",
-                                "sequence_number": seq,
-                                "thought_role": Role.thought_progress.value,
-                                "phase": "artifact",
-                                "progress_status": "completed",
-                                "message": f"Created artifact: {artifact['title']}",
-                                "content": json.dumps(artifact, ensure_ascii=False),
-                                "artifact": artifact,
-                            },
-                        )
                     completed = ResponseObject(
                         id=resp_id,
                         model=response_model,
@@ -899,9 +881,6 @@ class HermesHarnessProvider:
             return root
         return ensure_artifact_root(self._project_base(project_name))
 
-    def _artifact_snapshot(self, project_name: str | None) -> dict[str, float]:
-        return snapshot_artifacts(self._artifact_root(project_name))
-
     def _artifact_instructions(self, project_name: str | None, *, artifact_root: Path | None = None) -> str:
         root = artifact_root or self._artifact_root(project_name)
         return (
@@ -954,9 +933,6 @@ class HermesHarnessProvider:
 
     def _artifact_payload_from_folder(self, folder: Path) -> dict[str, Any] | None:
         return artifact_payload_from_folder(folder, root=folder.parent)
-
-    def _scan_updated_artifacts(self, project_name: str | None, before: dict[str, float]) -> list[dict[str, Any]]:
-        return scan_updated_artifacts(self._artifact_root(project_name), before)
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json"}
