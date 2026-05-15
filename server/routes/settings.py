@@ -64,13 +64,21 @@ PROVIDER_TYPE_LABELS = {
 
 # Server-owned so the UI doesn't drift from what each backend actually
 # accepts. Empty list = user must supply (openai-compatible).
+#
+# minds-cloud hosts a single `latest:*` alias namespace whose router
+# dispatches to the actual provider (Anthropic, OpenAI, Google, Fireworks)
+# upstream — the cowork app never needs to know which provider serves a
+# given alias. Direct-provider buckets below stay on concrete model IDs
+# because they hit the providers' own APIs.
 RECOMMENDED_MODELS: dict[str, list[str]] = {
-    # mdb.ai's router currently only accepts the `_reason_` / `_code_`
-    # sentinel pair — every other model name returns
-    # "Mind 'X' not found" (HTTP 500). The earlier expansion
-    # (latest:sonnet, latest:gpt, gpt-low, …) was rolled back after
-    # an end-to-end test against the live router.
-    "minds-cloud":       ["_reason_", "_code_"],
+    "minds-cloud": [
+        "latest:sonnet", "latest:opus", "latest:haiku",
+        "latest:gpt", "latest:gpt-low", "latest:gpt-medium",
+        "latest:gpt-high", "latest:gpt-codex",
+        "latest:gpt-mini", "latest:gpt-nano",
+        "latest:gemini", "latest:gemini-flash",
+        "latest:kimi", "latest:deepseek", "latest:qwen",
+    ],
     "anthropic":         ["claude-sonnet-4-6", "claude-opus-4-6", "claude-haiku-4-5-20251001"],
     "openai":            ["gpt-5.4", "gpt-5.4-mini", "o3", "o4-mini"],
     "gemini":            ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-3-flash-preview"],
@@ -79,7 +87,7 @@ RECOMMENDED_MODELS: dict[str, list[str]] = {
 
 # Default planning + coding model per type. Used when modelMode == 'default'.
 RECOMMENDED_PAIR = {
-    "minds-cloud":       ("_reason_", "_code_"),
+    "minds-cloud":       ("latest:sonnet", "latest:haiku"),
     "anthropic":         ("claude-sonnet-4-6", "claude-haiku-4-5-20251001"),
     "openai":            ("gpt-5.4", "gpt-5.4-mini"),
     "gemini":            ("gemini-2.5-pro", "gemini-2.5-flash"),
@@ -221,16 +229,6 @@ def get_config_status() -> dict[str, Any]:
         "provider_label": PROVIDER_LABELS.get(provider, provider),
         "migrated": migrated,
     }
-
-
-# Minds Cloud uses sentinel model names (`_reason_`, `_code_`) that
-# only its OpenAI-compatible router resolves. If the user onboards via
-# Minds and later switches `ANTON_PLANNING_PROVIDER` to anthropic /
-# openai / gemini, these sentinels linger in cowork preferences and
-# the UI sends them on every request — every request then 404s
-# because the new provider doesn't know what `_reason_` is.
-def _is_minds_sentinel(model_id: str | None) -> bool:
-    return bool(model_id) and model_id.startswith("_") and model_id.endswith("_")
 
 
 def _ui_settings() -> dict[str, Any]:
