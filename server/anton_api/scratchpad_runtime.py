@@ -132,3 +132,28 @@ async def close_all() -> None:
         except Exception:
             pass
     _pads.clear()
+
+
+class WorkspaceScopedPool:
+    """ScratchpadPoolLike adapter satisfying anton's launch_artifact_backend.
+
+    Pins the workspace_path at construction so the helper sees a no-arg
+    `venv_python(name)` / `get_or_create(name)` API. `venv_python`
+    provisions the venv on demand via `LocalScratchpadRuntime.ensure_venv`
+    — fast no-op when the deterministic disk path
+    (`<workspace>/.anton/scratchpad-venvs/<name>/`) already exists,
+    full `uv venv` / `python -m venv` creation when it doesn't. The
+    runtime is registered in the module-level pool so subsequent
+    `get_or_create` calls (e.g. for `install_packages`) reuse the same
+    instance.
+    """
+
+    def __init__(self, workspace_path: str):
+        self._workspace_path = workspace_path
+
+    async def venv_python(self, name: str) -> Optional[str]:
+        pad = get_or_create(name, workspace_path=self._workspace_path)
+        return pad.ensure_venv()
+
+    async def get_or_create(self, name: str):
+        return get_or_create(name, workspace_path=self._workspace_path)
