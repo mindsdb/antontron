@@ -467,7 +467,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
             className="provider-card-link"
             onClick={(e) => { e.stopPropagation(); host.openExternal(MINDS_REGISTER_URL); }}
           >
-            Get your first month free &rarr;
+            Get your first week free &rarr;
           </span>
         </div>
       </div>
@@ -582,7 +582,7 @@ export default function Onboarding({ onComplete }: { onComplete: () => void }) {
                 className="onboard-link"
                 onClick={() => host.openExternal(MINDS_REGISTER_URL)}
               >
-                Sign up at mindshub.ai for a free month
+                Sign up at mindshub.ai for a free week
               </span>
             </div>
           )}
