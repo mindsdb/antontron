@@ -7,13 +7,17 @@ the translation layer and the single place that handles legacy env fallbacks.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
+import httpx
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Any, Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from .cowork_state import update_state, load_state
@@ -61,7 +65,7 @@ PROVIDER_TYPE_LABELS = {
 # Server-owned so the UI doesn't drift from what each backend actually
 # accepts. Empty list = user must supply (openai-compatible).
 RECOMMENDED_MODELS: dict[str, list[str]] = {
-    # mdb.ai's router currently only accepts the `_reason_` / `_code_`
+    # MindsHub's router currently only accepts the `_reason_` / `_code_`
     # sentinel pair — every other model name returns
     # "Mind 'X' not found" (HTTP 500). The earlier expansion
     # (latest:sonnet, latest:gpt, gpt-low, …) was rolled back after
@@ -280,7 +284,7 @@ def _empty_provider(ptype: str) -> dict[str, Any]:
         base["name"] = ""
     if ptype == "minds-cloud":
         base.update({
-            "mindsUrl": "https://mdb.ai",
+            "mindsUrl": "https://api.mindshub.ai",
             "mindsMindName": "",
             "mindsDatasource": "",
             "mindsDatasourceEngine": "",
@@ -499,7 +503,7 @@ def _base_url_for(provider: dict[str, Any]) -> str:
     if provider["type"] == "gemini":
         return GEMINI_BASE_URL
     if provider["type"] == "minds-cloud":
-        url = (provider.get("mindsUrl") or "https://mdb.ai").rstrip("/")
+        url = (provider.get("mindsUrl") or "https://api.mindshub.ai").rstrip("/")
         return f"{url}{MINDS_API_PATH_SUFFIX}"
     if provider["type"] == "openai-compatible":
         return provider.get("baseUrl", "") or ""
@@ -556,7 +560,7 @@ def _env_from_providers(
             writes["ANTON_MINDS_API_KEY"] = m["apiKey"]
         else:
             deletes.append("ANTON_MINDS_API_KEY")
-        writes["ANTON_MINDS_URL"] = (m.get("mindsUrl") or "https://mdb.ai").rstrip("/")
+        writes["ANTON_MINDS_URL"] = (m.get("mindsUrl") or "https://api.mindshub.ai").rstrip("/")
         for key, env in (
             ("mindsMindName", "ANTON_MINDS_MIND_NAME"),
             ("mindsDatasource", "ANTON_MINDS_DATASOURCE"),
@@ -670,7 +674,7 @@ async def get_settings():
         "anthropicApiKey":  _masked("ANTON_ANTHROPIC_API_KEY"),
         "openaiApiKey":     _masked("ANTON_OPENAI_API_KEY"),
         "mindsApiKey":      _masked("ANTON_MINDS_API_KEY"),
-        "mindsUrl":         _get_env("ANTON_MINDS_URL", "https://mdb.ai"),
+        "mindsUrl":         _get_env("ANTON_MINDS_URL", "https://api.mindshub.ai"),
         "mindsMindName":    _get_env("ANTON_MINDS_MIND_NAME", ""),
         "mindsDatasource":  _get_env("ANTON_MINDS_DATASOURCE", ""),
         "mindsDatasourceEngine": _get_env("ANTON_MINDS_DATASOURCE_ENGINE", ""),
@@ -871,7 +875,7 @@ async def update_settings(patch: SettingsPatch):
     # the new endpoint. Catch the two unambiguous cases:
     #
     #   1. Active state = Minds Cloud, but ANTON_OPENAI_API_KEY holds a
-    #      non-Minds value → router auth will 401 against mdb.ai.
+    #      non-Minds value → router auth will 401 against MindsHub.
     #   2. Active state = OpenAI / non-Minds compatible, but
     #      ANTON_OPENAI_API_KEY holds an `mdb_…` Minds key → will 401
     #      against api.openai.com (or any non-Minds host).
@@ -988,8 +992,8 @@ async def _ping_provider(p: dict[str, Any]) -> tuple[str, str]:
         if ptype == "minds-cloud":
             if not key:
                 return "fail", "missing API key"
-            base = (p.get("mindsUrl") or "https://mdb.ai").rstrip("/")
-            # mdb.ai exposes `/api/v1/minds/` as the auth-checked list
+            base = (p.get("mindsUrl") or "https://api.mindshub.ai").rstrip("/")
+            # MindsHub exposes `/api/v1/minds/` as the auth-checked list
             # endpoint (the OpenAI-compatible `/models` route 401s even
             # for valid keys). This matches the URL used by the Electron
             # main process's validateMinds helper.
@@ -1061,3 +1065,182 @@ async def validate_settings():
         "provider": status["provider"],
         "model": status["model"],
     }
+
+
+# ─── Onboarding-only surface (web SPA parity with Electron) ─────────
+# These endpoints back the host abstraction's readSettings/saveSettings/
+# checkInstall/checkConfigured/validateProvider methods on the web. The
+# Electron renderer goes through window.antontron instead — see
+# src/renderer/platform/host.ts. The contract here matches the IPC
+# shapes so the same React onboarding pages work in both shells.
+
+
+@router.get("/raw")
+async def read_raw_settings():
+    """Return ~/.anton/.env as a flat dict — same shape as the
+    Electron `readSettings` IPC. Onboarding uses this to load existing
+    values when the user revisits the LLM-provider screen.
+
+    Values are returned in the clear because the user is configuring
+    their own backend; there is no cross-tenant exposure on a single-
+    user FastAPI instance. If we ever multi-tenant the web host this
+    must move to a per-user store."""
+    return _read_dotenv(GLOBAL_ENV_PATH)
+
+
+class RawSettingsBody(BaseModel):
+    content: str
+
+
+@router.post("/raw")
+async def write_raw_settings(body: RawSettingsBody):
+    """Replace ~/.anton/.env with the supplied dotenv content. Mirrors
+    the Electron `saveSettings` IPC. Onboarding builds the lines
+    locally (provider, model, keys) and posts the joined string."""
+    try:
+        GLOBAL_ENV_PATH.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            GLOBAL_ENV_PATH.parent.chmod(0o700)
+        except OSError:
+            pass
+        GLOBAL_ENV_PATH.write_text(body.content + "\n", encoding="utf-8")
+        try:
+            GLOBAL_ENV_PATH.chmod(0o600)
+        except OSError:
+            pass
+        # Reflect the writes in the running process so subsequent
+        # health checks pick them up without a server restart.
+        for line in body.content.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, val = line.partition("=")
+            os.environ[key.strip()] = val.strip().strip('"').strip("'")
+    except Exception as e:
+        logger.warning("Failed to write raw settings: %s", e)
+        raise HTTPException(status_code=500, detail="Settings could not be saved.") from e
+    return {"ok": True}
+
+
+@router.get("/install-status")
+async def install_status():
+    """The hosted FastAPI server is its own install — if this endpoint
+    answers, anton + python deps are by definition ready. Returned for
+    parity with the Electron `checkInstall` IPC so App.tsx's setup gate
+    can short-circuit on web."""
+    return {"antonInstalled": True, "serverDepsReady": True}
+
+
+@router.get("/configured")
+async def check_configured():
+    """Cheap predicate used by App.tsx's onboarding gate. Mirrors the
+    Electron `checkConfigured` IPC: a key being present is enough — we
+    don't ping the provider here (validate-provider does that)."""
+    env = _read_dotenv(GLOBAL_ENV_PATH)
+    if env.get("ANTON_ANTHROPIC_API_KEY") or os.environ.get("ANTON_ANTHROPIC_API_KEY"):
+        return {"configured": True, "provider": "anthropic"}
+    if (env.get("ANTON_OPENAI_API_KEY") or os.environ.get("ANTON_OPENAI_API_KEY")) and (
+        env.get("ANTON_OPENAI_BASE_URL") or os.environ.get("ANTON_OPENAI_BASE_URL")
+    ):
+        return {"configured": True, "provider": "minds"}
+    return {"configured": False, "provider": ""}
+
+
+class ValidateProviderBody(BaseModel):
+    provider: str
+    apiKey: str
+    baseUrl: Optional[str] = None
+    model: Optional[str] = None
+
+
+def _http_json(url: str, method: str, headers: dict[str, str], body: Optional[bytes] = None) -> tuple[int, str]:
+    req = urllib.request.Request(url, data=body, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return resp.status, resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        return e.code, e.read().decode("utf-8", errors="replace") if e.fp else ""
+    except urllib.error.URLError as e:
+        raise RuntimeError(str(e.reason)) from e
+
+
+def _validate_anthropic(api_key: str, model: str) -> dict[str, Any]:
+    try:
+        body = json.dumps({"model": model, "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]}).encode()
+        status, text = _http_json(
+            "https://api.anthropic.com/v1/messages",
+            "POST",
+            {"x-api-key": api_key, "anthropic-version": "2023-06-01", "content-type": "application/json"},
+            body,
+        )
+        if status in (200, 201):
+            return {"ok": True}
+        try:
+            msg = json.loads(text).get("error", {}).get("message") or f"HTTP {status}"
+        except Exception:
+            msg = f"HTTP {status}"
+        return {"ok": False, "error": msg}
+    except Exception:
+        logger.warning("Anthropic provider validation failed", exc_info=True)
+        return {"ok": False, "error": "Cannot connect"}
+
+
+def _validate_minds(api_key: str, base_url: str) -> dict[str, Any]:
+    # mdb.ai requires HTTP/2; urllib only speaks HTTP/1.1 and gets a 401.
+    # httpx (already a transitive dep via anton) handles HTTP/2 via ALPN.
+    try:
+        base = base_url.rstrip("/")
+        with httpx.Client(http2=True, timeout=15) as client:
+            resp = client.get(
+                f"{base}/api/v1/minds/",
+                headers={"Authorization": f"Bearer {api_key}"},
+            )
+        if resp.status_code in (401, 403):
+            return {"ok": False, "error": "Invalid API key"}
+        if 200 <= resp.status_code < 300:
+            return {"ok": True}
+        return {"ok": False, "error": f"Server returned HTTP {resp.status_code}"}
+    except Exception:
+        logger.warning("Minds provider validation failed", exc_info=True)
+        return {"ok": False, "error": "Cannot connect"}
+
+
+def _validate_openai_compatible(api_key: str, base_url: str, model: Optional[str]) -> dict[str, Any]:
+    try:
+        normalized = base_url.rstrip("/")
+        # Bases that already include a versioned path (e.g. Gemini's
+        # /v1beta/openai) skip the implicit /v1 prefix.
+        import re
+        chat_url = f"{normalized}/chat/completions" if re.search(r"/v\d", normalized) else f"{normalized}/v1/chat/completions"
+        body = json.dumps({"model": model or "gpt-4o", "messages": [{"role": "user", "content": "ping"}]}).encode()
+        status, text = _http_json(
+            chat_url,
+            "POST",
+            {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+            body,
+        )
+        if status in (200, 201):
+            return {"ok": True}
+        if status in (401, 403):
+            return {"ok": False, "error": "Invalid API key"}
+        try:
+            msg = json.loads(text).get("error", {}).get("message") or f"HTTP {status}"
+        except Exception:
+            msg = f"HTTP {status}"
+        return {"ok": False, "error": msg}
+    except Exception:
+        logger.warning("OpenAI-compatible provider validation failed", exc_info=True)
+        return {"ok": False, "error": "Cannot connect"}
+
+
+@router.post("/validate-provider")
+async def validate_provider(body: ValidateProviderBody):
+    """Server-side provider key check. Mirrors the Electron
+    `validateProvider` IPC; same shape, same provider names."""
+    if body.provider == "anthropic":
+        return _validate_anthropic(body.apiKey, body.model or "claude-sonnet-4-6")
+    if body.provider == "minds":
+        return _validate_minds(body.apiKey, body.baseUrl or "https://mdb.ai")
+    if body.provider == "openai-compatible":
+        return _validate_openai_compatible(body.apiKey, body.baseUrl or "https://api.openai.com/v1", body.model)
+    return {"ok": False, "error": "Unknown provider"}

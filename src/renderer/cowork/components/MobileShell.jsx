@@ -179,13 +179,14 @@ export default function MobileShell({
 
   const title = titleForRoute(route, { selectedProject, currentTask });
 
-  // FAB is the universal "create" affordance on mobile. Shown
-  // everywhere except inside an open chat (the composer already
-  // covers that surface) and on configuration surfaces (Settings)
-  // where "create new" is not a relevant action. Tap opens a 2-row
-  // menu: New task / New project. "New task" honors the current
-  // project context if any.
-  const showFab = route !== 'task' && route !== 'settings';
+  // FAB is the universal "create" affordance on mobile. Hidden on:
+  //   • 'task'      — the chat composer already covers "new message".
+  //   • 'settings'  — configuration surface; "create new" not relevant.
+  //   • 'artifacts' — a read-only gallery; artifacts are produced by
+  //                   tasks, not by an explicit "+ artifact" action.
+  // Tap opens a 2-row menu: New task / New project. "New task" honors
+  // the current project context if any.
+  const showFab = !['task', 'settings', 'artifacts'].includes(route);
   const fabProject = route === 'projects' && selectedProject ? selectedProject : null;
 
   return (

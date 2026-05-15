@@ -13,9 +13,67 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import subprocess
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+
+# Names we import at the top of this module. If anton-core's
+# self-update wiped them from the venv (uv tool reinstall is the usual
+# culprit), the next `from fastapi import FastAPI` would crash the
+# whole server with a generic ModuleNotFoundError. Heal in place
+# instead — pip-install from our bundled requirements.txt and re-exec.
+_SERVER_DEP_IMPORTS: tuple[str, ...] = ("fastapi", "uvicorn", "multipart", "pydantic", "httpx")
+
+
+def _missing_server_deps() -> list[str]:
+    missing: list[str] = []
+    for name in _SERVER_DEP_IMPORTS:
+        try:
+            __import__(name)
+        except ImportError:
+            missing.append(name)
+    return missing
+
+
+def _reinstall_server_deps() -> bool:
+    """pip-install the bundled requirements.txt into the current
+    interpreter. Returns True on success."""
+    req = Path(__file__).parent / "requirements.txt"
+    if not req.is_file():
+        print(f"[server] cannot heal venv — requirements.txt not at {req}", flush=True)
+        return False
+    print(f"[server] healing venv via {sys.executable} -m pip install -r {req}", flush=True)
+    try:
+        subprocess.run(
+            [sys.executable, "-m", "pip", "install", "-q", "-r", str(req)],
+            check=True,
+        )
+        return True
+    except subprocess.CalledProcessError as exc:
+        print(f"[server] dep reinstall failed: {exc}", flush=True)
+        return False
+    except Exception as exc:
+        print(f"[server] dep reinstall crashed: {exc}", flush=True)
+        return False
+
+
+def _heal_and_reexec_if_deps_missing() -> None:
+    """If any server-side import is gone (typical after `anton` self-
+    updates and uv reseeded the venv), reinstall and re-exec so the
+    next interpreter image has the deps loaded."""
+    if os.environ.get("_ANTON_SERVER_DEPS_HEALED") == "1":
+        return
+    missing = _missing_server_deps()
+    if not missing:
+        return
+    print(f"[server] missing deps after boot: {missing}", flush=True)
+    if not _reinstall_server_deps():
+        # Couldn't heal — drop through; the import on the next line
+        # will raise the real ModuleNotFoundError with a stack trace.
+        return
+    os.environ["_ANTON_SERVER_DEPS_HEALED"] = "1"
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 # Load ~/.anton/.env if it exists (before anything else)
 _env_path = Path.home() / ".anton" / ".env"
@@ -81,6 +139,13 @@ def _maybe_self_update_and_reexec() -> None:
     try:
         if check_and_update(_NullConsole(), settings):
             os.environ["_ANTON_UPDATED"] = "1"
+            # uv tool's reinstall path can wipe the server-side deps
+            # (fastapi, uvicorn, multipart, pydantic, httpx) since
+            # they aren't anton-core's own requirements. Reinstall
+            # them BEFORE re-exec so the next interpreter image can
+            # actually boot.
+            if _missing_server_deps():
+                _reinstall_server_deps()
             # Re-exec the same interpreter on the same script so the
             # post-import state (anton, fastapi, etc.) reloads
             # against the freshly installed version. PID/pipes are
@@ -93,6 +158,10 @@ def _maybe_self_update_and_reexec() -> None:
 
 
 _maybe_self_update_and_reexec()
+# Belt-and-suspenders: if a previous launch (or a manual `uv tool
+# upgrade anton`) left the venv missing server deps, heal now before
+# the top-level imports below would otherwise crash the process.
+_heal_and_reexec_if_deps_missing()
 
 
 from fastapi import FastAPI

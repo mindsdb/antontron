@@ -28,6 +28,7 @@ import {
   useCollectionShortcut,
 } from '../components/collection';
 import { host } from '../../platform/host';
+import { useBreakpoint } from '../hooks/useBreakpoint';
 
 const FONT_BODY    = "var(--font-body)";
 const FONT_DISPLAY = "var(--font-display)";
@@ -98,6 +99,20 @@ function projectOf(artifact, projects = []) {
 function isHtmlArtifact(a) {
   return (a.ext || '').toLowerCase() === '.html'
     || (a.path || '').toLowerCase().endsWith('.html');
+}
+
+// Extensions we can preview inline in the in-app ArtifactViewer (text
+// branch). Keep in sync with the viewer's own TEXT_PREVIEW_EXTS so the
+// click handlers and the body renderer agree on what's previewable.
+const _INLINE_TEXT_EXTS = new Set(['.md', '.txt', '.csv']);
+function isInlinePreviewable(a) {
+  if (!a) return false;
+  if (isHtmlArtifact(a)) return true;
+  const declared = (a.ext || '').toLowerCase();
+  if (_INLINE_TEXT_EXTS.has(declared)) return true;
+  const p = (a.path || '').toLowerCase();
+  for (const ext of _INLINE_TEXT_EXTS) if (p.endsWith(ext)) return true;
+  return false;
 }
 
 // "Updated" is already pre-formatted by the server (e.g. "3h ago",
@@ -178,15 +193,16 @@ function PublishedPill() {
         background: 'color-mix(in srgb, var(--accent) 14%, transparent)',
         border: '1px solid color-mix(in srgb, var(--accent) 35%, transparent)',
         color: 'var(--accent)',
-        padding: '3px 8px', borderRadius: 999,
-        fontSize: 10.5, fontWeight: 600,
-        display: 'inline-flex', alignItems: 'center', gap: 5,
+        padding: '1px 6px', borderRadius: 999,
+        fontSize: 9, fontWeight: 700,
+        lineHeight: 1.2,
+        display: 'inline-flex', alignItems: 'center', gap: 4,
         flexShrink: 0,
-        letterSpacing: '0.04em', textTransform: 'uppercase',
+        letterSpacing: '0.05em', textTransform: 'uppercase',
         fontFamily: FONT_BODY,
       }}
     >
-      <span style={{ width: 5, height: 5, borderRadius: 99, background: 'var(--accent)' }} />
+      <span style={{ width: 4, height: 4, borderRadius: 99, background: 'var(--accent)' }} />
       Published
     </span>
   );
@@ -315,6 +331,7 @@ function LocalPathRow({ path }) {
 
 function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isMenuOpen, busy, onOpenProject }) {
   const isHtml = isHtmlArtifact(artifact);
+  const canPreview = isInlinePreviewable(artifact);
   const published = !!artifact.publishedUrl;
 
   const [hover, setHover] = useState(false);
@@ -356,8 +373,8 @@ function ArtifactBubble({ artifact, projects = [], onOpenViewer, onMenuOpen, isM
       tabIndex={0}
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
-      onClick={() => isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)}
-      onKeyDown={(e) => { if (e.key === 'Enter') (isHtml ? onOpenViewer(artifact) : openArtifact(artifact.path)); }}
+      onClick={() => canPreview ? onOpenViewer(artifact) : openArtifact(artifact.path)}
+      onKeyDown={(e) => { if (e.key === 'Enter') (canPreview ? onOpenViewer(artifact) : openArtifact(artifact.path)); }}
       style={{
         position: 'relative',
         cursor: 'pointer',
@@ -760,6 +777,7 @@ function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, o
   const triggerRef = useRef(null);
 
   const isHtml = isHtmlArtifact(artifact);
+  const canPreview = isInlinePreviewable(artifact);
   const published = !!artifact.publishedUrl;
   const project = projectNameOf(artifact, projects);
   const projectMatch = projectOf(artifact, projects);
@@ -770,7 +788,7 @@ function ArtifactRow({ artifact, projects, onOpenViewer, onPublish: doPublish, o
     return copyText(artifact.publishedUrl);
   };
   const onRowOpen = () => {
-    if (isHtml) onOpenViewer?.(artifact);
+    if (canPreview) onOpenViewer?.(artifact);
     else openArtifact(artifact.path);
   };
 
@@ -1009,9 +1027,14 @@ function Toast({ kind, message, onClose }) {
 export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, projects = [], onOpenProject }) {
   const [list, setList] = useState(initial);
   const [viewer, setViewer] = useState(null);
+  const { isMobile } = useBreakpoint();
   const [view, setView] = useState(() =>
     localStorage.getItem('anton:artifacts-view') === 'list' ? 'list' : 'grid'
   );
+  // List rows break at phone widths (5-column grid). Force grid on
+  // mobile so the toggle isn't needed; the user's persisted desktop
+  // preference is left untouched.
+  const effectiveView = isMobile ? 'grid' : view;
   const [search, setSearch] = useState('');
   const [sort, setSort] = useState('published');
   // Per-artifact-path "in flight" set so multiple cards can publish
@@ -1077,7 +1100,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
   // Centralized publish — single source of truth for state updates,
   // toast dispatch, and busy bookkeeping. Mirrors anton's /publish
   // command flow: POST → server zips, scrubs credentials, uploads to
-  // mdb.ai, persists report_id in `.published.json`. We then reflect
+  // MindsHub, persists report_id in `.published.json`. We then reflect
   // the returned URL into the local list so the UI flips to "Published"
   // without a refetch.
   const handlePublish = async (artifact) => {
@@ -1113,7 +1136,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
     try {
       await unpublishArtifact(artifact.path);
       updateOne({ ...artifact, publishedUrl: '' });
-      setToast({ kind: 'ok', message: 'Unpublished from mdb.ai.' });
+      setToast({ kind: 'ok', message: 'Unpublished from MindsHub.' });
     } catch (e) {
       setToast({ kind: 'error', message: `Unpublish failed: ${e?.message || e}` });
     } finally {
@@ -1228,7 +1251,7 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
             />
           }
           sort={<SortPill value={sort} onChange={setSort} options={SORT_OPTIONS} />}
-          view={<ViewToggle value={view} onChange={setView} />}
+          view={<span className="artifacts-view-toggle"><ViewToggle value={view} onChange={setView} /></span>}
           counts={
             <ArtifactsCounts
               search={search}
@@ -1242,8 +1265,8 @@ export default function ArtifactsView({ artifacts: initial = EMPTY_ARTIFACTS, pr
 
       {total === 0 ? (
         <EmptyState />
-      ) : view === 'grid' ? (
-        <div style={{
+      ) : effectiveView === 'grid' ? (
+        <div className="artifacts-grid" style={{
           padding: '6px 32px 60px',
           // Same grid geometry as ProjectsView so cards line up at
           // the same density across pages.

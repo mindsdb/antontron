@@ -575,7 +575,47 @@ function AppCore() {
   const composerMuteLastTaskIdRef = useRef(null);
   const prevRouteForComposerMuteRef = useRef(null);
 
-  const handleStopStream = useCallback(async () => {
+  // Per-task queue of user messages waiting for the current turn to
+  // finish before they get sent. When the user fires another message
+  // while a stream is in flight we push to this queue instead of
+  // trying to start a parallel turn (anton-core can't handle that
+  // gracefully). After the active turn's onDone/onError fires we
+  // drain one item from the queue.
+  const [messageQueue, setMessageQueue] = useState({}); // { [taskId]: [{id, text}] }
+  const messageQueueRef = useRef({});
+  useEffect(() => { messageQueueRef.current = messageQueue; }, [messageQueue]);
+  const enqueueMessage = (taskId, text) => {
+    const item = { id: `q_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 6)}`, text };
+    setMessageQueue((prev) => ({ ...prev, [taskId]: [...(prev[taskId] || []), item] }));
+  };
+  const removeFromQueue = (taskId, itemId) => {
+    setMessageQueue((prev) => {
+      const arr = (prev[taskId] || []).filter((q) => q.id !== itemId);
+      const next = { ...prev };
+      if (arr.length === 0) delete next[taskId];
+      else next[taskId] = arr;
+      return next;
+    });
+  };
+  const popQueueHead = (taskId) => {
+    const arr = messageQueueRef.current[taskId] || [];
+    if (arr.length === 0) return null;
+    const [head, ...rest] = arr;
+    setMessageQueue((prev) => {
+      const next = { ...prev };
+      if (rest.length === 0) delete next[taskId];
+      else next[taskId] = rest;
+      return next;
+    });
+    return head;
+  };
+
+  const handleStopStream = useCallback(async (opts = {}) => {
+    // `silent: true` aborts the stream without leaving the "Task stopped"
+    // assistant placeholder behind — used when the caller is about to
+    // remove the user turn anyway (delete flow), so the placeholder
+    // would just flash on screen for a frame before being pruned.
+    const silent = opts?.silent === true;
     // 1) Cancel the running scratchpad (if any) so anton stops
     //    executing user code mid-cell.
     const padName = activeScratchpadRef.current;
@@ -590,6 +630,19 @@ function AppCore() {
     }
     activeScratchpadRef.current = null;
     activeStreamingTaskIdRef.current = null;
+
+    if (silent) {
+      // Just strip the `_streaming` + stale `activity` rows; the caller
+      // will follow up with its own state mutation (e.g. delete the user
+      // turn) and we don't want a "stopped" message lingering between.
+      setTasks((prev) => prev.map((t) => {
+        const before = t.messages || [];
+        const filtered = before.filter((m) => m.role !== '_streaming' && m.role !== 'activity');
+        if (filtered.length === before.length) return t;
+        return { ...t, status: 'idle', messages: filtered };
+      }));
+      return;
+    }
 
     // 3) Roll the streaming placeholder into a final assistant
     //    message. Drop the in-flight steps so the rail's Progress
@@ -754,7 +807,14 @@ function AppCore() {
   const [serverOnline, setServerOnline] = useState(host.isWeb);
   const [serverBusy, setServerBusy] = useState(false);
   const [serverBusyKind, setServerBusyKind] = useState('starting'); // 'starting' | 'stopping'
-  const [health, setHealth] = useState({ status: 'offline', anton_available: false, config_ready: false });
+  // `config_ready` deliberately omitted from the initial state — the
+  // boot-time settings redirect at line ~798 keys off `=== false` so
+  // that "not yet fetched" (undefined) and "server confirmed
+  // unconfigured" (false) are distinguishable. Seeding it as `false`
+  // here causes a spurious redirect to Settings on first paint when
+  // serverOnline starts true (the web shell), before fetchHealth has
+  // even returned.
+  const [health, setHealth] = useState({ status: 'offline', anton_available: false });
 
   // OTA UI update state
   const [updateStatus, setUpdateStatus] = useState(null); // { phase, version }
@@ -849,10 +909,10 @@ function AppCore() {
     if (serverOnline && !bootIntroDone) setBootIntroDone(true);
   }, [serverOnline, bootIntroDone]);
 
-  // Listen for OTA update status pushed from main process
+  // Listen for OTA update status pushed from main process. No-op in
+  // web — host returns a noop unsubscriber there.
   useEffect(() => {
-    if (!window.antontron?.onUpdateStatus) return;
-    return window.antontron.onUpdateStatus((status) => {
+    return host.onUpdateStatus((status) => {
       setUpdateStatus(status);
     });
   }, []);
@@ -863,7 +923,7 @@ function AppCore() {
     setUpdateApplying(true);
     setUpdateStatus({ phase: 'downloading', version: updateStatus?.version });
     try {
-      const result = await window.antontron.applyUpdate();
+      const result = await host.applyUpdate();
       console.log('[ui-update] applyUpdate result:', result);
       // Window will reload with the new bundle — no further action needed
     } catch (err) {
@@ -1824,6 +1884,27 @@ function AppCore() {
     if (!currentTask) return;
     const id = currentTask.id;
 
+    // Anton-core can't run two turns in parallel against the same
+    // conversation, so if a stream is in flight (or one is about to
+    // start) for this task we queue the new message and let
+    // onDone/onError drain it.
+    //
+    // The check covers two race conditions:
+    //   1) `activeStreamCtrlRef` is already set — a fully launched
+    //      stream is in flight.
+    //   2) `activeStreamingTaskIdRef` matches but the controller
+    //      hasn't been assigned yet — a previous invocation is mid-
+    //      await (resolving attachments). Without this leg, two
+    //      rapid clicks both pass the guard and we'd end up with
+    //      two parallel streams, the first one's controller leaked.
+    if (activeStreamingTaskIdRef.current === id || activeStreamCtrlRef.current) {
+      enqueueMessage(id, text);
+      return;
+    }
+    // Synchronous reservation so a second invocation that fires
+    // before our awaits resolve sees us as "in flight."
+    activeStreamingTaskIdRef.current = id;
+
     const disabledForSend = normalizeComposerDisabledConnections(composerDisabledConnections);
 
     const taskProjectName = currentTask.projectName
@@ -1834,11 +1915,20 @@ function AppCore() {
       || null;
     const taskModel = currentTask.model || selectedModel?.id || null;
 
-    const { merged: sendingAttachments, attachmentIds } = await resolveComposerAttachmentsForSend(
-      taskProjectName,
-      id,
-      composerAttachments,
-    );
+    let sendingAttachments, attachmentIds;
+    try {
+      ({ merged: sendingAttachments, attachmentIds } = await resolveComposerAttachmentsForSend(
+        taskProjectName,
+        id,
+        composerAttachments,
+      ));
+    } catch (err) {
+      // Attachment resolution failed before we ever started the
+      // stream — release the reservation so the user's next send
+      // doesn't get stuck in the queue forever.
+      activeStreamingTaskIdRef.current = null;
+      throw err;
+    }
 
     setTasks((prev) => prev.map((t) =>
       t.id === id
@@ -1925,6 +2015,13 @@ function AppCore() {
           persistTurnState(id, assistantTurnIndex, finalSteps, finalStartedAt);
         }
         fetchArtifacts().then((data) => { if (Array.isArray(data)) setArtifacts(data); });
+        // Drain the next queued message for this task (if any) so a
+        // user who fired multiple prompts mid-stream gets each one
+        // sent in order.
+        const next = popQueueHead(id);
+        if (next) {
+          Promise.resolve().then(() => handleSendInTask(next.text));
+        }
       },
       onError(message, event) {
         activeStreamCtrlRef.current = null;
@@ -1936,6 +2033,12 @@ function AppCore() {
           return { ...t, status: 'error', messages: [...msgs, { role: 'error', content: message || 'Anton could not complete this task.', code: event?.code }] };
         }));
         fetchHealth().then((h) => setHealth(h));
+        // Same drain on error so a failed turn doesn't strand the
+        // queue. The next item gets its own shot at the LLM.
+        const next = popQueueHead(id);
+        if (next) {
+          Promise.resolve().then(() => handleSendInTask(next.text));
+        }
       },
     });
   };
@@ -2134,6 +2237,14 @@ function AppCore() {
 
   const performDeleteTurn = async (taskId, turnIndex) => {
     if (!taskId || typeof turnIndex !== 'number') return;
+    // If anton is actively streaming a response to the turn being
+    // deleted, stop the stream first so the SSE connection doesn't
+    // keep producing events for a turn that no longer exists. The
+    // silent flag keeps the abort from injecting a "Task stopped"
+    // placeholder which would only flash before being pruned.
+    if (activeStreamingTaskIdRef.current === taskId) {
+      try { await handleStopStream({ silent: true }); } catch {}
+    }
     if (typeof taskId === 'string' && taskId.startsWith('tmp-')) {
       // No server-side history yet — drop the local pair only.
       setTasks((prev) => prev.map((t) => {
@@ -2493,6 +2604,8 @@ function AppCore() {
           <ChatView
             task={currentTask}
             onSend={handleSendInTask}
+            queuedMessages={messageQueue[currentTask?.id] || []}
+            onRemoveFromQueue={(itemId) => removeFromQueue(currentTask?.id, itemId)}
             onBack={() => {
               // Returning home = "new task in this project". Pre-select
               // the task's project so the home composer is ready to go.
@@ -2540,6 +2653,7 @@ function AppCore() {
             selectedProject={selectedProject}
             tasks={tasks}
             scheduled={scheduled}
+            scheduleRunsIndex={scheduleRunsIndex}
             models={modelOptions}
             onSelectProject={(p) => setSelectedProject(p)}
             onCreateProject={handleCreateProject}
@@ -2805,7 +2919,7 @@ function AppCore() {
           setServerBusyKind('stopping');
           setServerBusy(true);
           try {
-            const result = await window.antontron?.serverStop?.();
+            const result = await host.serverStop();
             if (result) setServerOnline(!!result.running);
           } catch {} finally {
             setServerBusy(false);
