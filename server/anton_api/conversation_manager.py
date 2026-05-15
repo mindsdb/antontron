@@ -1291,7 +1291,7 @@ async def _resolve_session(
 
 
 async def chat_stream(
-    user_input: str,
+    user_input: "str | list[dict]",
     *,
     conversation_id: Optional[str] = None,
     project: Optional[str] = None,
