@@ -79,4 +79,13 @@ contextBridge.exposeInMainWorld('antontron', {
   getUIVersion: () => ipcRenderer.invoke(IPC.APP_UI_VERSION),
   openExternal: (url: string) => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
   getPathForFile: (file: File) => webUtils.getPathForFile(file),
+
+  // Preview proxy — main hosts a loopback HTTP forwarder for
+  // backend+frontend artifact previews. startProxy points it at the
+  // given artifact dir and returns the URL for the iframe; stopProxy
+  // clears the binding (the listener stays up for the next preview).
+  preview: {
+    startProxy: (artifactDir: string) => ipcRenderer.invoke('preview:start-proxy', artifactDir),
+    stopProxy:  () => ipcRenderer.invoke('preview:stop-proxy'),
+  },
 });

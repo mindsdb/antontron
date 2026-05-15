@@ -11,6 +11,7 @@ import { oauthConnect } from './oauth-service';
 import { sendEvent } from './analytics';
 import { getRendererPath, getBundledPath, checkForUIUpdate, applyUIUpdate, hasInternet, getCachedVersion } from './ui-updater';
 import type { UpdateCheckResult } from './ui-updater';
+import { startProxy as startPreviewProxy, stopProxy as stopPreviewProxy, shutdownProxy as shutdownPreviewProxy } from './preview-proxy';
 
 function getAntonEnvPath(): string {
   return path.join(os.homedir(), '.anton', '.env');
@@ -400,6 +401,18 @@ function setupIPC() {
   // why the backend is offline.
   ipcMain.handle('server:get-diagnostics', () => getServerDiagnostics());
 
+  // Preview proxy — forwards iframe requests to the backend port that
+  // anton's scratchpad runtime recorded in metadata.json. Only one
+  // preview is active at a time; the proxy listens on a fixed loopback
+  // port and we just swap which artifact dir it currently forwards to.
+  ipcMain.handle('preview:start-proxy', async (_event, artifactDir: string) => {
+    return startPreviewProxy(artifactDir);
+  });
+  ipcMain.handle('preview:stop-proxy', async () => {
+    stopPreviewProxy();
+    return { ok: true };
+  });
+
   // PKCE OAuth — opens a one-shot loopback server + the user's
   // default browser. The renderer hands over either Anton's hosted
   // client_id (Pattern A) or BYOK client_id + client_secret (Pattern B).
@@ -702,6 +715,7 @@ let _quitDrained = false;
 async function drainServerForQuit(): Promise<void> {
   if (_quitDrained) return;
   _quitDrained = true;
+  shutdownPreviewProxy();
   // Hard ceiling so a wedged python can't pin the quit indefinitely.
   // stopServer's own SIGTERM(3s) + SIGKILL(1.5s) chain stays inside
   // this window, but a misbehaving OS-level process delay could push
