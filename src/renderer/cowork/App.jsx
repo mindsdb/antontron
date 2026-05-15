@@ -34,7 +34,7 @@ import { fetchSessions, fetchSession, fetchProjects, fetchArtifacts, fetchSettin
          pauseSchedule, resumeSchedule, runScheduleNow, fetchDatasources, MOCK_DATA,
          renameConversation, deleteConversation, deleteConversationTurn, moveConversation,
          deleteProject, cancelScratchpad, fetchConnector,
-         fetchSavedConnection, deleteDatasource } from './api';
+         fetchSavedConnection, deleteDatasource, decideApproval } from './api';
 import { initialStreamState, reduceStream } from './lib/responseStreamAdapter';
 
 // One-of-ten encouraging follow-ups picked when a connect task is
@@ -665,6 +665,16 @@ function AppCore() {
         }],
       };
     }));
+  }, []);
+
+  const handleApprovalDecision = useCallback(async (approvalId, decision) => {
+    if (!approvalId) return;
+    try {
+      await decideApproval(approvalId, decision);
+    } catch (err) {
+      // eslint-disable-next-line no-console
+      console.warn('[approval] decision failed', err);
+    }
   }, []);
 
   // Per-task streaming state is derived inside ChatView (it has the
@@ -2609,6 +2619,7 @@ function AppCore() {
             onDeleteTurn={(turnIdx) => handleDeleteTurnRequest(currentTask?.id, turnIdx)}
             onMoveTaskToProject={handleMoveTaskToProject}
             onStop={handleStopStream}
+            onApprovalDecision={handleApprovalDecision}
             onSubmitDataVaultForm={handleSubmitDataVaultForm}
             onNavigateToConnectors={() => navigate('customize')}
             onCancelModify={handleCancelModify}

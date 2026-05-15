@@ -655,6 +655,13 @@ export async function updateSettings(patch) {
   return req('/settings', { method: 'PUT', body: JSON.stringify(patch) });
 }
 
+export async function decideApproval(approvalId, decision) {
+  return req(`/approvals/${encodeURIComponent(approvalId)}/decide`, {
+    method: 'POST',
+    body: JSON.stringify({ decision }),
+  });
+}
+
 export async function validateSettings() {
   return req('/settings/validate', { method: 'POST', body: JSON.stringify({}) });
 }
@@ -1207,6 +1214,7 @@ export const MOCK_DATA = {
 
   settings: {
     harnessProvider: 'anton',
+    approvalsMode: 'off',
     hermesApiBaseUrl: 'http://127.0.0.1:8642',
     hermesApiKey: '',
     hermesAutoStart: true,

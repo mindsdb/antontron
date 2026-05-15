@@ -42,6 +42,12 @@ class AntonHarnessProvider:
             tool_progress=True,
             cancellation=True,
             sidecar=False,
+            approval_mode="preflight",
+            file_access_reporting="heuristic",
+            tool_event_reporting="structured",
+            native_memory_mode="anton",
+            native_skills_mode="anton",
+            session_memory_snapshot=False,
         )
 
     async def health(self) -> dict:
@@ -126,13 +132,15 @@ class AntonHarnessProvider:
         model: str | None,
         disabled_connections: list[dict] | None,
     ) -> AsyncIterator[str]:
-        async for chunk in self._stream_legacy_sse(
+        from runtime.service import runtime_service
+
+        async for chunk in runtime_service.stream_response(
             user_input=user_input,
             conversation_id=conversation_id,
             project=project,
             model=model,
             disabled_connections=disabled_connections,
-            inference_profile=None,
+            harness_override=self.id,
         ):
             yield chunk
 

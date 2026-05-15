@@ -44,6 +44,7 @@ UI_DEFAULTS = {
     "showDots": True,
     "showCounters": True,
     "accentVariant": "aqua",
+    "approvalsMode": "off",
 }
 
 # Multi-provider config. Each provider has its own credentials and lives
@@ -699,6 +700,7 @@ async def get_settings():
         "showDots":      ui["showDots"],
         "showCounters":  ui["showCounters"],
         "accentVariant": ui["accentVariant"],
+        "approvalsMode": ui["approvalsMode"] if ui["approvalsMode"] in ("off", "require") else "off",
         "uiUpdateMode":  _get_env("UI_UPDATE_MODE", "manual"),
         # Multi-provider surface (canonical going forward)
         "providers":     _masked_providers(providers),
@@ -724,6 +726,7 @@ class SettingsPatch(BaseModel):
     showDots:             Optional[bool] = None
     showCounters:         Optional[bool] = None
     accentVariant:        Optional[str] = None
+    approvalsMode:        Optional[str] = None
     planningProvider:     Optional[str] = None
     planningModel:        Optional[str] = None
     codingProvider:       Optional[str] = None
@@ -774,6 +777,8 @@ async def update_settings(patch: SettingsPatch):
         pref_writes["showCounters"] = patch.showCounters
     if patch.accentVariant is not None:
         pref_writes["accentVariant"] = patch.accentVariant
+    if patch.approvalsMode is not None:
+        pref_writes["approvalsMode"] = "require" if patch.approvalsMode == "require" else "off"
     if patch.providerStatus is not None:
         # Sanitize — only accept the three known states per type.
         clean = {}

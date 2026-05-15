@@ -10,6 +10,7 @@ export function ProgressBox({
   streamStatus = null,
   conversationId = '',
   onActivateStep,
+  onApprovalDecision,
   defaultOpen = true,
   maxBodyHeight = 300,
 }) {
@@ -20,6 +21,7 @@ export function ProgressBox({
         streamStatus={streamStatus || (steps.length ? 'done' : null)}
         conversationId={conversationId}
         onActivateStep={onActivateStep}
+        onApprovalDecision={onApprovalDecision}
       />
     </RailCard>
   );

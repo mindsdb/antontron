@@ -365,6 +365,7 @@ export function reduceStream(state, event, now = Date.now) {
       file: { badge: 'File', label: event.file_path || progressMessage(event) || 'File accessed' },
       source: { badge: 'Source', label: event.source_path || progressMessage(event) || 'Source used' },
       approval: { badge: 'Approval', label: progressMessage(event) || 'Approval required' },
+      access: { badge: 'Access', label: progressMessage(event) || 'Access denied' },
     }[phase];
     if (genericProgress) {
       const failed = progressStatus === 'failed' || Boolean(event.error);
@@ -382,6 +383,9 @@ export function reduceStream(state, event, now = Date.now) {
           source_path: event.source_path || null,
           tool_name: event.tool_name || null,
           error: event.error || null,
+          approval_id: event.approval_id || null,
+          approval_status: event.approval_status || null,
+          resource: event.resource || null,
         },
       };
       if (!completed) {

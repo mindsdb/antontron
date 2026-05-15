@@ -839,6 +839,7 @@ export default function ChatView({
   onOpenProject,
   onOpenProjectsList,
   onStop,
+  onApprovalDecision,
   projects = [],
   sidebarCollapsed = false,
   // Messages the user typed while Anton was mid-turn. Displayed as
@@ -1741,6 +1742,7 @@ export default function ChatView({
           steps={railSteps}
           streamStatus={streamingMsg?.streamStatus}
           conversationId={task.id || ''}
+          onApprovalDecision={onApprovalDecision}
           onActivateStep={(step) => railMsgKey
             ? setOpenScratchpadStepId(prefixId(railMsgKey, step.id))
             : null}

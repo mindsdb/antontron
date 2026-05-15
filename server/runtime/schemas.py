@@ -47,6 +47,12 @@ class HarnessCapabilities(BaseModel):
     tool_progress: bool = True
     cancellation: bool = False
     sidecar: bool = False
+    approval_mode: Literal["none", "preflight", "live_pause", "audit_only"] = "audit_only"
+    file_access_reporting: Literal["none", "heuristic", "structured"] = "heuristic"
+    tool_event_reporting: Literal["none", "basic", "structured"] = "basic"
+    native_memory_mode: str = ""
+    native_skills_mode: str = ""
+    session_memory_snapshot: bool = False
 
 
 class HarnessHealth(BaseModel):
@@ -90,12 +96,56 @@ class CoworkEvent(BaseModel):
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
+class CoworkResourceRef(BaseModel):
+    resource_type: Literal["file", "connector", "publish", "package", "shell", "browser", "artifact"]
+    operation: Literal["read", "write", "mutate", "install", "publish", "execute"]
+    scope: str = ""
+    label: str = ""
+    path: str = ""
+    connector_id: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class CoworkAccessDecision(BaseModel):
+    status: Literal["allowed", "approval_required", "denied"]
+    reason: str = ""
+    resource: CoworkResourceRef
+
+
+class CoworkApprovalRequest(BaseModel):
+    id: str = Field(default_factory=lambda: new_id("approval"))
+    turn_id: str
+    resource: CoworkResourceRef
+    decision: CoworkAccessDecision
+    status: Literal["pending", "approved", "denied", "expired", "bypassed"] = "pending"
+    created_at: str = ""
+    decided_at: str | None = None
+    expires_at: str | None = None
+    message: str = ""
+
+
+class CoworkApprovalDecision(BaseModel):
+    decision: Literal["approved", "denied"]
+
+
+class CoworkAccessPolicy(BaseModel):
+    approvals_mode: Literal["off", "require"] = "off"
+    project_root: str
+    artifact_root: str
+    upload_roots: list[str] = Field(default_factory=list)
+    allowed_read_roots: list[str] = Field(default_factory=list)
+    allowed_write_roots: list[str] = Field(default_factory=list)
+    denied_path_parts: list[str] = Field(default_factory=lambda: [".cowork", ".anton"])
+    disabled_connectors: list[str] = Field(default_factory=list)
+
+
 class CoworkTurn(BaseModel):
     id: str = Field(default_factory=lambda: new_id("turn"))
     status: Literal["running", "completed", "failed", "cancelled", "partial"] = "running"
     user_message_id: str
     assistant_message_id: str | None = None
     events: list[CoworkEvent] = Field(default_factory=list)
+    approvals: list[CoworkApprovalRequest] = Field(default_factory=list)
     started_at: str = ""
     completed_at: str | None = None
     error: str | None = None
@@ -134,5 +184,9 @@ class HarnessTurnRequest(BaseModel):
     disabled_connections: list[dict[str, Any]] | None = None
     inference: ResolvedInferenceProfile
     artifact_root: str
+    approvals_mode: Literal["off", "require"] = "off"
+    access_policy: CoworkAccessPolicy | None = None
+    approval_grants: list[CoworkApprovalRequest] = Field(default_factory=list)
+    interactive_approvals: bool = True
     runtime_options: dict[str, Any] = Field(default_factory=dict)
     harness_state: dict[str, Any] = Field(default_factory=dict)

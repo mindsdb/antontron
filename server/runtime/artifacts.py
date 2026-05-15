@@ -182,3 +182,31 @@ def scan_updated_artifacts(root: Path, before: dict[str, float]) -> list[dict[st
         if key not in before or artifact_folder_mtime(folder) > before[key]:
             artifacts.append(payload)
     return artifacts
+
+
+def scan_ignored_artifacts(root: Path, before: dict[str, float]) -> list[dict[str, str]]:
+    ignored: list[dict[str, str]] = []
+    if not root.is_dir():
+        return ignored
+    for folder in sorted(path for path in root.iterdir() if path.is_dir()):
+        try:
+            key = str(folder.resolve())
+        except OSError:
+            continue
+        current_mtime = artifact_folder_mtime(folder)
+        if key in before and current_mtime <= before[key]:
+            continue
+        metadata_path = folder / "metadata.json"
+        if not metadata_path.exists():
+            continue
+        try:
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            ignored.append({"path": str(folder), "reason": "metadata.json is not valid JSON"})
+            continue
+        if not isinstance(metadata, dict):
+            ignored.append({"path": str(folder), "reason": "metadata.json must contain a JSON object"})
+            continue
+        if artifact_payload_from_folder(folder, root=root) is None:
+            ignored.append({"path": str(folder), "reason": "artifact metadata does not point to a valid primary file"})
+    return ignored

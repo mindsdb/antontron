@@ -11,7 +11,19 @@ from harnesses.config import selected_harness_id
 from harnesses.registry import get_harness_by_id
 
 from .conversations import store
-from .artifacts import ensure_artifact_root, scan_updated_artifacts, snapshot_artifacts
+from .access import (
+    build_access_policy,
+    classify_resource,
+    current_approvals_mode,
+    event_for_access_denied,
+    event_for_approval,
+    event_for_artifact_ignored,
+    file_resource_from_event,
+    make_approval,
+    preflight_resources,
+)
+from .approvals import approval_coordinator
+from .artifacts import ensure_artifact_root, scan_ignored_artifacts, scan_updated_artifacts, snapshot_artifacts
 from .events import cowork_event_to_legacy_sse, iter_sse_payloads
 from .inference import resolve_inference_profile, validate_inference_profile
 from .schemas import (
@@ -81,6 +93,17 @@ class RuntimeService:
             if key:
                 emitted.add(key)
             events.append(self._artifact_event(turn_id, artifact))
+        for ignored in scan_ignored_artifacts(Path(artifact_root), before):
+            key = str(ignored.get("path") or "")
+            if key and key in emitted:
+                continue
+            if key:
+                emitted.add(key)
+            events.append(event_for_artifact_ignored(
+                turn_id,
+                key,
+                str(ignored.get("reason") or "Artifact metadata is invalid"),
+            ))
         return events
 
     def _failed_event(self, turn_id: str, code: str, message: str) -> CoworkEvent:
@@ -98,6 +121,86 @@ class RuntimeService:
             },
         )
 
+    async def _handle_preflight_access(
+        self,
+        *,
+        conv,
+        turn,
+        user_input: str,
+        access_policy,
+        approvals_mode: str,
+        interactive_approvals: bool,
+    ) -> AsyncIterator[CoworkEvent]:
+        for resource in preflight_resources(user_input):
+            decision = classify_resource(access_policy, resource)
+            if decision.status == "allowed":
+                continue
+            if decision.status == "denied":
+                denied = event_for_access_denied(turn.id, decision)
+                store.append_event(conv, turn.id, denied)
+                yield denied
+                failed = self._failed_event(turn.id, "access_denied", decision.reason)
+                store.append_event(conv, turn.id, failed)
+                store.finish_turn(conv, turn.id, "failed", decision.reason)
+                yield failed
+                return
+
+            if approvals_mode == "off":
+                approval = make_approval(turn_id=turn.id, decision=decision, status="bypassed")
+                store.add_approval(conv, turn.id, approval)
+                event = event_for_approval(approval)
+                store.append_event(conv, turn.id, event)
+                yield event
+                continue
+
+            approval = make_approval(turn_id=turn.id, decision=decision, status="pending")
+            store.add_approval(conv, turn.id, approval)
+            required = event_for_approval(approval)
+            store.append_event(conv, turn.id, required)
+            yield required
+            if not interactive_approvals:
+                denied = store.update_approval(approval.id, "expired")
+                expired_approval = denied[1] if denied else approval.model_copy(update={"status": "expired"})
+                expired = event_for_approval(expired_approval, "approval.denied")
+                store.append_event(conv, turn.id, expired)
+                yield expired
+                failed = self._failed_event(turn.id, "approval_required", "Approval is required before this scheduled or non-interactive task can continue.")
+                store.append_event(conv, turn.id, failed)
+                store.finish_turn(conv, turn.id, "failed", failed.payload.get("message"))
+                yield failed
+                return
+
+            approval_coordinator.register(approval.id)
+            decision_text = await approval_coordinator.wait(approval.id)
+            if decision_text != "approved":
+                updated = store.update_approval(approval.id, "denied" if decision_text == "denied" else "expired")
+                resolved = updated[1] if updated else approval.model_copy(update={"status": decision_text})
+                denied_event = event_for_approval(resolved, "approval.denied")
+                store.append_event(conv, turn.id, denied_event)
+                yield denied_event
+                failed = self._failed_event(turn.id, "approval_denied", "Approval was denied or expired.")
+                store.append_event(conv, turn.id, failed)
+                store.finish_turn(conv, turn.id, "failed", failed.payload.get("message"))
+                yield failed
+                return
+
+            updated = store.update_approval(approval.id, "approved")
+            resolved = updated[1] if updated else approval.model_copy(update={"status": "approved"})
+            granted = event_for_approval(resolved, "approval.granted")
+            store.append_event(conv, turn.id, granted)
+            yield granted
+
+    def _audit_event_access(self, *, event: CoworkEvent, turn_id: str, access_policy, approvals_mode: str) -> CoworkEvent | None:
+        if approvals_mode != "require":
+            return None
+        resource = file_resource_from_event(event)
+        if resource is None:
+            return None
+        decision = classify_resource(access_policy, resource)
+        if decision.status == "denied":
+            return event_for_access_denied(turn_id, decision)
+        return None
+
     async def stream_response(
         self,
         *,
@@ -109,8 +212,9 @@ class RuntimeService:
         attachment_ids: list[str] | None = None,
         harness_override: str | None = None,
         inference_override: dict[str, Any] | None = None,
+        interactive_approvals: bool = True,
     ) -> AsyncIterator[str]:
-        del model, attachment_ids
+        del model
         conv = store.get(conversation_id) if conversation_id else None
         if inference_override:
             try:
@@ -140,8 +244,17 @@ class RuntimeService:
             harness_id = conv.harness
 
         harness = get_harness_by_id(harness_id)
+        capabilities = harness.capabilities()
+        approvals_mode = current_approvals_mode()
         inference_ok, inference_error = validate_inference_profile(inference)
         artifact_root = self._artifact_root(project_context.name)
+        access_policy = build_access_policy(
+            project_context=project_context,
+            artifact_root=artifact_root,
+            uploads=[],
+            disabled_connections=disabled_connections,
+            approvals_mode=approvals_mode,
+        )
         readiness = harness.validate_request(
             HarnessTurnRequest(
                 conversation_id=conv.id,
@@ -152,6 +265,9 @@ class RuntimeService:
                 disabled_connections=disabled_connections,
                 inference=inference,
                 artifact_root=artifact_root,
+                approvals_mode=approvals_mode,
+                access_policy=access_policy,
+                interactive_approvals=interactive_approvals,
                 harness_state=conv.harness_state,
             )
         )
@@ -168,6 +284,25 @@ class RuntimeService:
             yield cowork_event_to_legacy_sse(failed)
             return
 
+        if approvals_mode == "require" and capabilities.approval_mode == "none":
+            failed = self._failed_event(turn.id, "approval_unsupported", "The selected harness does not support Cowork approval checks.")
+            store.append_event(conv, turn.id, failed)
+            store.finish_turn(conv, turn.id, "failed", failed.payload.get("message"))
+            yield cowork_event_to_legacy_sse(failed)
+            return
+
+        async for access_event in self._handle_preflight_access(
+            conv=conv,
+            turn=turn,
+            user_input=user_input,
+            access_policy=access_policy,
+            approvals_mode=approvals_mode,
+            interactive_approvals=interactive_approvals,
+        ):
+            yield cowork_event_to_legacy_sse(access_event)
+            if access_event.type == "response.failed":
+                return
+
         request = HarnessTurnRequest(
             conversation_id=conv.id,
             turn_id=turn.id,
@@ -177,6 +312,16 @@ class RuntimeService:
             disabled_connections=disabled_connections,
             inference=inference,
             artifact_root=artifact_root,
+            approvals_mode=approvals_mode,
+            access_policy=access_policy,
+            approval_grants=[
+                approval
+                for t in (store.get(conv.id) or conv).turns
+                if t.id == turn.id
+                for approval in t.approvals
+                if approval.status in {"approved", "bypassed"}
+            ],
+            interactive_approvals=interactive_approvals,
             harness_state=conv.harness_state,
             runtime_options={"cowork_canonical": True},
         )
@@ -187,6 +332,21 @@ class RuntimeService:
             async for event in harness.start_turn(request):
                 conv = store.get(conv.id) or conv
                 store.append_event(conv, turn.id, event)
+                denied = self._audit_event_access(
+                    event=event,
+                    turn_id=turn.id,
+                    access_policy=access_policy,
+                    approvals_mode=approvals_mode,
+                )
+                if denied is not None:
+                    store.append_event(conv, turn.id, denied)
+                    terminal_seen = True
+                    store.finish_turn(conv, turn.id, "failed", denied.payload.get("message"))
+                    yield cowork_event_to_legacy_sse(denied)
+                    failed = self._failed_event(turn.id, "access_denied", str(denied.payload.get("message") or "Access denied"))
+                    store.append_event(conv, turn.id, failed)
+                    yield cowork_event_to_legacy_sse(failed)
+                    return
                 if event.type == "artifact.created":
                     artifact = event.payload.get("artifact")
                     if isinstance(artifact, dict):
@@ -262,6 +422,7 @@ class RuntimeService:
         disabled_connections: list[dict[str, Any]] | None,
         harness_override: str | None = None,
         inference_override: dict[str, Any] | None = None,
+        interactive_approvals: bool = False,
     ) -> tuple[str, str | None]:
         text: list[str] = []
         seen_id = conversation_id
@@ -273,6 +434,7 @@ class RuntimeService:
             disabled_connections=disabled_connections,
             harness_override=harness_override,
             inference_override=inference_override,
+            interactive_approvals=interactive_approvals,
         ):
             for _event_type, payload in iter_sse_payloads(chunk):
                 if payload.get("type") == "response.created":

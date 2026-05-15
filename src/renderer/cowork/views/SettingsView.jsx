@@ -1486,6 +1486,17 @@ export default function SettingsView({ settings, setSetting, onSave, theme, onTh
                   ]}
                 />
               </Section>
+              <Section title="Approvals" subtitle="Choose whether Cowork asks before risky file, connector, publish, package, and shell actions.">
+                <Segmented
+                  value={settings.approvalsMode ?? 'off'}
+                  onChange={(v) => setSetting('approvalsMode', v)}
+                  groupLabel="Approvals"
+                  options={[
+                    { value: 'off', label: 'Off', title: 'Allow actions as today while still recording available progress evidence.' },
+                    { value: 'require', label: 'Require', title: 'Ask before risky actions when Cowork can preflight them.' },
+                  ]}
+                />
+              </Section>
               <Section title="Hermes auto-start" subtitle="Start Hermes Agent locally when the backend starts and Hermes is selected.">
                 <Toggle
                   value={settings.hermesAutoStart ?? true}

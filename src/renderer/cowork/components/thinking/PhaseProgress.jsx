@@ -70,7 +70,7 @@ function pickCompletedLabel(phase, key) {
 }
 
 function PhaseRow({
-  bank, phaseKey, status, label, sublabel, hint, onClick,
+  bank, phaseKey, status, label, sublabel, hint, onClick, actions = null,
 }) {
   const isActive = status === 'in_progress';
   const isDone = status === 'completed';
@@ -111,16 +111,44 @@ function PhaseRow({
           </span>
         )}
       </span>
-      {hint && (
+      {actions || (hint && (
         <span className="ml-1 flex-none text-[10.5px] font-mono text-ink-4">
           {hint}
         </span>
-      )}
+      ))}
     </div>
   );
 }
 
-export function PhaseProgress({ steps = [], streamStatus = null, conversationId = '', onActivateStep }) {
+function ApprovalActions({ approvalId, onApprovalDecision }) {
+  if (!approvalId || !onApprovalDecision) return null;
+  return (
+    <span className="ml-1 inline-flex flex-none items-center gap-1">
+      <button
+        type="button"
+        className="rounded border border-accent/40 px-1.5 py-0.5 text-[10.5px] text-accent hover:bg-accent/10"
+        onClick={(event) => {
+          event.stopPropagation();
+          onApprovalDecision(approvalId, 'approved');
+        }}
+      >
+        Approve
+      </button>
+      <button
+        type="button"
+        className="rounded border border-line px-1.5 py-0.5 text-[10.5px] text-ink-4 hover:bg-surface-2"
+        onClick={(event) => {
+          event.stopPropagation();
+          onApprovalDecision(approvalId, 'denied');
+        }}
+      >
+        Deny
+      </button>
+    </span>
+  );
+}
+
+export function PhaseProgress({ steps = [], streamStatus = null, conversationId = '', onActivateStep, onApprovalDecision }) {
   const scratchpadSteps = steps.filter((s) => s._isScratchpad);
   const genericSteps = steps.filter((s) => s._isGenericProgress && s.badge !== 'Artifact');
   const artifactSteps = steps.filter((s) => s.badge === 'Artifact');
@@ -205,12 +233,15 @@ export function PhaseProgress({ steps = [], streamStatus = null, conversationId 
 
       {genericSteps.map((step) => {
         const isReasoning = step._progressPhase === 'reasoning';
+        const isApproval = step._progressPhase === 'approval';
         const status = step.status === 'failed' ? 'completed' : step.status;
         const message = step.data?.message || null;
         const toolName = step.data?.tool_name || null;
         const label = isReasoning
           ? 'Reasoned through the request'
-          : (step.label || toolName || 'Used a tool');
+          : isApproval
+            ? (step.status === 'in_progress' ? 'Approval needed' : step.label || 'Approval handled')
+            : (step.label || toolName || 'Used a tool');
         const sublabel = isReasoning
           ? message
           : (toolName && toolName !== label ? toolName : message);
@@ -230,6 +261,11 @@ export function PhaseProgress({ steps = [], streamStatus = null, conversationId 
             label={label}
             sublabel={sublabel}
             hint={hint}
+            actions={
+              isApproval && step.status === 'in_progress'
+                ? <ApprovalActions approvalId={step.data?.approval_id} onApprovalDecision={onApprovalDecision} />
+                : null
+            }
           />
         );
       })}

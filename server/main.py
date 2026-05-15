@@ -181,6 +181,7 @@ from routes.settings import get_config_status
 from routes.artifacts import router as artifacts_router
 from routes.utilities import router as utilities_router
 from routes.attachments import router as attachments_router
+from routes.approvals import router as approvals_router
 from routes.search import router as search_router
 from routes.harnesses import router as harnesses_router
 from routes.pins import router as pins_router
@@ -265,6 +266,7 @@ app.include_router(artifacts_router, prefix="/v1/artifacts", tags=["artifacts"])
 # utilities.py exposes /memory, /skills, /datasources, /publish at the prefix root
 app.include_router(utilities_router, prefix="/v1", tags=["utilities"])
 app.include_router(attachments_router)
+app.include_router(approvals_router)
 app.include_router(search_router)
 app.include_router(harnesses_router)
 app.include_router(pins_router)

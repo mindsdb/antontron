@@ -26,6 +26,12 @@ class NanoclawHarnessProvider:
             streaming=False,
             tool_progress=False,
             cancellation=False,
+            approval_mode="none",
+            file_access_reporting="none",
+            tool_event_reporting="none",
+            native_memory_mode="unsupported",
+            native_skills_mode="unsupported",
+            session_memory_snapshot=False,
         )
 
     async def health(self) -> dict:

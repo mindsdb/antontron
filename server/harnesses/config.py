@@ -13,6 +13,7 @@ from pathlib import Path
 
 
 GLOBAL_ENV_PATH = Path.home() / ".anton" / ".env"
+HERMES_ENV_PATH = Path.home() / ".hermes" / ".env"
 DEFAULT_HERMES_BASE_URL = "http://127.0.0.1:8642"
 HARNESS_ENV_KEY = "COWORK_HARNESS_PROVIDER"
 HERMES_BASE_URL_ENV_KEY = "COWORK_HERMES_API_BASE_URL"
@@ -66,7 +67,11 @@ def hermes_base_url() -> str:
 
 
 def hermes_api_key() -> str:
-    return get_env(HERMES_API_KEY_ENV_KEY) or get_env("API_SERVER_KEY")
+    return (
+        get_env(HERMES_API_KEY_ENV_KEY)
+        or get_env("API_SERVER_KEY")
+        or read_dotenv(HERMES_ENV_PATH).get("API_SERVER_KEY", "")
+    )
 
 
 def hermes_auto_start() -> bool:

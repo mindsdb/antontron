@@ -119,6 +119,12 @@ class HermesHarnessProvider:
             tool_progress=True,
             cancellation=False,
             sidecar=True,
+            approval_mode="preflight",
+            file_access_reporting="heuristic",
+            tool_event_reporting="basic",
+            native_memory_mode="hermes",
+            native_skills_mode="hermes",
+            session_memory_snapshot=True,
         )
 
     async def health(self) -> dict:
@@ -608,20 +614,15 @@ class HermesHarnessProvider:
         model: str | None,
         disabled_connections: list[dict] | None,
     ) -> AsyncIterator[str]:
-        inference = resolve_inference_profile()
-        if model:
-            inference = inference.model_copy(update={
-                "planning_model": model,
-                "id": f"{inference.provider_type}:{model}:{inference.coding_model}",
-            })
-        async for chunk in self._stream_legacy_sse(
+        from runtime.service import runtime_service
+
+        async for chunk in runtime_service.stream_response(
             user_input=user_input,
             conversation_id=conversation_id,
             project=project,
             model=model,
             disabled_connections=disabled_connections,
-            inference=inference,
-            artifact_root=None,
+            harness_override=self.id,
         ):
             yield chunk
 
@@ -916,6 +917,27 @@ class HermesHarnessProvider:
             "Only files inside that artifact root are surfaced in Anton Cowork Live Artifacts."
         )
 
+    def _access_policy_instructions(self) -> str:
+        return (
+            "\n\nCowork access policy:\n"
+            "Treat project file moves, renames, deletes, overwrites, package installs, publishing, "
+            "external sends, and connector mutations as approval-worthy actions. If the user asks "
+            "to see a plan before changes, or says to proceed only after approval, do not perform "
+            "those actions until explicit approval is present. Instead, produce the requested plan "
+            "or artifact and record each proposed mutating action as awaiting approval, including "
+            "moves and renames as well as deletions. When you write structured manifests, traces, "
+            "or result JSON, include approval entries with requested=true and granted=false for "
+            "each pending mutating action. If any file moves or renames are pending, also include "
+            "a summary approval entry whose action text includes the words 'file moves'.\n"
+            "For permission-boundary refusals, say 'I do not have access' and tell the user how to "
+            "request access. Do not read, list, summarize, or include restricted path contents. If "
+            "you record a trace for a restricted request, mark it as refused, denied, or blocked; "
+            "do not record it as successful file access.\n"
+            "When you provide source evidence, every source_path must be an actual existing file "
+            "path. Do not use prose such as 'derived from ...' as a source_path; cite the concrete "
+            "file paths separately."
+        )
+
     def _artifact_user_files(self, folder: Path) -> list[Path]:
         return artifact_user_files(folder)
 
@@ -993,6 +1015,7 @@ class HermesHarnessProvider:
                 f"\nCowork inference profile: provider={inference.planning_provider_label or inference.provider_label}, "
                 f"planning_model={inference.planning_model}, coding_model={inference.coding_model}."
                 + self._artifact_instructions(project_name, artifact_root=artifact_root)
+                + self._access_policy_instructions()
             ),
             "inference": inference.safe_dump(),
         }

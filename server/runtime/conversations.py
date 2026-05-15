@@ -14,6 +14,7 @@ from anton_api import projects_store
 from .inference import profile_for_storage
 from .events import cowork_event_to_legacy_sse, iter_sse_payloads
 from .schemas import (
+    CoworkApprovalRequest,
     CoworkConversation,
     CoworkEvent,
     CoworkMessage,
@@ -214,6 +215,45 @@ class CoworkConversationStore:
         self.save(conv)
         return conv
 
+    def add_approval(self, conv: CoworkConversation, turn_id: str, approval: CoworkApprovalRequest) -> CoworkConversation:
+        for turn in conv.turns:
+            if turn.id == turn_id:
+                if not any(existing.id == approval.id for existing in turn.approvals):
+                    turn.approvals.append(approval)
+                break
+        conv.updated_at = utc_now_iso()
+        self.save(conv)
+        return conv
+
+    def find_approval(self, approval_id: str) -> tuple[CoworkConversation, CoworkApprovalRequest] | None:
+        for _project_name, store_dir in _all_store_dirs("all"):
+            for path in store_dir.glob("*.json"):
+                try:
+                    conv = CoworkConversation.model_validate_json(path.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                for turn in conv.turns:
+                    for approval in turn.approvals:
+                        if approval.id == approval_id:
+                            return conv, approval
+        return None
+
+    def update_approval(self, approval_id: str, status: str) -> tuple[CoworkConversation, CoworkApprovalRequest] | None:
+        found = self.find_approval(approval_id)
+        if not found:
+            return None
+        conv, _approval = found
+        for turn in conv.turns:
+            for approval in turn.approvals:
+                if approval.id == approval_id:
+                    if status in {"pending", "approved", "denied", "expired", "bypassed"}:
+                        approval.status = status  # type: ignore[assignment]
+                    approval.decided_at = utc_now_iso()
+                    conv.updated_at = utc_now_iso()
+                    self.save(conv)
+                    return conv, approval
+        return None
+
     def append_assistant_delta(self, conv: CoworkConversation, turn_id: str, delta: str, *, save: bool = True) -> None:
         now = utc_now_iso()
         for msg in conv.messages:
@@ -258,6 +298,14 @@ class CoworkConversationStore:
                         legacy_events.append(legacy)
                 if legacy_events:
                     entry["events"] = legacy_events
+                approvals = [
+                    approval.model_dump()
+                    for turn in conv.turns
+                    if turn.id == msg.turn_id
+                    for approval in turn.approvals
+                ]
+                if approvals:
+                    entry["approvals"] = approvals
                 started = started_by_turn.get(msg.turn_id)
                 if started:
                     entry["startedAt"] = started

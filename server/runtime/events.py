@@ -108,6 +108,26 @@ def normalize_legacy_payloads(
                 "phase": phase,
                 "message": payload.get("message") or payload.get("content") or "",
             })
+    elif legacy_type in {
+        "tool.requested",
+        "tool.started",
+        "tool.completed",
+        "tool.failed",
+        "file.accessed",
+        "source.used",
+        "approval.required",
+        "approval.granted",
+        "approval.denied",
+        "approval.bypassed",
+        "access.denied",
+        "artifact.ignored",
+    }:
+        event_type = legacy_type
+        event_payload.update({
+            key: value
+            for key, value in payload.items()
+            if key not in {"type", "at_ms"}
+        })
 
     base = CoworkEvent(type=event_type, turn_id=turn_id, at_ms=at_ms, payload=event_payload)
     extras = _typed_events_from_payload(payload, turn_id, at_ms, project_root=project_root)
@@ -282,6 +302,36 @@ def _legacy_progress_payload(event: CoworkEvent) -> dict[str, Any] | None:
             "phase": "approval",
             "progress_status": "started",
             "tool_name": event.payload.get("tool_name") or "",
+            "approval_id": event.payload.get("approval_id") or "",
+            "approval_status": event.payload.get("approval_status") or "pending",
+            "resource": event.payload.get("resource") or None,
+        }
+    if event.type in {"approval.granted", "approval.denied", "approval.bypassed"}:
+        failed = event.type == "approval.denied"
+        return {
+            **base,
+            "phase": "approval",
+            "progress_status": "failed" if failed else "completed",
+            "tool_name": event.payload.get("tool_name") or "",
+            "approval_id": event.payload.get("approval_id") or "",
+            "approval_status": event.payload.get("approval_status") or ("denied" if failed else "approved"),
+            "resource": event.payload.get("resource") or None,
+        }
+    if event.type == "access.denied":
+        return {
+            **base,
+            "phase": "access",
+            "progress_status": "failed",
+            "resource": event.payload.get("resource") or None,
+            "error": event.payload.get("message") or event.payload.get("error") or "Access denied",
+        }
+    if event.type == "artifact.ignored":
+        return {
+            **base,
+            "phase": "artifact",
+            "progress_status": "failed",
+            "path": event.payload.get("path") or "",
+            "error": event.payload.get("message") or "Artifact ignored",
         }
     return None
 
