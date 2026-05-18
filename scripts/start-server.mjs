@@ -101,7 +101,7 @@ export async function start({ readyTimeoutMs = 15000 } = {}) {
   // controls shutdown order explicitly: vite quiesces first, THEN we
   // SIGTERM python — avoids ECONNREFUSED noise from vite proxying
   // /v1/* during shutdown.
-  const child = spawn(uvCmd, ['run', 'python', '-m', 'cowork'], {
+  const child = spawn(uvCmd, ['run', 'cowork-server'], {
     cwd: serverDir,
     env,
     stdio: ['ignore', 'pipe', 'pipe'],

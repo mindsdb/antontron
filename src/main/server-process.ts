@@ -1,10 +1,11 @@
-// Spawns the cowork-server FastAPI backend and waits for /health to come
-// up. Uses `uv run python -m cowork` from the cowork-server directory,
-// which lets uv manage the virtualenv and dependencies automatically.
+// Spawns the cowork-server FastAPI backend and waits for /health to come up.
 //
-// In dev the cowork-server directory is a sibling of this repo
-// (../cowork-server). When packaged, it is bundled as an extraResource
-// at process.resourcesPath/cowork-server.
+// In dev: `uv run cowork-server` from the sibling cowork-server directory
+// so local source edits are picked up immediately.
+//
+// In production (packaged Electron or web): runs the `cowork-server`
+// binary installed via `uv tool install cowork-server`. No bundled source
+// directory needed — the installer handles package installation.
 
 import { spawn, ChildProcess } from 'child_process';
 import * as fs from 'fs';
@@ -82,17 +83,24 @@ function getEnvPath(): string {
   return parts.join(path.delimiter);
 }
 
-function getServerDir(): string {
-  // Override with env var for non-standard layouts.
+// In dev mode, return the sibling cowork-server source directory so we
+// can run `uv run cowork-server` against local source. Returns null when
+// packaged (the installed binary is used instead).
+function getDevServerDir(): string | null {
+  if (app.isPackaged) return null;
   if (process.env.COWORK_SERVER_DIR) {
     return path.resolve(process.env.COWORK_SERVER_DIR);
   }
-  // Packaged: cowork-server/ shipped via electron-builder extraResources.
-  if (app.isPackaged) {
-    return path.join(process.resourcesPath, 'cowork-server');
-  }
-  // Dev: sibling directory ../cowork-server relative to this repo root.
   return path.join(__dirname, '..', '..', '..', '..', 'cowork-server');
+}
+
+// Locate the installed `cowork-server` binary (installed via
+// `uv tool install cowork-server`). Lives in ~/.local/bin on
+// POSIX, %LOCALAPPDATA%/bin on Windows.
+function getCoworkServerBin(): string | null {
+  const localBin = path.join(os.homedir(), '.local', 'bin', 'cowork-server');
+  if (fs.existsSync(localBin)) return localBin;
+  return null;
 }
 
 async function probeHealth(timeoutMs: number): Promise<boolean> {
@@ -157,22 +165,35 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
   // transition to "not running" reflects this start cycle's reason.
   lastStopIntentional = null;
   _stopRequested = false;
-  const uvCmd = getUvPath();
-  if (!uvCmd) {
-    lastStartError = 'uv not found. Install uv first: https://docs.astral.sh/uv/getting-started/installation/';
-    return {
-      ok: false,
-      reason: lastStartError,
-    };
-  }
 
-  const serverDir = getServerDir();
-  if (!fs.existsSync(path.join(serverDir, 'pyproject.toml'))) {
-    lastStartError = `cowork-server not found at ${serverDir} (missing pyproject.toml)`;
-    return {
-      ok: false,
-      reason: lastStartError,
-    };
+  // Determine how to spawn the server:
+  //   Dev mode:  `uv run cowork-server` from the sibling source dir
+  //   Packaged:  run the installed `cowork-server` binary directly
+  const devDir = getDevServerDir();
+  let spawnCmd: string;
+  let spawnArgs: string[];
+  let spawnCwd: string | undefined;
+
+  if (devDir && fs.existsSync(path.join(devDir, 'pyproject.toml'))) {
+    // Dev: use uv to run from source so local edits are picked up
+    const uvCmd = getUvPath();
+    if (!uvCmd) {
+      lastStartError = 'uv not found. Install uv first: https://docs.astral.sh/uv/getting-started/installation/';
+      return { ok: false, reason: lastStartError };
+    }
+    spawnCmd = uvCmd;
+    spawnArgs = ['run', 'cowork-server'];
+    spawnCwd = devDir;
+  } else {
+    // Packaged: use the installed cowork-server binary
+    const bin = getCoworkServerBin();
+    if (!bin) {
+      lastStartError = 'cowork-server not installed. Run the installer to set up the backend.';
+      return { ok: false, reason: lastStartError };
+    }
+    spawnCmd = bin;
+    spawnArgs = [];
+    spawnCwd = undefined;
   }
 
   pendingStart = (async (): Promise<StartServerResult> => {
@@ -184,10 +205,8 @@ export async function startServer(opts: { port?: number; readyTimeoutMs?: number
       COWORK_SERVER_HOST: SERVER_HOST,
     };
 
-    // Spawn `uv run python -m cowork` with cwd set to the cowork-server
-    // directory so uv can find pyproject.toml and manage the venv.
-    const child = spawn(uvCmd, ['run', 'python', '-m', 'cowork'], {
-      cwd: serverDir,
+    const child = spawn(spawnCmd, spawnArgs, {
+      cwd: spawnCwd,
       env,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
