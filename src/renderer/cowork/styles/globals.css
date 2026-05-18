@@ -4751,9 +4751,6 @@ select.dispatch-input {
 .dispatch-input-sm {
   min-width: 0;
 }
-.dispatch-input-prio {
-  width: 68px;
-}
 
 /* ── Buttons (override the original .dispatch-btn-* hardcoded colors) ── */
 .dispatch-btn {

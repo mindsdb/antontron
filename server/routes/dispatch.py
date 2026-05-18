@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -36,65 +36,11 @@ DISPATCH_DB_PATH = DISPATCH_DIR / "dispatch.db"
 DISPATCH_SESSIONS_DIR = DISPATCH_DIR / "sessions"
 
 
-# Allowlisted roots for agent-group workspaces. The user-supplied workspace
-# path is .resolve()'d and must sit under one of these — anything else is
-# rejected with 400 so an attacker can't aim a request at ~/.ssh/, /etc/, or
-# a sibling project's tree via .. traversal or symlink escape.
-#
-# The list comes from config, never from the request:
-#   1. ``ANTON_WORKSPACE_ROOTS`` env var — os.pathsep-separated absolute paths.
-#   2. Default: ``~/Projects`` (matches the UI placeholder).
-#
-# .expanduser() is deliberately NOT applied to the request body, only to the
-# configured roots — a request that says "~/.ssh/id_rsa" must not silently
-# resolve to the operator's actual home directory.
-def _allowed_workspace_roots() -> list[Path]:
-    raw = os.environ.get("ANTON_WORKSPACE_ROOTS", "").strip()
-    if raw:
-        return [
-            Path(p).expanduser().resolve()
-            for p in raw.split(os.pathsep)
-            if p.strip()
-        ]
-    return [(Path.home() / "Projects").resolve()]
-
-
-def _resolve_workspace_or_400(raw: str) -> Path:
-    """Resolve a user-supplied workspace path against the allowlist.
-
-    Raises HTTPException(400) when the path is empty, expands a home tilde,
-    or escapes every allowlisted root after .resolve() (which collapses
-    ``..`` segments and follows symlinks).
-    """
-    if not raw or not raw.strip():
-        raise HTTPException(status_code=400, detail="workspace is required")
-    candidate = raw.strip()
-    # Reject home-tilde explicitly — .expanduser() would silently let
-    # "~/.ssh/id_rsa" resolve to the operator's home tree.
-    if candidate.startswith("~"):
-        raise HTTPException(
-            status_code=400,
-            detail="workspace must be an absolute path under an allowed root, not a home-relative tilde",
-        )
-    resolved = Path(candidate).resolve()
-    roots = _allowed_workspace_roots()
-    for root in roots:
-        try:
-            if resolved == root or resolved.is_relative_to(root):
-                return resolved
-        except AttributeError:  # pragma: no cover — Path.is_relative_to is 3.9+
-            try:
-                resolved.relative_to(root)
-                return resolved
-            except ValueError:
-                continue
-    raise HTTPException(
-        status_code=400,
-        detail=(
-            "workspace must resolve under an allowed root "
-            f"({', '.join(str(r) for r in roots)})"
-        ),
-    )
+# Dispatch runs a single shared agent identity — "Anton". The AgentGroup
+# entity and the wiring FK stay in anton.core.dispatch so a future multi-agent
+# feature can plug other agents in, but cowork only ever creates/uses this one.
+ANTON_AGENT_GROUP_ID = "anton"
+ANTON_AGENT_GROUP_NAME = "Anton"
 
 
 def _managed_workspace_root() -> Path:
@@ -113,18 +59,14 @@ def _managed_workspace_root() -> Path:
     return Path.home() / ".anton" / "dispatch-workspaces"
 
 
-def _default_agent_workspace(name: str, group_id: str) -> Path:
-    """Pick a managed workspace for an agent group with no explicit path.
+def _anton_workspace() -> Path:
+    """Fixed managed workspace for the single Anton agent group.
 
-    ``<name-slug>-<short-id>`` keeps the directory human-recognisable while
-    the id suffix avoids two same-named groups silently sharing a tree.
-    This path is server-controlled, so it skips the allowlist check that
-    guards user-supplied paths.
+    ``<managed-root>/anton`` — the same path the router's ``_auto_workspace``
+    resolves, so a group created here and one auto-provisioned by the router
+    agree. Server-controlled, so no allowlist check is needed.
     """
-    slug = "".join(
-        c if c.isalnum() or c in "-_." else "-" for c in name.strip().lower()
-    ).strip("-") or "agent"
-    return (_managed_workspace_root() / f"{slug}-{group_id[:8]}").resolve()
+    return (_managed_workspace_root() / ANTON_AGENT_GROUP_ID).resolve()
 
 
 # Lazy singletons — the dispatch repo + router are process-local, fine for the
@@ -160,6 +102,39 @@ async def close_repo() -> None:
             await _repo.close()
         finally:
             _repo = None
+
+
+async def _ensure_single_anton_group(repo: Any) -> None:
+    """Guarantee exactly one agent group — "Anton" — and route everything to it.
+
+    Creates the Anton group if missing, then collapses any other agent groups
+    (the per-channel groups older builds auto-provisioned) into it, re-pointing
+    their wirings and sessions. Idempotent — a no-op once migrated.
+    """
+    from anton.core.dispatch.entities import AgentGroup
+    from anton.core.dispatch.policy import PermissionPolicy
+
+    try:
+        await repo.get_agent_group(ANTON_AGENT_GROUP_ID)
+    except KeyError:
+        workspace = _anton_workspace()
+        workspace.mkdir(parents=True, exist_ok=True)
+        await repo.create_agent_group(
+            AgentGroup(
+                id=ANTON_AGENT_GROUP_ID,
+                name=ANTON_AGENT_GROUP_NAME,
+                workspace=workspace,
+                policy=PermissionPolicy(),
+            )
+        )
+
+    removed = await repo.collapse_to_single_agent_group(ANTON_AGENT_GROUP_ID)
+    if removed:
+        logger.info(
+            "dispatch: collapsed %d legacy agent group(s) into %r",
+            removed,
+            ANTON_AGENT_GROUP_ID,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +174,7 @@ async def start_dispatch() -> None:
         logger.exception("could not register slack adapter")
 
     repo = _get_repo()
+    await _ensure_single_anton_group(repo)
     orchestrator = LocalScratchpadOrchestrator(
         store_opener=repo.open_session_store,
         # Cowork's tone nudge — same suffix the interactive chat uses.
@@ -338,25 +314,19 @@ def _session_dto(s: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-class AgentGroupCreate(BaseModel):
-    id: Optional[str] = None  # auto-generated when omitted
-    name: str = Field(..., min_length=1)
-    # Optional: blank/omitted means "give it a managed workspace" — the
-    # server picks one under ~/.anton/dispatch-workspaces/ (see
-    # _default_agent_workspace). Supply an explicit path only to point the
-    # agent at an existing project tree; that path is allowlist-checked.
-    workspace: Optional[str] = None
-
-
 class WiringCreate(BaseModel):
-    """Wire an agent group to a messaging group.
+    """Wire a messaging group to the Anton agent.
 
     Provide either ``messaging_group_id`` (existing) or
     ``channel_type`` + ``platform_id`` (creates the messaging group on demand).
     The latter is the natural shape from the UI — operators know
     "slack channel C123" not "mg uuid".
+
+    ``agent_group_id`` defaults to the single shared Anton group; it stays in
+    the model so the entity FK is still expressible for a future multi-agent
+    feature, but the UI never sets it.
     """
-    agent_group_id: str
+    agent_group_id: str = ANTON_AGENT_GROUP_ID
     messaging_group_id: Optional[str] = None
     channel_type: Optional[str] = None
     platform_id: Optional[str] = None
@@ -444,46 +414,9 @@ async def list_agent_groups():
     return {"agent_groups": [_agent_group_dto(g) for g in groups]}
 
 
-@router.post("/agent-groups")
-async def create_agent_group(body: AgentGroupCreate):
-    import uuid
-
-    from anton.core.dispatch.entities import AgentGroup
-    from anton.core.dispatch.policy import PermissionPolicy
-
-    group_id = body.id or str(uuid.uuid4())
-    raw_workspace = (body.workspace or "").strip()
-    if raw_workspace:
-        # Explicit path — allowlist-checked so a request can't aim an agent
-        # at ~/.ssh, /etc, or a sibling project tree.
-        workspace = _resolve_workspace_or_400(raw_workspace)
-    else:
-        # Blank — hand the group a managed workspace, same as the router's
-        # auto-provisioning. This is the common path from the UI.
-        workspace = _default_agent_workspace(body.name, group_id)
-    workspace.mkdir(parents=True, exist_ok=True)
-
-    repo = _get_repo()
-    group = AgentGroup(
-        id=group_id,
-        name=body.name.strip(),
-        workspace=workspace,
-        policy=PermissionPolicy(),
-    )
-    saved = await repo.create_agent_group(group)
-    return {"agent_group": _agent_group_dto(saved)}
-
-
-@router.delete("/agent-groups/{agent_group_id}")
-async def delete_agent_group(agent_group_id: str):
-    repo = _get_repo()
-    try:
-        deleted = await repo.delete_agent_group(agent_group_id)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    if not deleted:
-        raise HTTPException(status_code=404, detail=f"agent_group not found: {agent_group_id}")
-    return {"deleted": True, "id": agent_group_id}
+# Agent groups are created and managed server-side — a single shared "Anton"
+# group, ensured at startup by _ensure_single_anton_group. There is no
+# create/delete endpoint: the UI no longer exposes per-agent management.
 
 
 # ---------------------------------------------------------------------------

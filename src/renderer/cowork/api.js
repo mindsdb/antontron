@@ -865,7 +865,9 @@ export async function startGoogleCalendarAuth() {
   return req('/integrations/google-calendar/oauth/start', { method: 'POST', body: JSON.stringify({}) });
 }
 
-// ─── Dispatch (channels + agent groups + wirings) ─────────────────────────────
+// ─── Dispatch (channels + wirings) ────────────────────────────────────────────
+// Dispatch routes every channel to a single shared "Anton" agent group, ensured
+// server-side — there are no agent-group management endpoints.
 export async function fetchDispatchStatus() {
   try {
     return await req('/dispatch/status');
@@ -881,23 +883,6 @@ export async function fetchDispatchChannels() {
   } catch {
     return [];
   }
-}
-
-export async function fetchAgentGroups() {
-  try {
-    const data = await req('/dispatch/agent-groups');
-    return data.agent_groups ?? [];
-  } catch {
-    return [];
-  }
-}
-
-export async function createAgentGroup({ name, workspace }) {
-  return req('/dispatch/agent-groups', { method: 'POST', body: JSON.stringify({ name, workspace }) });
-}
-
-export async function deleteAgentGroup(id) {
-  return req(`/dispatch/agent-groups/${encodeURIComponent(id)}`, { method: 'DELETE' });
 }
 
 export async function fetchWirings() {

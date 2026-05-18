@@ -2,11 +2,8 @@ import { useCallback, useEffect, useState } from 'react';
 import Ico from '../components/Icons';
 import { PageHeader } from '../components/collection';
 import {
-  createAgentGroup,
   createWiring,
-  deleteAgentGroup,
   deleteWiring,
-  fetchAgentGroups,
   fetchDiscordConfig,
   fetchDispatchChannels,
   fetchDispatchStatus,
@@ -647,151 +644,20 @@ function ChannelCard({
   );
 }
 
-function AgentGroupForm({ onCreated, busy, setBusy }) {
-  const [name, setName] = useState('');
-  const [workspace, setWorkspace] = useState('');
-  const [error, setError] = useState(null);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!name.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      // Blank workspace → the server hands the group a managed workspace
-      // under ~/.anton/dispatch-workspaces/. An explicit path is optional.
-      const created = await createAgentGroup({ name: name.trim(), workspace: workspace.trim() });
-      setName('');
-      setWorkspace('');
-      onCreated(created.agent_group);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form className="dispatch-form" onSubmit={submit}>
-      <input
-        className="dispatch-input"
-        placeholder="Agent name (e.g. Anton)"
-        value={name}
-        onChange={(e) => setName(e.target.value)}
-      />
-      <input
-        className="dispatch-input"
-        placeholder="Workspace path — optional, blank for a managed one"
-        value={workspace}
-        onChange={(e) => setWorkspace(e.target.value)}
-      />
-      <button
-        type="submit"
-        className="btn-primary"
-        disabled={busy || !name.trim()}
-      >
-        Add agent
-      </button>
-      {error ? <span className="dispatch-error">{error}</span> : null}
-    </form>
-  );
-}
-
-function WiringForm({ agentGroups, channels, onCreated, busy, setBusy }) {
-  const connectableTypes = channels.filter((c) => c.active).map((c) => c.type);
-  const [agentGroupId, setAgentGroupId] = useState('');
-  const [channelType, setChannelType] = useState(connectableTypes[0] || 'slack');
-  const [platformId, setPlatformId] = useState('');
-  const [sessionMode, setSessionMode] = useState('per-messaging-group');
-  const [triggerRule, setTriggerRule] = useState('always');
-  const [error, setError] = useState(null);
-
-  useEffect(() => {
-    if (!agentGroupId && agentGroups[0]) setAgentGroupId(agentGroups[0].id);
-  }, [agentGroups, agentGroupId]);
-  useEffect(() => {
-    if (!connectableTypes.includes(channelType) && connectableTypes[0]) {
-      setChannelType(connectableTypes[0]);
-    }
-  }, [connectableTypes, channelType]);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!agentGroupId || !channelType || !platformId.trim()) return;
-    setBusy(true);
-    setError(null);
-    try {
-      const created = await createWiring({
-        agent_group_id: agentGroupId,
-        channel_type: channelType,
-        platform_id: platformId.trim(),
-        session_mode: sessionMode,
-        trigger_rule: triggerRule,
-      });
-      setPlatformId('');
-      onCreated(created.wiring);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (!agentGroups.length) {
-    return <p className="dispatch-empty">Add an agent group first.</p>;
-  }
-  if (!connectableTypes.length) {
-    return <p className="dispatch-empty">Connect a channel first to wire it.</p>;
-  }
-
-  return (
-    <form className="dispatch-form dispatch-form-wide" onSubmit={submit}>
-      <select className="dispatch-input" value={agentGroupId} onChange={(e) => setAgentGroupId(e.target.value)}>
-        {agentGroups.map((g) => (<option key={g.id} value={g.id}>{g.name}</option>))}
-      </select>
-      <select className="dispatch-input" value={channelType} onChange={(e) => setChannelType(e.target.value)}>
-        {connectableTypes.map((t) => (<option key={t} value={t}>{CHANNEL_LIBRARY[t]?.name || t}</option>))}
-      </select>
-      <input
-        className="dispatch-input"
-        placeholder="Platform id (e.g. C0123ABC)"
-        value={platformId}
-        onChange={(e) => setPlatformId(e.target.value)}
-      />
-      <select className="dispatch-input" value={sessionMode} onChange={(e) => setSessionMode(e.target.value)}>
-        {SESSION_MODES.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
-      </select>
-      <select className="dispatch-input" value={triggerRule} onChange={(e) => setTriggerRule(e.target.value)}>
-        {TRIGGER_RULES.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
-      </select>
-      <button
-        type="submit"
-        className="btn-primary"
-        disabled={busy || !platformId.trim()}
-      >
-        Wire
-      </button>
-      {error ? <span className="dispatch-error">{error}</span> : null}
-    </form>
-  );
-}
-
-/** One wiring row with inline-editable session mode, trigger rule, and
- *  priority. Saving re-POSTs to /dispatch/wirings — the same (messaging
- *  group, agent group) key, so the server's INSERT OR REPLACE updates the
- *  existing row in place. The Save button shows only while the row differs
- *  from what's persisted. */
-function WiringRow({ wiring, channelName, agentName, onSaved, onRemove }) {
+/** One wiring row with inline-editable session mode and trigger rule.
+ *  Saving re-POSTs to /dispatch/wirings — the same (messaging group, agent
+ *  group) key, so the server's INSERT OR REPLACE updates the existing row in
+ *  place. The Save button shows only while the row differs from what's
+ *  persisted. */
+function WiringRow({ wiring, channelName, onSaved, onRemove }) {
   const [sessionMode, setSessionMode] = useState(wiring.session_mode);
   const [triggerRule, setTriggerRule] = useState(wiring.trigger_rule);
-  const [priority, setPriority] = useState(String(wiring.priority));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
   const dirty =
     sessionMode !== wiring.session_mode ||
-    triggerRule !== wiring.trigger_rule ||
-    (Number(priority) || 0) !== wiring.priority;
+    triggerRule !== wiring.trigger_rule;
 
   const save = async () => {
     setBusy(true);
@@ -799,10 +665,8 @@ function WiringRow({ wiring, channelName, agentName, onSaved, onRemove }) {
     try {
       const updated = await createWiring({
         messaging_group_id: wiring.messaging_group_id,
-        agent_group_id: wiring.agent_group_id,
         session_mode: sessionMode,
         trigger_rule: triggerRule,
-        priority: Number(priority) || 0,
       });
       onSaved(updated.wiring);
     } catch (err) {
@@ -814,7 +678,7 @@ function WiringRow({ wiring, channelName, agentName, onSaved, onRemove }) {
 
   return (
     <li className="dispatch-list-row">
-      <span className="dispatch-list-name">{channelName} → {agentName}</span>
+      <span className="dispatch-list-name">{channelName} → Anton</span>
       <div className="dispatch-wiring-edit">
         <select
           className="dispatch-input dispatch-input-sm"
@@ -832,13 +696,6 @@ function WiringRow({ wiring, channelName, agentName, onSaved, onRemove }) {
         >
           {TRIGGER_RULES.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
         </select>
-        <input
-          className="dispatch-input dispatch-input-sm dispatch-input-prio"
-          type="number"
-          value={priority}
-          onChange={(e) => setPriority(e.target.value)}
-          title="Priority — lower wins when several wirings match"
-        />
         {error ? <span className="dispatch-error">{error}</span> : null}
       </div>
       {dirty ? (
@@ -856,7 +713,6 @@ function WiringRow({ wiring, channelName, agentName, onSaved, onRemove }) {
 export default function DispatchView() {
   const [status, setStatus] = useState(null);
   const [channels, setChannels] = useState([]);
-  const [agentGroups, setAgentGroups] = useState([]);
   const [wirings, setWirings] = useState([]);
   const [messagingGroups, setMessagingGroups] = useState([]);
   const [slackStatus, setSlackStatus] = useState(null);
@@ -865,7 +721,6 @@ export default function DispatchView() {
   const [whatsappStatus, setWhatsAppStatus] = useState(null);
   const [connectError, setConnectError] = useState({});
   const [connectBusy, setConnectBusy] = useState({});
-  const [formBusy, setFormBusy] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
@@ -873,10 +728,9 @@ export default function DispatchView() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [s, c, ag, w, mg, sc, tc, dc, wc] = await Promise.all([
+      const [s, c, w, mg, sc, tc, dc, wc] = await Promise.all([
         fetchDispatchStatus(),
         fetchDispatchChannels(),
-        fetchAgentGroups(),
         fetchWirings(),
         fetchMessagingGroups(),
         fetchSlackConfig(),
@@ -896,7 +750,6 @@ export default function DispatchView() {
       if (!types.has('telegram')) visible.unshift({ type: 'telegram', registered: false, active: false });
       if (!types.has('slack'))    visible.unshift({ type: 'slack',    registered: false, active: false });
       setChannels(visible);
-      setAgentGroups(ag);
       setWirings(w);
       setMessagingGroups(mg);
       setSlackStatus(sc);
@@ -943,16 +796,6 @@ export default function DispatchView() {
     }
   };
 
-  const removeAgent = async (id) => {
-    if (!window.confirm(`Delete agent group "${id}"? Existing wirings must be removed first.`)) return;
-    try {
-      await deleteAgentGroup(id);
-      refresh();
-    } catch (err) {
-      window.alert(err.message);
-    }
-  };
-
   const removeWiring = async (mgId, agId) => {
     try {
       await deleteWiring(mgId, agId);
@@ -966,7 +809,7 @@ export default function DispatchView() {
     <div className="dispatch-view scroll-clean" style={{ flex: 1, overflowY: 'auto' }}>
       <PageHeader
         title="Dispatch"
-        subtitle="Wire Anton up to chat platforms — Slack, Telegram, Discord, WhatsApp — and route inbound messages to agent groups."
+        subtitle="Wire Anton up to chat platforms — Slack, Telegram, Discord, WhatsApp — and route inbound messages to Anton."
       />
       <div style={{ height: 32 }} />
       <main className="dispatch-content dispatch-content-wide">
@@ -977,7 +820,7 @@ export default function DispatchView() {
           {status ? (
             <p className="dispatch-status-line">
               {status.ready ? 'Dispatch ready · ' : 'Dispatch unavailable · '}
-              {status.agent_group_count} agent{status.agent_group_count === 1 ? '' : 's'} · {status.wiring_count} wiring{status.wiring_count === 1 ? '' : 's'} · {status.active_channels.length} active channel{status.active_channels.length === 1 ? '' : 's'}
+              {status.wiring_count} wiring{status.wiring_count === 1 ? '' : 's'} · {status.active_channels.length} active channel{status.active_channels.length === 1 ? '' : 's'}
             </p>
           ) : (
             <p className="dispatch-status-line">Loading…</p>
@@ -1014,48 +857,23 @@ export default function DispatchView() {
 
         <section className="dispatch-section">
           <header className="dispatch-section-head">
-            <h2>Agent groups</h2>
-          </header>
-          <ul className="dispatch-list">
-            {agentGroups.map((g) => (
-              <li key={g.id} className="dispatch-list-row">
-                <span className="dispatch-list-name">{g.name}</span>
-                <span className="dispatch-list-meta">{g.workspace}</span>
-                <button type="button" className="dispatch-btn dispatch-btn-icon" onClick={() => removeAgent(g.id)}>
-                  {Ico.trash(14)}
-                </button>
-              </li>
-            ))}
-            {agentGroups.length === 0 ? <li className="dispatch-empty">No agent groups yet.</li> : null}
-          </ul>
-          <AgentGroupForm
-            onCreated={(g) => { setAgentGroups((prev) => [...prev, g]); refresh(); }}
-            busy={formBusy}
-            setBusy={setFormBusy}
-          />
-        </section>
-
-        <section className="dispatch-section">
-          <header className="dispatch-section-head">
             <h2>Wirings</h2>
           </header>
           <ul className="dispatch-list">
             {wirings.map((w) => {
-              // Resolve UUIDs back to human-readable labels. Messaging groups
-              // are populated lazily, so a freshly-wired row may not have its
-              // group recorded yet — fall back to a short id in that case.
+              // Resolve the messaging-group UUID back to a human-readable
+              // label. Messaging groups are populated lazily, so a freshly-
+              // wired row may not have its group recorded yet — fall back to
+              // a short id in that case.
               const mg = messagingGroups.find((m) => m.id === w.messaging_group_id);
-              const ag = agentGroups.find((g) => g.id === w.agent_group_id);
               const channelName = mg
                 ? `${CHANNEL_LIBRARY[mg.channel_type]?.name || mg.channel_type} · ${mg.display_name || mg.platform_id}`
                 : `${w.messaging_group_id.slice(0, 8)}…`;
-              const agentName = ag ? ag.name : `${w.agent_group_id.slice(0, 8)}…`;
               return (
                 <WiringRow
                   key={`${w.messaging_group_id}-${w.agent_group_id}`}
                   wiring={w}
                   channelName={channelName}
-                  agentName={agentName}
                   onSaved={(updated) => {
                     setWirings((prev) => prev.map((x) =>
                       x.messaging_group_id === updated.messaging_group_id
@@ -1067,15 +885,12 @@ export default function DispatchView() {
                 />
               );
             })}
-            {wirings.length === 0 ? <li className="dispatch-empty">No wirings yet.</li> : null}
+            {wirings.length === 0 ? (
+              <li className="dispatch-empty">
+                No wirings yet — a channel is wired automatically the first time it messages Anton.
+              </li>
+            ) : null}
           </ul>
-          <WiringForm
-            agentGroups={agentGroups}
-            channels={channels}
-            onCreated={(w) => { setWirings((prev) => [...prev, w]); refresh(); }}
-            busy={formBusy}
-            setBusy={setFormBusy}
-          />
         </section>
       </main>
     </div>
