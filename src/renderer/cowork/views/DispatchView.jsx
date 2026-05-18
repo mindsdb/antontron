@@ -654,10 +654,12 @@ function AgentGroupForm({ onCreated, busy, setBusy }) {
 
   const submit = async (e) => {
     e.preventDefault();
-    if (!name.trim() || !workspace.trim()) return;
+    if (!name.trim()) return;
     setBusy(true);
     setError(null);
     try {
+      // Blank workspace → the server hands the group a managed workspace
+      // under ~/.anton/dispatch-workspaces/. An explicit path is optional.
       const created = await createAgentGroup({ name: name.trim(), workspace: workspace.trim() });
       setName('');
       setWorkspace('');
@@ -679,14 +681,14 @@ function AgentGroupForm({ onCreated, busy, setBusy }) {
       />
       <input
         className="dispatch-input"
-        placeholder="Workspace path (e.g. ~/Projects/anton)"
+        placeholder="Workspace path — optional, blank for a managed one"
         value={workspace}
         onChange={(e) => setWorkspace(e.target.value)}
       />
       <button
         type="submit"
         className="btn-primary"
-        disabled={busy || !name.trim() || !workspace.trim()}
+        disabled={busy || !name.trim()}
       >
         Add agent
       </button>

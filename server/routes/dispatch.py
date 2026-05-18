@@ -97,6 +97,36 @@ def _resolve_workspace_or_400(raw: str) -> Path:
     )
 
 
+def _managed_workspace_root() -> Path:
+    """Base dir for server-managed agent workspaces.
+
+    Mirrors the router's auto-provisioning base so manually-created and
+    auto-provisioned agent groups land side by side. ``~/.anton`` is the
+    one path that exists and persists identically on the desktop app, the
+    web build, and the cloud container (whose only persistent volume is
+    mounted there). Overridable with ``ANTON_DISPATCH_WORKSPACE_ROOT`` —
+    the same env var ``router._auto_workspace`` honours.
+    """
+    root = os.environ.get("ANTON_DISPATCH_WORKSPACE_ROOT", "").strip()
+    if root:
+        return Path(root).expanduser()
+    return Path.home() / ".anton" / "dispatch-workspaces"
+
+
+def _default_agent_workspace(name: str, group_id: str) -> Path:
+    """Pick a managed workspace for an agent group with no explicit path.
+
+    ``<name-slug>-<short-id>`` keeps the directory human-recognisable while
+    the id suffix avoids two same-named groups silently sharing a tree.
+    This path is server-controlled, so it skips the allowlist check that
+    guards user-supplied paths.
+    """
+    slug = "".join(
+        c if c.isalnum() or c in "-_." else "-" for c in name.strip().lower()
+    ).strip("-") or "agent"
+    return (_managed_workspace_root() / f"{slug}-{group_id[:8]}").resolve()
+
+
 # Lazy singletons — the dispatch repo + router are process-local, fine for the
 # cowork single-user gateway. Multi-instance deployments would swap this for a
 # managed backend.
@@ -311,7 +341,11 @@ def _session_dto(s: Any) -> dict[str, Any]:
 class AgentGroupCreate(BaseModel):
     id: Optional[str] = None  # auto-generated when omitted
     name: str = Field(..., min_length=1)
-    workspace: str = Field(..., min_length=1)
+    # Optional: blank/omitted means "give it a managed workspace" — the
+    # server picks one under ~/.anton/dispatch-workspaces/ (see
+    # _default_agent_workspace). Supply an explicit path only to point the
+    # agent at an existing project tree; that path is allowlist-checked.
+    workspace: Optional[str] = None
 
 
 class WiringCreate(BaseModel):
@@ -417,12 +451,21 @@ async def create_agent_group(body: AgentGroupCreate):
     from anton.core.dispatch.entities import AgentGroup
     from anton.core.dispatch.policy import PermissionPolicy
 
-    workspace = _resolve_workspace_or_400(body.workspace)
+    group_id = body.id or str(uuid.uuid4())
+    raw_workspace = (body.workspace or "").strip()
+    if raw_workspace:
+        # Explicit path — allowlist-checked so a request can't aim an agent
+        # at ~/.ssh, /etc, or a sibling project tree.
+        workspace = _resolve_workspace_or_400(raw_workspace)
+    else:
+        # Blank — hand the group a managed workspace, same as the router's
+        # auto-provisioning. This is the common path from the UI.
+        workspace = _default_agent_workspace(body.name, group_id)
     workspace.mkdir(parents=True, exist_ok=True)
 
     repo = _get_repo()
     group = AgentGroup(
-        id=body.id or str(uuid.uuid4()),
+        id=group_id,
         name=body.name.strip(),
         workspace=workspace,
         policy=PermissionPolicy(),
