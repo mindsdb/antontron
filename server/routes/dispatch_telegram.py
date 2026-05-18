@@ -39,6 +39,7 @@ import hmac
 import json
 import logging
 import os
+import secrets as secrets_mod
 from datetime import datetime, timezone
 from typing import Any
 from urllib.request import Request as URLRequest, urlopen
@@ -76,6 +77,7 @@ from channels import (
     SignatureMismatch,
     WebhookHandshake,
     load_channel_secrets,
+    secret_var_name,
 )
 from .settings import _read_dotenv, _write_dotenv, GLOBAL_ENV_PATH
 
@@ -444,22 +446,49 @@ class TelegramBridge(ChatBridgeBase):
     # Webhook registration helpers
     # ------------------------------------------------------------------
 
+    def _ensure_secret_token(self) -> str:
+        """Return the webhook ``secret_token``, minting + persisting one if unset.
+
+        Telegram echoes this back in the ``X-Telegram-Bot-Api-Secret-Token``
+        header on every delivery, and :meth:`verify_signature` requires it —
+        without one, webhook ingress refuses every payload. The config panel
+        doesn't expose the field, so webhook mode auto-generates a token on
+        first registration and persists it to ``~/.anton/.env`` (under the
+        canonical ``DS_TELEGRAM_<ACCOUNT>__SECRET_TOKEN`` name) so it survives
+        restarts and is picked up by ``load_channel_secrets`` next boot.
+        """
+        existing = (self.secrets.get("secret_token") or "").strip()
+        if existing:
+            return existing
+        token = secrets_mod.token_urlsafe(32)
+        self.secrets["secret_token"] = token
+        var_name = secret_var_name("telegram", self.account, "secret_token")
+        os.environ[var_name] = token
+        try:
+            _write_dotenv(GLOBAL_ENV_PATH, {var_name: token})
+        except Exception:
+            logger.warning(
+                "could not persist telegram webhook secret_token to .env; "
+                "webhook auth will reset on restart",
+                exc_info=True,
+            )
+        return token
+
     async def _register_webhook(self, webhook_url: str) -> None:
         """Tell Telegram to POST updates to ``webhook_url``.
 
-        Passes the configured ``secret_token`` so Telegram echoes it back in
-        the ``X-Telegram-Bot-Api-Secret-Token`` header on every delivery,
-        which ``verify_signature`` then compares constant-time.
+        Passes the ``secret_token`` so Telegram echoes it back in the
+        ``X-Telegram-Bot-Api-Secret-Token`` header on every delivery, which
+        ``verify_signature`` then compares constant-time. The token is
+        auto-minted by :meth:`_ensure_secret_token` when none is configured.
         """
         bot_token = self.secrets.get("bot_token") or ""
         payload: dict[str, Any] = {
             "url": webhook_url,
             "allowed_updates": ["message"],
             "drop_pending_updates": False,
+            "secret_token": self._ensure_secret_token(),
         }
-        secret_token = (self.secrets.get("secret_token") or "").strip()
-        if secret_token:
-            payload["secret_token"] = secret_token
         result = await asyncio.to_thread(
             self._call_api, bot_token, "setWebhook", payload
         )
