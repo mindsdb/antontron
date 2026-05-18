@@ -774,6 +774,83 @@ function WiringForm({ agentGroups, channels, onCreated, busy, setBusy }) {
   );
 }
 
+/** One wiring row with inline-editable session mode, trigger rule, and
+ *  priority. Saving re-POSTs to /dispatch/wirings — the same (messaging
+ *  group, agent group) key, so the server's INSERT OR REPLACE updates the
+ *  existing row in place. The Save button shows only while the row differs
+ *  from what's persisted. */
+function WiringRow({ wiring, channelName, agentName, onSaved, onRemove }) {
+  const [sessionMode, setSessionMode] = useState(wiring.session_mode);
+  const [triggerRule, setTriggerRule] = useState(wiring.trigger_rule);
+  const [priority, setPriority] = useState(String(wiring.priority));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const dirty =
+    sessionMode !== wiring.session_mode ||
+    triggerRule !== wiring.trigger_rule ||
+    (Number(priority) || 0) !== wiring.priority;
+
+  const save = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const updated = await createWiring({
+        messaging_group_id: wiring.messaging_group_id,
+        agent_group_id: wiring.agent_group_id,
+        session_mode: sessionMode,
+        trigger_rule: triggerRule,
+        priority: Number(priority) || 0,
+      });
+      onSaved(updated.wiring);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <li className="dispatch-list-row">
+      <span className="dispatch-list-name">{channelName} → {agentName}</span>
+      <div className="dispatch-wiring-edit">
+        <select
+          className="dispatch-input dispatch-input-sm"
+          value={sessionMode}
+          onChange={(e) => setSessionMode(e.target.value)}
+          title="Session mode"
+        >
+          {SESSION_MODES.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
+        </select>
+        <select
+          className="dispatch-input dispatch-input-sm"
+          value={triggerRule}
+          onChange={(e) => setTriggerRule(e.target.value)}
+          title="Trigger rule"
+        >
+          {TRIGGER_RULES.map((m) => (<option key={m.value} value={m.value}>{m.label}</option>))}
+        </select>
+        <input
+          className="dispatch-input dispatch-input-sm dispatch-input-prio"
+          type="number"
+          value={priority}
+          onChange={(e) => setPriority(e.target.value)}
+          title="Priority — lower wins when several wirings match"
+        />
+        {error ? <span className="dispatch-error">{error}</span> : null}
+      </div>
+      {dirty ? (
+        <button type="button" className="dispatch-btn" disabled={busy} onClick={save}>
+          {busy ? 'Saving…' : 'Save'}
+        </button>
+      ) : null}
+      <button type="button" className="dispatch-btn dispatch-btn-icon" onClick={onRemove}>
+        {Ico.trash(14)}
+      </button>
+    </li>
+  );
+}
+
 export default function DispatchView() {
   const [status, setStatus] = useState(null);
   const [channels, setChannels] = useState([]);
@@ -972,13 +1049,20 @@ export default function DispatchView() {
                 : `${w.messaging_group_id.slice(0, 8)}…`;
               const agentName = ag ? ag.name : `${w.agent_group_id.slice(0, 8)}…`;
               return (
-                <li key={`${w.messaging_group_id}-${w.agent_group_id}`} className="dispatch-list-row">
-                  <span className="dispatch-list-name">{channelName} → {agentName}</span>
-                  <span className="dispatch-list-meta">{w.session_mode} · {w.trigger_rule} · prio {w.priority}</span>
-                  <button type="button" className="dispatch-btn dispatch-btn-icon" onClick={() => removeWiring(w.messaging_group_id, w.agent_group_id)}>
-                    {Ico.trash(14)}
-                  </button>
-                </li>
+                <WiringRow
+                  key={`${w.messaging_group_id}-${w.agent_group_id}`}
+                  wiring={w}
+                  channelName={channelName}
+                  agentName={agentName}
+                  onSaved={(updated) => {
+                    setWirings((prev) => prev.map((x) =>
+                      x.messaging_group_id === updated.messaging_group_id
+                        && x.agent_group_id === updated.agent_group_id
+                        ? updated : x));
+                    refresh();
+                  }}
+                  onRemove={() => removeWiring(w.messaging_group_id, w.agent_group_id)}
+                />
               );
             })}
             {wirings.length === 0 ? <li className="dispatch-empty">No wirings yet.</li> : null}

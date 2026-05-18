@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from abc import ABC, abstractmethod
+from collections import OrderedDict
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -34,6 +35,11 @@ logger = logging.getLogger(__name__)
 # errors generally. 500 is included because most platforms classify
 # unexpected internal errors as transient.
 RETRYABLE_HTTP_STATUS = frozenset({429, 500, 502, 503, 504})
+
+# How many recent inbound message ids each bridge remembers for de-duplication.
+# Bounds memory while covering any realistic burst of platform redeliveries
+# before the originals age out.
+INBOUND_DEDUP_CAPACITY = 512
 
 
 def raise_if_retryable(exc: HTTPError) -> None:
@@ -131,6 +137,9 @@ class ChatBridgeBase(ABC):
         # without this set a fire-and-forget routing task could be garbage
         # collected mid-run.
         self._inbound_tasks: set[asyncio.Task[Any]] = set()
+        # FIFO of recently-routed inbound message ids, for de-duplication.
+        # Value is unused — only the key + insertion order matter.
+        self._seen_inbound_ids: OrderedDict[str, None] = OrderedDict()
 
     # -----------------------------------------------------------------
     # Abstract surface — subclasses implement
@@ -240,6 +249,29 @@ class ChatBridgeBase(ABC):
     # Background inbound dispatch
     # -----------------------------------------------------------------
 
+    def is_duplicate_inbound(self, message_id: str) -> bool:
+        """Return True if ``message_id`` was already routed; record it otherwise.
+
+        Platforms re-deliver inbound events on any delivery hiccup — Slack
+        and WhatsApp retry webhooks on a slow or non-2xx response, Slack
+        Socket Mode resends an envelope whose ACK was lost, Telegram
+        long-polling replays updates whose offset wasn't advanced before a
+        crash. Routing a duplicate runs the agent and posts its reply twice.
+
+        Keeps a bounded FIFO of the most recent :data:`INBOUND_DEDUP_CAPACITY`
+        ids, evicting the oldest once full. A falsy id is never treated as a
+        duplicate — we can't dedup what we can't key on. All callers run on
+        the asyncio event loop, so no lock is needed.
+        """
+        if not message_id:
+            return False
+        if message_id in self._seen_inbound_ids:
+            return True
+        self._seen_inbound_ids[message_id] = None
+        while len(self._seen_inbound_ids) > INBOUND_DEDUP_CAPACITY:
+            self._seen_inbound_ids.popitem(last=False)
+        return False
+
     def schedule_inbound(self, events: list[Any], on_inbound) -> None:
         """Route parsed inbound events to the router without blocking the caller.
 
@@ -250,12 +282,23 @@ class ChatBridgeBase(ABC):
         Awaiting ``on_inbound`` inline couples the ACK to the full agent
         run, so each event is instead routed in its own background task.
 
-        A strong reference to every task is held in :attr:`_inbound_tasks`
-        until it finishes (asyncio keeps only weak refs to tasks). Exceptions
-        are logged inside the task, never raised here — by the time
-        ``on_inbound`` runs the webhook response has already been sent.
+        Events whose message id was already routed are dropped via
+        :meth:`is_duplicate_inbound` so a platform redelivery doesn't run
+        the agent twice. A strong reference to every task is held in
+        :attr:`_inbound_tasks` until it finishes (asyncio keeps only weak
+        refs to tasks). Exceptions are logged inside the task, never raised
+        here — by the time ``on_inbound`` runs the webhook response has
+        already been sent.
         """
         for event in events:
+            message_id = getattr(getattr(event, "message", None), "id", "")
+            if self.is_duplicate_inbound(message_id):
+                logger.info(
+                    "dropping duplicate %s inbound message id=%s",
+                    self.channel_type,
+                    message_id,
+                )
+                continue
             task = asyncio.create_task(self._run_inbound(on_inbound, event))
             self._inbound_tasks.add(task)
             task.add_done_callback(self._inbound_tasks.discard)

@@ -4732,6 +4732,29 @@ select.dispatch-input {
   cursor: pointer;
 }
 
+/* Inline-editable wiring row — compact controls between the row name and
+   its Save/delete buttons. The wrapper takes the free space so the
+   buttons stay flush right. */
+.dispatch-wiring-edit {
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.dispatch-input-sm {
+  height: 32px;
+  font-size: 12px;
+  padding: 0 8px;
+}
+.dispatch-form-wide .dispatch-input-sm,
+.dispatch-input-sm {
+  min-width: 0;
+}
+.dispatch-input-prio {
+  width: 68px;
+}
+
 /* ── Buttons (override the original .dispatch-btn-* hardcoded colors) ── */
 .dispatch-btn {
   cursor: pointer;

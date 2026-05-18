@@ -255,6 +255,8 @@ class TelegramBridge(ChatBridgeBase):
                 )
                 events = self._updates_to_events(updates)
                 for event in events:
+                    if self.is_duplicate_inbound(event.message.id):
+                        continue
                     if self._setup is not None:
                         try:
                             await self._setup.on_inbound(event)

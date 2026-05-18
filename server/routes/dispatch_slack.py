@@ -365,6 +365,11 @@ class SlackBridge(ChatBridgeBase):
             if self._setup is None:
                 logger.warning("Socket Mode received event but ChannelSetup is None")
                 return
+            if self.is_duplicate_inbound(inbound.message.id):
+                logger.info(
+                    "Socket Mode dropping duplicate event %s", inbound.message.id
+                )
+                return
             try:
                 await self._setup.on_inbound(inbound)
                 logger.info(

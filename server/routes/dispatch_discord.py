@@ -327,6 +327,8 @@ class DiscordBridge(ChatBridgeBase):
             event = bridge._message_to_event(msg, discord)
             if event is None or bridge._setup is None:
                 return
+            if bridge.is_duplicate_inbound(event.message.id):
+                return
             try:
                 await bridge._setup.on_inbound(event)
             except Exception:
