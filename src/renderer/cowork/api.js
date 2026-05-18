@@ -10,9 +10,16 @@ const ANTON_SERVER_PORT = 26866;
 const API_ORIGIN = (() => {
   if (typeof window === 'undefined') return '';
   const protocol = window.location?.protocol;
-  return protocol === 'file:' || protocol === 'app:'
-    ? `http://127.0.0.1:${ANTON_SERVER_PORT}`
-    : '';
+  // Packaged Electron (file:// or app://) OR dev Electron (http:// but
+  // window.antontron is present — Electron injected the preload bridge)
+  if (
+    protocol === 'file:' ||
+    protocol === 'app:' ||
+    typeof window.antontron !== 'undefined'
+  ) {
+    return `http://127.0.0.1:${ANTON_SERVER_PORT}`;
+  }
+  return '';
 })();
 
 export const BASE = `${API_ORIGIN}/v1`;
