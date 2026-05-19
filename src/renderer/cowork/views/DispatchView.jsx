@@ -49,6 +49,8 @@ const CHANNEL_LIBRARY = {
     description: 'Receive messages from your WhatsApp Cloud business number. Free-form replies are allowed inside the 24-hour customer-care window after each user message.',
     style: 'whatsapp',
     connectable: false,
+    comingSoon: true,
+    chip: 'Coming soon',
   },
 };
 
@@ -596,34 +598,50 @@ function ChannelCard({
   const discordReady = !isDiscord || (discordStatus?.install_ready ?? false);
   const connectDisabled =
     busy || (isSlack && !slackReady) || (isDiscord && !discordReady);
+  // Channels flagged `comingSoon` are visually disabled — the config panel
+  // and connect flow are suppressed and the card carries a "Coming soon" chip.
+  const comingSoon = Boolean(info.comingSoon);
   return (
-    <div className={`dispatch-channel-card dispatch-channel-${info.style || entry.type}`}>
+    <div
+      className={[
+        'dispatch-channel-card',
+        `dispatch-channel-${info.style || entry.type}`,
+        comingSoon ? 'dispatch-channel-coming-soon' : '',
+      ].filter(Boolean).join(' ')}
+      aria-disabled={comingSoon || undefined}
+    >
       <header className="dispatch-channel-head">
         <div>
           <h3>{info.name}</h3>
-          <StatusBadge active={entry.active} registered={entry.registered} />
+          {comingSoon ? null : (
+            <StatusBadge active={entry.active} registered={entry.registered} />
+          )}
         </div>
         {info.chip ? <span className="dispatch-channel-chip">{info.chip}</span> : null}
       </header>
       <p className="dispatch-channel-desc">{info.description}</p>
 
-      {isSlack && slackStatus ? (
-        <SlackConfigPanel initialStatus={slackStatus} onSaved={onSlackStatus} />
-      ) : null}
+      {comingSoon ? null : (
+        <>
+          {isSlack && slackStatus ? (
+            <SlackConfigPanel initialStatus={slackStatus} onSaved={onSlackStatus} />
+          ) : null}
 
-      {isTelegram && telegramStatus ? (
-        <TelegramConfigPanel initialStatus={telegramStatus} onSaved={onTelegramStatus} />
-      ) : null}
+          {isTelegram && telegramStatus ? (
+            <TelegramConfigPanel initialStatus={telegramStatus} onSaved={onTelegramStatus} />
+          ) : null}
 
-      {isDiscord && discordStatus ? (
-        <DiscordConfigPanel initialStatus={discordStatus} onSaved={onDiscordStatus} />
-      ) : null}
+          {isDiscord && discordStatus ? (
+            <DiscordConfigPanel initialStatus={discordStatus} onSaved={onDiscordStatus} />
+          ) : null}
 
-      {isWhatsApp && whatsappStatus ? (
-        <WhatsAppConfigPanel initialStatus={whatsappStatus} onSaved={onWhatsAppStatus} />
-      ) : null}
+          {isWhatsApp && whatsappStatus ? (
+            <WhatsAppConfigPanel initialStatus={whatsappStatus} onSaved={onWhatsAppStatus} />
+          ) : null}
+        </>
+      )}
 
-      {info.connectable && !entry.active ? (
+      {!comingSoon && info.connectable && !entry.active ? (
         <button
           type="button"
           className="btn-primary"

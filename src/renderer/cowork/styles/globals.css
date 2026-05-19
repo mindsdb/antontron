@@ -4632,6 +4632,23 @@ body[data-theme="dark"] .mshell__drawer-title {
   white-space: nowrap;
 }
 
+/* ── Coming-soon (disabled) channel ────────────────────────────────────── */
+.dispatch-channel-coming-soon {
+  opacity: 0.6;
+  pointer-events: none;
+  background: var(--surface-2);
+}
+.dispatch-channel-coming-soon:hover {
+  border-color: var(--line);
+}
+.dispatch-channel-coming-soon .dispatch-channel-chip {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent-2, var(--accent));
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
 /* ── Status pill ───────────────────────────────────────────────────────── */
 .dispatch-status {
   display: inline-flex;
