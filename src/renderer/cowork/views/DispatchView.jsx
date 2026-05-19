@@ -75,6 +75,31 @@ function StatusBadge({ active, registered }) {
   return <span className="dispatch-status dispatch-status-idle">Not connected</span>;
 }
 
+// Credential indicator pill — "<label> · Set / Not set" with a check icon
+// when set. Shared by every channel config panel's summary view.
+function Indicator({ set, label }) {
+  return (
+    <span className={`dispatch-config-flag ${set ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}>
+      {set ? Ico.check(12) : null}
+      <span>{label} · {set ? 'Set' : 'Not set'}</span>
+    </span>
+  );
+}
+
+// Channel transport badge — same pill, but with a free-form label and a
+// tooltip describing the transport. `set` drives the colour + check icon.
+function ModeBadge({ set, label, title }) {
+  return (
+    <span
+      className={`dispatch-config-flag ${set ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}
+      title={title}
+    >
+      {set ? Ico.check(12) : null}
+      <span>Mode · {label}</span>
+    </span>
+  );
+}
+
 function SlackConfigPanel({ initialStatus, onSaved }) {
   const [status, setStatus] = useState(initialStatus);
   const [editing, setEditing] = useState(!initialStatus.install_ready);
@@ -110,36 +135,15 @@ function SlackConfigPanel({ initialStatus, onSaved }) {
     }
   };
 
-  const Indicator = ({ set, label }) => (
-    <span className={`dispatch-config-flag ${set ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}>
-      {set ? Ico.check(12) : null}
-      <span>{label} · {set ? 'Set' : 'Not set'}</span>
-    </span>
-  );
-
-  // Mode indicator — Socket Mode is preferred for local dev (no public URL
-  // needed); webhook mode requires an externally reachable callback URL.
-  const ModeBadge = () => {
-    if (status.socket_mode_ready) {
-      return (
-        <span className="dispatch-config-flag dispatch-config-flag-set" title="Slack pushes events down a WebSocket — no public URL needed.">
-          {Ico.check(12)}
-          <span>Mode · Socket</span>
-        </span>
-      );
-    }
-    return (
-      <span className="dispatch-config-flag dispatch-config-flag-unset" title="Webhook mode — Slack POSTs to /v1/dispatch/slack/events. Requires a public Request URL.">
-        <span>Mode · Webhook</span>
-      </span>
-    );
-  };
-
   if (!editing) {
     return (
       <div className="dispatch-config-summary">
         <div className="dispatch-config-flags">
-          <ModeBadge />
+          {/* Socket Mode is preferred for local dev (no public URL needed);
+              webhook mode requires an externally reachable callback URL. */}
+          {status.socket_mode_ready
+            ? <ModeBadge set label="Socket" title="Slack pushes events down a WebSocket — no public URL needed." />
+            : <ModeBadge label="Webhook" title="Webhook mode — Slack POSTs to /v1/dispatch/slack/events. Requires a public Request URL." />}
           <Indicator set={status.client_id_set}      label="Client ID" />
           <Indicator set={status.client_secret_set}  label="Client Secret" />
           <Indicator set={status.signing_secret_set} label="Signing Secret" />
@@ -243,38 +247,17 @@ function TelegramConfigPanel({ initialStatus, onSaved }) {
     }
   };
 
-  const Indicator = ({ set, label }) => (
-    <span className={`dispatch-config-flag ${set ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}>
-      {set ? Ico.check(12) : null}
-      <span>{label} · {set ? 'Set' : 'Not set'}</span>
-    </span>
-  );
-
-  // Long-poll is the default and works without any public URL. Webhook mode
-  // kicks in only if the operator pasted a TELEGRAM_WEBHOOK_URL — useful for
-  // hosted deployments where polling would waste a worker.
-  const ModeBadge = () => {
-    if (status.mode === 'webhook') {
-      return (
-        <span className="dispatch-config-flag dispatch-config-flag-set" title="Telegram POSTs to /v1/dispatch/telegram/webhook. Requires a public URL.">
-          {Ico.check(12)}
-          <span>Mode · Webhook</span>
-        </span>
-      );
-    }
-    return (
-      <span className="dispatch-config-flag dispatch-config-flag-set" title="The bot calls getUpdates with a 30s long-poll — no public URL needed.">
-        {Ico.check(12)}
-        <span>Mode · Long-poll</span>
-      </span>
-    );
-  };
-
   if (!editing) {
     return (
       <div className="dispatch-config-summary">
         <div className="dispatch-config-flags">
-          <ModeBadge />
+          {/* Long-poll is the default and works without any public URL.
+              Webhook mode kicks in only if the operator pasted a
+              TELEGRAM_WEBHOOK_URL — useful for hosted deployments where
+              polling would waste a worker. */}
+          {status.mode === 'webhook'
+            ? <ModeBadge set label="Webhook" title="Telegram POSTs to /v1/dispatch/telegram/webhook. Requires a public URL." />
+            : <ModeBadge set label="Long-poll" title="The bot calls getUpdates with a 30s long-poll — no public URL needed." />}
           <Indicator set={status.bot_token_set}    label="Bot Token" />
           <Indicator set={status.bot_username_set} label="Bot Username" />
           <Indicator set={status.webhook_url_set}  label="Webhook URL" />
@@ -370,30 +353,17 @@ function DiscordConfigPanel({ initialStatus, onSaved }) {
     }
   };
 
-  const Indicator = ({ set, label }) => (
-    <span className={`dispatch-config-flag ${set ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}>
-      {set ? Ico.check(12) : null}
-      <span>{label} · {set ? 'Set' : 'Not set'}</span>
-    </span>
-  );
-
-  // Gateway is the chat-ingress path; Interactions is slash-command-only and
-  // additionally requires the application public key for Ed25519 verify.
-  const ModeBadge = () => (
-    <span
-      className={`dispatch-config-flag ${status.gateway_ready ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}
-      title="Discord pushes events down a Gateway WebSocket — no public URL needed for chat."
-    >
-      {status.gateway_ready ? Ico.check(12) : null}
-      <span>Mode · Gateway</span>
-    </span>
-  );
-
   if (!editing) {
     return (
       <div className="dispatch-config-summary">
         <div className="dispatch-config-flags">
-          <ModeBadge />
+          {/* Gateway is the chat-ingress path; Interactions is slash-command-
+              only and additionally requires the public key for Ed25519 verify. */}
+          <ModeBadge
+            set={status.gateway_ready}
+            label="Gateway"
+            title="Discord pushes events down a Gateway WebSocket — no public URL needed for chat."
+          />
           <Indicator set={status.bot_token_set}     label="Bot Token" />
           <Indicator set={status.public_key_set}    label="Public Key" />
           <Indicator set={status.client_id_set}     label="Client ID" />
@@ -491,30 +461,17 @@ function WhatsAppConfigPanel({ initialStatus, onSaved }) {
     }
   };
 
-  const Indicator = ({ set, label }) => (
-    <span className={`dispatch-config-flag ${set ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}>
-      {set ? Ico.check(12) : null}
-      <span>{label} · {set ? 'Set' : 'Not set'}</span>
-    </span>
-  );
-
-  // WhatsApp Cloud is always webhook-driven — Meta POSTs to our /webhook URL.
-  // The "mode" badge is informational only; there's no long-poll alternative.
-  const ModeBadge = () => (
-    <span
-      className={`dispatch-config-flag ${status.install_ready ? 'dispatch-config-flag-set' : 'dispatch-config-flag-unset'}`}
-      title="Meta POSTs to /v1/dispatch/whatsapp/webhook. Requires a public HTTPS URL configured in the Meta app."
-    >
-      {status.install_ready ? Ico.check(12) : null}
-      <span>Mode · Webhook</span>
-    </span>
-  );
-
   if (!editing) {
     return (
       <div className="dispatch-config-summary">
         <div className="dispatch-config-flags">
-          <ModeBadge />
+          {/* WhatsApp Cloud is always webhook-driven — Meta POSTs to our
+              /webhook URL. The mode badge is informational only. */}
+          <ModeBadge
+            set={status.install_ready}
+            label="Webhook"
+            title="Meta POSTs to /v1/dispatch/whatsapp/webhook. Requires a public HTTPS URL configured in the Meta app."
+          />
           <Indicator set={status.phone_number_id_set}     label="Phone Number ID" />
           <Indicator set={status.access_token_set}        label="Access Token" />
           <Indicator set={status.verify_token_set}        label="Verify Token" />

@@ -313,10 +313,10 @@ class WhatsAppBridge(ChatBridgeBase):
         if result.get("error"):
             err = result["error"]
             # Meta returns {"error": {"code": ..., "type": ..., "message": ...}}.
-            # Code 4 / 17 / 80007 are documented rate-limit codes; treat them
-            # as transient. Subcodes 2200 / 2207 / etc. (server) likewise.
+            # Codes 4 / 17 / 32 / 80007 are documented rate-limit codes —
+            # treat them as transient so the bridge's retry wrapper kicks in.
             code = err.get("code") if isinstance(err, dict) else None
-            if code in (4, 17, 32, 80007) or err.get("type") == "OAuthException" and code == 17:
+            if code in (4, 17, 32, 80007):
                 raise ConnectionError(f"whatsapp rate-limit: {err.get('message', err)}")
             raise RuntimeError(
                 f"whatsapp send failed: {err.get('message', err) if isinstance(err, dict) else err}"
