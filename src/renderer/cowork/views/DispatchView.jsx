@@ -4,6 +4,8 @@ import { PageHeader } from '../components/collection';
 import {
   createWiring,
   deleteWiring,
+  disconnectAllChannels,
+  disconnectChannel,
   fetchDiscordConfig,
   fetchDispatchChannels,
   fetchDispatchStatus,
@@ -583,7 +585,7 @@ function WhatsAppConfigPanel({ initialStatus, onSaved }) {
 }
 
 function ChannelCard({
-  entry, onConnect, busy, error,
+  entry, onConnect, onDisconnect, busy, disconnectBusy, error,
   slackStatus, onSlackStatus,
   telegramStatus, onTelegramStatus,
   discordStatus, onDiscordStatus,
@@ -601,6 +603,15 @@ function ChannelCard({
   // Channels flagged `comingSoon` are visually disabled — the config panel
   // and connect flow are suppressed and the card carries a "Coming soon" chip.
   const comingSoon = Boolean(info.comingSoon);
+  // Offer "Disconnect & clear" whenever there's something to tear down — the
+  // adapter is live, or credentials are stored even if the adapter isn't up
+  // yet (any `*_set` flag from the channel's config status).
+  const channelStatus = slackStatus || telegramStatus || discordStatus || whatsappStatus;
+  const hasCredentials = Boolean(
+    channelStatus
+    && Object.entries(channelStatus).some(([k, v]) => k.endsWith('_set') && v === true),
+  );
+  const showDisconnect = !comingSoon && (entry.active || hasCredentials);
   return (
     <div
       className={[
@@ -655,6 +666,18 @@ function ChannelCard({
         >
           {Ico.plus(14)}
           <span>{busy ? 'Opening sign-in…' : `Connect ${info.name}`}</span>
+        </button>
+      ) : null}
+      {showDisconnect ? (
+        <button
+          type="button"
+          className="dispatch-btn dispatch-btn-ghost dispatch-channel-disconnect"
+          onClick={() => onDisconnect(entry.type)}
+          disabled={disconnectBusy}
+          title="Stop this channel, delete its stored credentials, and remove its wirings"
+        >
+          {Ico.powerOff(13)}
+          <span>{disconnectBusy ? 'Disconnecting…' : 'Disconnect & clear'}</span>
         </button>
       ) : null}
       {error ? <p className="dispatch-error">{error}</p> : null}
@@ -739,6 +762,8 @@ export default function DispatchView() {
   const [whatsappStatus, setWhatsAppStatus] = useState(null);
   const [connectError, setConnectError] = useState({});
   const [connectBusy, setConnectBusy] = useState({});
+  const [disconnectBusy, setDisconnectBusy] = useState({});
+  const [clearingAll, setClearingAll] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
 
   const refresh = useCallback(() => setRefreshKey((k) => k + 1), []);
@@ -823,6 +848,39 @@ export default function DispatchView() {
     }
   };
 
+  const handleDisconnect = async (channelType) => {
+    const name = CHANNEL_LIBRARY[channelType]?.name || channelType;
+    if (!window.confirm(
+      `Disconnect ${name}? This stops the connection, deletes its stored `
+      + 'credentials, and removes its wirings.'
+    )) return;
+    setDisconnectBusy((s) => ({ ...s, [channelType]: true }));
+    try {
+      await disconnectChannel(channelType);
+      refresh();
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      setDisconnectBusy((s) => ({ ...s, [channelType]: false }));
+    }
+  };
+
+  const handleDisconnectAll = async () => {
+    if (!window.confirm(
+      'Clear all dispatch connections? This disconnects every channel, deletes '
+      + 'all stored credentials, and removes all wirings.'
+    )) return;
+    setClearingAll(true);
+    try {
+      await disconnectAllChannels();
+      refresh();
+    } catch (err) {
+      window.alert(err.message);
+    } finally {
+      setClearingAll(false);
+    }
+  };
+
   return (
     <div className="dispatch-view scroll-clean" style={{ flex: 1, overflowY: 'auto' }}>
       <PageHeader
@@ -848,9 +906,21 @@ export default function DispatchView() {
         <section className="dispatch-section">
           <header className="dispatch-section-head">
             <h2>Channels</h2>
-            <button type="button" className="btn-secondary" onClick={refresh}>
-              Refresh
-            </button>
+            <div className="dispatch-head-actions">
+              <button
+                type="button"
+                className="dispatch-btn dispatch-btn-ghost dispatch-btn-danger"
+                onClick={handleDisconnectAll}
+                disabled={clearingAll}
+                title="Disconnect every channel and clear all stored credentials and wirings"
+              >
+                {Ico.powerOff(14)}
+                <span>{clearingAll ? 'Clearing…' : 'Clear all connections'}</span>
+              </button>
+              <button type="button" className="btn-secondary" onClick={refresh}>
+                Refresh
+              </button>
+            </div>
           </header>
           <div className="dispatch-channel-grid">
             {channels.map((entry) => (
@@ -858,7 +928,9 @@ export default function DispatchView() {
                 key={entry.type}
                 entry={entry}
                 onConnect={handleConnect}
+                onDisconnect={handleDisconnect}
                 busy={connectBusy[entry.type]}
+                disconnectBusy={disconnectBusy[entry.type]}
                 error={connectError[entry.type]}
                 slackStatus={entry.type === 'slack' ? slackStatus : null}
                 onSlackStatus={setSlackStatus}

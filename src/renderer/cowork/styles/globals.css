@@ -4811,6 +4811,41 @@ select.dispatch-input {
   background: var(--surface-2);
   border-color: var(--line-2);
 }
+/* ── Disconnect / clear-connection controls ────────────────────────────── */
+.dispatch-head-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+.dispatch-btn-danger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 36px;
+  padding: 0 14px;
+  border-radius: 7px;
+  font-size: 13px;
+}
+.dispatch-btn-danger:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 45%, var(--line));
+  background: var(--danger-bg);
+}
+.dispatch-channel-disconnect {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 7px;
+  font-size: 12.5px;
+}
+.dispatch-channel-disconnect:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 40%, var(--line));
+  background: var(--danger-bg);
+}
 .dispatch-btn-icon {
   background: transparent;
   color: var(--ink-3);

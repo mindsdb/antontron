@@ -911,6 +911,21 @@ export async function deleteWiring(mgId, agId) {
   return req(`/dispatch/wirings/${encodeURIComponent(mgId)}/${encodeURIComponent(agId)}`, { method: 'DELETE' });
 }
 
+// Disconnect one channel — stops its live adapter, clears stored credentials
+// (env vars + vault), and removes its wirings. Sticky across server restarts.
+export async function disconnectChannel(channelType) {
+  return req(`/dispatch/channels/${encodeURIComponent(channelType)}/disconnect`, {
+    method: 'POST',
+    body: JSON.stringify({}),
+  });
+}
+
+// Disconnect every channel — full dispatch reset (all adapters, credentials,
+// and wirings). Sessions and message history are left intact.
+export async function disconnectAllChannels() {
+  return req('/dispatch/disconnect-all', { method: 'POST', body: JSON.stringify({}) });
+}
+
 export async function startSlackOAuth(redirectUri) {
   const params = new URLSearchParams({ redirect_uri: redirectUri });
   return req(`/dispatch/slack/oauth/start?${params.toString()}`, { method: 'POST', body: JSON.stringify({}) });
