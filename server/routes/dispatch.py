@@ -245,6 +245,122 @@ async def _noop_action(response: Any) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Disconnect — stop a channel adapter and clear its stored connection
+# ---------------------------------------------------------------------------
+
+# Channel modules register a credential-clearer here at import time so the
+# generic disconnect endpoints can wipe per-channel secrets without dispatch.py
+# needing to know each channel's env-var / vault layout.
+_credential_clearers: dict[str, Any] = {}
+
+
+def register_credential_clearer(channel_type: str, clearer: Any) -> None:
+    """Register a no-arg callable that wipes one channel's stored credentials.
+
+    Called at import time by each channel module. ``clearer`` deletes the
+    channel's env vars (process + ``~/.anton/.env``) and its DataVault
+    connections; :func:`_disconnect_channel` invokes it.
+    """
+    _credential_clearers[channel_type] = clearer
+
+
+def clear_channel_credentials(
+    *,
+    fixed_keys: tuple[str, ...],
+    env_prefix: str,
+    vault_engine: str,
+) -> None:
+    """Wipe a channel's stored credentials — env vars and DataVault entries.
+
+    Deletes ``fixed_keys`` plus any ``~/.anton/.env`` or process-env var
+    starting with ``env_prefix`` (covers the ``DS_<ENGINE>_<ACCOUNT>__*``
+    vars the adapters mint), then removes every ``vault_engine`` connection.
+    Channel modules call this from the clearer they register.
+    """
+    from .settings import _read_dotenv, _write_dotenv, GLOBAL_ENV_PATH
+
+    existing = _read_dotenv(GLOBAL_ENV_PATH)
+    keys = set(fixed_keys)
+    keys.update(k for k in existing if k.startswith(env_prefix))
+    keys.update(k for k in os.environ if k.startswith(env_prefix))
+    _write_dotenv(GLOBAL_ENV_PATH, {}, delete_keys=tuple(sorted(keys)))
+    for key in keys:
+        os.environ.pop(key, None)
+
+    try:
+        from anton.core.datasources.data_vault import LocalDataVault
+        vault = LocalDataVault()
+        for conn in vault.list_connections():
+            if conn.get("engine") == vault_engine and conn.get("name"):
+                vault.delete(vault_engine, conn["name"])
+    except Exception:
+        logger.debug(
+            "could not clear %s vault connections", vault_engine, exc_info=True
+        )
+
+
+async def _remove_channel_wirings(channel_type: str) -> int:
+    """Delete every wiring whose messaging group belongs to ``channel_type``."""
+    repo = _get_repo()
+    mg_ids = {
+        mg.id
+        for mg in await repo.list_messaging_groups()
+        if mg.channel_type == channel_type
+    }
+    if not mg_ids:
+        return 0
+    removed = 0
+    for w in await repo.list_wirings():
+        if w.messaging_group_id in mg_ids:
+            if await repo.delete_wiring(w.messaging_group_id, w.agent_group_id):
+                removed += 1
+    return removed
+
+
+async def _disconnect_channel(channel_type: str) -> dict[str, Any]:
+    """Tear a channel down: stop its adapter, clear credentials, drop wirings."""
+    # 1. Stop the running adapter (best-effort — it may not be active).
+    adapter_stopped = False
+    try:
+        from anton.core.dispatch.registry import shutdown_channel_adapter
+        adapter_stopped = await shutdown_channel_adapter(channel_type)
+    except Exception:
+        logger.exception("disconnect: failed to stop %s adapter", channel_type)
+
+    # 2. Wipe stored credentials (env vars + vault) via the channel's clearer.
+    credentials_cleared = False
+    clearer = _credential_clearers.get(channel_type)
+    if clearer is not None:
+        try:
+            clearer()
+            credentials_cleared = True
+        except Exception:
+            logger.exception(
+                "disconnect: failed to clear %s credentials", channel_type
+            )
+
+    # 3. Remove wirings that routed this channel — a wiring with no live
+    #    channel is dead, so disconnecting clears them too.
+    wirings_removed = 0
+    try:
+        wirings_removed = await _remove_channel_wirings(channel_type)
+    except Exception:
+        logger.exception("disconnect: failed to remove %s wirings", channel_type)
+
+    logger.info(
+        "dispatch: disconnected %s (adapter_stopped=%s, credentials_cleared=%s, "
+        "wirings_removed=%d)",
+        channel_type, adapter_stopped, credentials_cleared, wirings_removed,
+    )
+    return {
+        "channel_type": channel_type,
+        "adapter_stopped": adapter_stopped,
+        "credentials_cleared": credentials_cleared,
+        "wirings_removed": wirings_removed,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Serialization helpers
 # ---------------------------------------------------------------------------
 
@@ -395,6 +511,39 @@ async def list_channels():
             for ct in sorted(get_registered_channel_types())
         ]
     }
+
+
+# ---------------------------------------------------------------------------
+# Disconnect endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.post("/channels/{channel_type}/disconnect")
+async def disconnect_channel(channel_type: str):
+    """Disconnect one channel — stop its adapter, clear credentials, drop wirings.
+
+    Sticky: the stored credentials are deleted, so the channel stays down
+    across a server restart until it is reconfigured.
+    """
+    if channel_type not in _credential_clearers:
+        raise HTTPException(
+            status_code=404, detail=f"unknown channel type: {channel_type}"
+        )
+    return await _disconnect_channel(channel_type)
+
+
+@router.post("/disconnect-all")
+async def disconnect_all_channels():
+    """Disconnect every channel — a full dispatch reset.
+
+    Stops all adapters, clears all channel credentials, and removes all
+    wirings. Sessions and message history are left intact.
+    """
+    results = [
+        await _disconnect_channel(channel_type)
+        for channel_type in sorted(_credential_clearers)
+    ]
+    return {"disconnected": results}
 
 
 # ---------------------------------------------------------------------------

@@ -79,6 +79,7 @@ from channels import (
     load_channel_secrets,
     secret_var_name,
 )
+from .dispatch import clear_channel_credentials, register_credential_clearer
 from .settings import _read_dotenv, _write_dotenv, GLOBAL_ENV_PATH
 
 logger = logging.getLogger(__name__)
@@ -692,6 +693,23 @@ TELEGRAM_ENV_KEYS = (
     TELEGRAM_BOT_USERNAME_KEY,
     TELEGRAM_WEBHOOK_URL_KEY,
 )
+
+
+def _clear_telegram_credentials() -> None:
+    """Wipe stored Telegram credentials — env vars + DataVault entries.
+
+    Clears the config keys plus any DS_TELEGRAM_* var (the bot token and
+    the auto-minted webhook secret_token), and removes every `telegram`
+    DataVault connection.
+    """
+    clear_channel_credentials(
+        fixed_keys=TELEGRAM_ENV_KEYS,
+        env_prefix="DS_TELEGRAM_",
+        vault_engine="telegram",
+    )
+
+
+register_credential_clearer("telegram", _clear_telegram_credentials)
 
 
 class TelegramConfigPatch(BaseModel):

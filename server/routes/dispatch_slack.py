@@ -58,6 +58,7 @@ from channels import (
     verify_slack,
 )
 from .cowork_state import load_state, update_state
+from .dispatch import clear_channel_credentials, register_credential_clearer
 from .settings import _read_dotenv, _write_dotenv, GLOBAL_ENV_PATH
 
 logger = logging.getLogger(__name__)
@@ -555,6 +556,22 @@ SLACK_ENV_KEYS = (
     # webhook URL. Avoids ngrok/.localhost-reachability issues.
     "SLACK_APP_TOKEN",
 )
+
+
+def _clear_slack_credentials() -> None:
+    """Wipe stored Slack credentials — env vars + DataVault bot tokens.
+
+    Clears the SLACK_* config keys plus any DS_SLACK_* env-var connection,
+    and removes every `slack` DataVault entry (the OAuth-saved bot token).
+    """
+    clear_channel_credentials(
+        fixed_keys=SLACK_ENV_KEYS,
+        env_prefix="DS_SLACK_",
+        vault_engine="slack",
+    )
+
+
+register_credential_clearer("slack", _clear_slack_credentials)
 
 
 class SlackConfigPatch(BaseModel):

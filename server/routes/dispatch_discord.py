@@ -74,6 +74,7 @@ from channels import (
     load_channel_secrets,
 )
 from .cowork_state import load_state, update_state
+from .dispatch import clear_channel_credentials, register_credential_clearer
 from .settings import _read_dotenv, _write_dotenv, GLOBAL_ENV_PATH
 
 logger = logging.getLogger(__name__)
@@ -675,6 +676,22 @@ DISCORD_ENV_KEYS = (
     DISCORD_BOT_TOKEN_KEY,
     DISCORD_PUBLIC_KEY_KEY,
 )
+
+
+def _clear_discord_credentials() -> None:
+    """Wipe stored Discord credentials — env vars + DataVault entries.
+
+    Clears the DISCORD_* / DS_DISCORD_* config keys and removes every
+    `discord` DataVault connection (guild records keyed by guild_id).
+    """
+    clear_channel_credentials(
+        fixed_keys=DISCORD_ENV_KEYS,
+        env_prefix="DS_DISCORD_",
+        vault_engine="discord",
+    )
+
+
+register_credential_clearer("discord", _clear_discord_credentials)
 
 
 class DiscordConfigPatch(BaseModel):

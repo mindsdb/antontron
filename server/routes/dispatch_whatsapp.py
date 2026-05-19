@@ -68,6 +68,7 @@ from channels import (
     load_channel_secrets,
     verify_whatsapp,
 )
+from .dispatch import clear_channel_credentials, register_credential_clearer
 from .settings import _read_dotenv, _write_dotenv, GLOBAL_ENV_PATH
 
 logger = logging.getLogger(__name__)
@@ -519,6 +520,18 @@ WHATSAPP_ENV_KEYS = (
     WHATSAPP_APP_SECRET_KEY,
     WHATSAPP_BUSINESS_ACCOUNT_ID_KEY,
 )
+
+
+def _clear_whatsapp_credentials() -> None:
+    """Wipe stored WhatsApp credentials — env vars + DataVault entries."""
+    clear_channel_credentials(
+        fixed_keys=WHATSAPP_ENV_KEYS,
+        env_prefix="DS_WHATSAPP_",
+        vault_engine="whatsapp",
+    )
+
+
+register_credential_clearer("whatsapp", _clear_whatsapp_credentials)
 
 
 class WhatsAppConfigPatch(BaseModel):
