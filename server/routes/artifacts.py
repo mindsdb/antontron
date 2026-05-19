@@ -35,7 +35,7 @@ from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
-from anton_api import projects_store
+from anton_api import preview_proxy, projects_store
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -607,7 +607,6 @@ async def _launch_backend_locked(
     a current value on its next request.
     """
     from anton.core.artifacts.backend_launcher import launch_artifact_backend
-    from anton.core.artifacts import ArtifactStore
     from anton_api import scratchpad_runtime
 
     project_root = _resolve_project_root(artifact_dir)
@@ -615,11 +614,19 @@ async def _launch_backend_locked(
         return False, "Artifact is not in a registered project.", 0
 
     pool = scratchpad_runtime.WorkspaceScopedPool(str(project_root))
+    # anton's default health_timeout is 10s — too short for artifacts
+    # that do slow IO (HTTP fetches with retry/backoff, large model
+    # loads, etc.) before binding their port. The launcher then
+    # terminates a perfectly healthy backend just because it didn't
+    # finish startup yet. 45s leaves room for two CoinGecko-style
+    # retries without making the user wait forever on a truly stuck
+    # script — anton terminates the proc on timeout.
     result = await launch_artifact_backend(
         slug=slug,
         artifact_folder=artifact_dir,
         scratchpad_pool=pool,
         tracked_backends=_LAUNCHED_BACKENDS,
+        health_timeout=45.0,
     )
     if isinstance(result, str):
         # Helper returned an error string. Strip the redundant "Error: "
@@ -628,13 +635,28 @@ async def _launch_backend_locked(
         return False, detail, 0
 
     new_port = int(result["port"])
+    # Persist the new port directly to metadata.json. anton's
+    # `ArtifactStore` does not expose an `update()` method — the
+    # previous call to `store.update(slug, port=new_port)` was always
+    # raising AttributeError silently, leaving metadata.json pinned to
+    # the original port from when the artifact was created. Both the
+    # Electron and the Python preview proxies read metadata.json on
+    # every request, so the stale value was what they kept dialing,
+    # producing ECONNREFUSED even though the backend was healthy on a
+    # different port.
     try:
-        store = ArtifactStore(artifact_dir.parent)
-        store.update(slug, port=new_port)
+        meta_path = artifact_dir / "metadata.json"
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+        meta["port"] = new_port
+        meta_path.write_text(
+            json.dumps(meta, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
     except Exception as exc:
         # Metadata write failure shouldn't abort an otherwise-working
-        # relaunch — the backend is up; the Electron proxy will still
-        # work for this session because we return the new port directly.
+        # relaunch — the backend is up and we return the new port to
+        # the caller. But proxies will keep dialing the stale port
+        # until the next successful write, so this matters.
         logger.warning("Could not persist backend port to metadata: %s", exc)
 
     logger.info(
@@ -699,10 +721,12 @@ async def preview_mount(req: PreviewMountRequest):
             backend_port = None
 
     if backend_port is not None:
-        # Proxy mode: renderer talks to the main-process forwarder. We
-        # only echo back the directory so main can lazy-read the port
-        # on each request (survives backend restarts that pick a new
-        # port and rewrite metadata.json).
+        # Proxy mode: renderer talks to a loopback forwarder. Electron
+        # uses its main-process proxy (window.antontron.preview.startProxy);
+        # the web shell uses the FastAPI process's in-process proxy
+        # (`anton_api.preview_proxy`). Either way the proxy lazy-reads
+        # the port on each request, so a backend restart that picks a
+        # new port and rewrites metadata.json is picked up automatically.
         #
         # Auto-launch: if nothing is listening on the recorded port, try
         # to bring the backend back up before handing off the proxy URL.
@@ -715,12 +739,18 @@ async def preview_mount(req: PreviewMountRequest):
         running, launch_detail, current_port = await _ensure_backend_running(
             parent, backend_port
         )
+        # Web shell: register the dir with the in-process proxy and
+        # build a loopback URL the iframe can load. Electron ignores
+        # `proxyUrl` and goes through its own main-process forwarder.
+        preview_proxy.set_artifact(parent)
+        proxy_url = preview_proxy.url_for(parent) or ""
         return {
             "kind": "proxy",
             "artifactDir": str(parent),
             "port": current_port if running else backend_port,
             "backendRunning": running,
             "launchError": "" if running else launch_detail,
+            "proxyUrl": proxy_url,
         }
 
     if artifact.suffix.lower() != ".html":

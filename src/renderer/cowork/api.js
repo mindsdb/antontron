@@ -634,8 +634,13 @@ export async function mountArtifactPreview(path) {
     port: typeof data?.port === 'number' ? data.port : null,
     // Absolute URL the iframe can load directly for static previews.
     // Empty for proxy previews — the caller resolves the URL via
-    // window.antontron.preview.startProxy(artifactDir).
+    // host.startPreviewProxy(artifactDir, proxyUrl), which uses the
+    // Electron-main proxy when running in Electron and the in-process
+    // FastAPI proxy (`proxyUrl`) when running in the web shell.
     url: data?.relUrl ? `${BASE}${data.relUrl}` : '',
+    // Loopback URL of the cowork-process preview proxy. Used by the
+    // web shell; Electron ignores it and goes through its own bridge.
+    proxyUrl: data?.proxyUrl || '',
     // Server-side sidecar lookup of the artifact's published URL (if
     // any). Forwarded so the viewer shows the "Published" pill even
     // when opened from a chat bubble — those carry no publishedUrl on

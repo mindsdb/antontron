@@ -384,7 +384,6 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
     setBackendPort(null);
     setTextPreview(null);
     let cancelled = false;
-    let usedProxy = false;
     if (isText) {
       previewArtifact(actionPath)
         .then((data) => {
@@ -403,14 +402,22 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
       return () => { cancelled = true; };
     }
     mountArtifactPreview(actionPath)
-      .then(async ({ kind, url, artifactDir, port, publishedUrl: serverPublishedUrl }) => {
+      .then(async ({ kind, url, artifactDir, port, proxyUrl, publishedUrl: serverPublishedUrl }) => {
         if (kind === 'proxy') {
           if (!artifactDir) throw new Error('Preview mount returned no artifact dir');
-          const proxy = await window.antontron?.preview?.startProxy?.(artifactDir);
-          if (!proxy?.url) throw new Error('Preview proxy unavailable');
+          if (!proxyUrl) throw new Error('Preview proxy unavailable');
+          // Realign hostname onto the SPA's own host so the parent page
+          // and iframe stay same-site — the server hardcodes
+          // `127.0.0.1`, but the SPA may be on `localhost`, and Chrome
+          // treats those as distinct sites under tracking protection.
+          let iframeUrl = proxyUrl;
+          try {
+            const u = new URL(proxyUrl);
+            if (window.location?.hostname) u.hostname = window.location.hostname;
+            iframeUrl = u.toString();
+          } catch { /* fall through with the raw URL */ }
           if (cancelled) return;
-          usedProxy = true;
-          setPreviewUrl(proxy.url);
+          setPreviewUrl(iframeUrl);
           if (typeof port === 'number') setBackendPort(port);
           return;
         }
@@ -428,12 +435,7 @@ export function ArtifactViewer({ open, artifact, onClose, onChange, onDelete }) 
       })
       .catch((e) => { if (!cancelled) setErr(e?.message || 'Could not load artifact'); })
       .finally(() => { if (!cancelled) setLoading(false); });
-    return () => {
-      cancelled = true;
-      if (usedProxy) {
-        window.antontron?.preview?.stopProxy?.();
-      }
-    };
+    return () => { cancelled = true; };
   }, [open, artifact?.path, actionPath, hasActionPath, disabledReason, isText]);
 
   // Parse CSV → GFM pipe table once per loaded text. We cap at
