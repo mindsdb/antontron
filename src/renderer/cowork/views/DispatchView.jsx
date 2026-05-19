@@ -584,29 +584,35 @@ function WhatsAppConfigPanel({ initialStatus, onSaved }) {
   );
 }
 
+// Per-channel wiring registry — the config-panel component and the config
+// loader for each channel type. ChannelCard and DispatchView look channels
+// up here instead of branching on `entry.type`, so adding a new client is
+// one entry here plus its CHANNEL_LIBRARY description — no edits to the
+// card or view logic.
+const CHANNEL_REGISTRY = {
+  slack:    { ConfigPanel: SlackConfigPanel,    fetchConfig: fetchSlackConfig },
+  telegram: { ConfigPanel: TelegramConfigPanel, fetchConfig: fetchTelegramConfig },
+  discord:  { ConfigPanel: DiscordConfigPanel,  fetchConfig: fetchDiscordConfig },
+  whatsapp: { ConfigPanel: WhatsAppConfigPanel, fetchConfig: fetchWhatsAppConfig },
+};
+
 function ChannelCard({
   entry, onConnect, onDisconnect, busy, disconnectBusy, error,
-  slackStatus, onSlackStatus,
-  telegramStatus, onTelegramStatus,
-  discordStatus, onDiscordStatus,
-  whatsappStatus, onWhatsAppStatus,
+  channelStatus, onStatusChange,
 }) {
   const info = CHANNEL_LIBRARY[entry.type] || { id: entry.type, name: entry.type, description: '' };
-  const isSlack = entry.type === 'slack';
-  const isTelegram = entry.type === 'telegram';
-  const isDiscord = entry.type === 'discord';
-  const isWhatsApp = entry.type === 'whatsapp';
-  const slackReady = !isSlack || (slackStatus?.install_ready ?? false);
-  const discordReady = !isDiscord || (discordStatus?.install_ready ?? false);
+  const ConfigPanel = CHANNEL_REGISTRY[entry.type]?.ConfigPanel || null;
+  // OAuth-install channels can't start the connect flow until their app
+  // credentials are saved; `install_ready` is the channel's own gate.
+  const needsInstall = entry.type === 'slack' || entry.type === 'discord';
   const connectDisabled =
-    busy || (isSlack && !slackReady) || (isDiscord && !discordReady);
+    busy || (needsInstall && !(channelStatus?.install_ready ?? false));
   // Channels flagged `comingSoon` are visually disabled — the config panel
   // and connect flow are suppressed and the card carries a "Coming soon" chip.
   const comingSoon = Boolean(info.comingSoon);
   // Offer "Disconnect & clear" whenever there's something to tear down — the
   // adapter is live, or credentials are stored even if the adapter isn't up
   // yet (any `*_set` flag from the channel's config status).
-  const channelStatus = slackStatus || telegramStatus || discordStatus || whatsappStatus;
   const hasCredentials = Boolean(
     channelStatus
     && Object.entries(channelStatus).some(([k, v]) => k.endsWith('_set') && v === true),
@@ -632,25 +638,9 @@ function ChannelCard({
       </header>
       <p className="dispatch-channel-desc">{info.description}</p>
 
-      {comingSoon ? null : (
-        <>
-          {isSlack && slackStatus ? (
-            <SlackConfigPanel initialStatus={slackStatus} onSaved={onSlackStatus} />
-          ) : null}
-
-          {isTelegram && telegramStatus ? (
-            <TelegramConfigPanel initialStatus={telegramStatus} onSaved={onTelegramStatus} />
-          ) : null}
-
-          {isDiscord && discordStatus ? (
-            <DiscordConfigPanel initialStatus={discordStatus} onSaved={onDiscordStatus} />
-          ) : null}
-
-          {isWhatsApp && whatsappStatus ? (
-            <WhatsAppConfigPanel initialStatus={whatsappStatus} onSaved={onWhatsAppStatus} />
-          ) : null}
-        </>
-      )}
+      {!comingSoon && ConfigPanel && channelStatus ? (
+        <ConfigPanel initialStatus={channelStatus} onSaved={onStatusChange} />
+      ) : null}
 
       {!comingSoon && info.connectable && !entry.active ? (
         <button
@@ -659,9 +649,9 @@ function ChannelCard({
           onClick={() => onConnect(entry.type)}
           disabled={connectDisabled}
           title={
-            isSlack && !slackReady ? 'Save the Slack credentials first'
-            : isDiscord && !discordReady ? 'Save the Discord client ID first'
-            : undefined
+            connectDisabled && !busy
+              ? `Save the ${info.name} credentials first`
+              : undefined
           }
         >
           {Ico.plus(14)}
@@ -756,10 +746,9 @@ export default function DispatchView() {
   const [channels, setChannels] = useState([]);
   const [wirings, setWirings] = useState([]);
   const [messagingGroups, setMessagingGroups] = useState([]);
-  const [slackStatus, setSlackStatus] = useState(null);
-  const [telegramStatus, setTelegramStatus] = useState(null);
-  const [discordStatus, setDiscordStatus] = useState(null);
-  const [whatsappStatus, setWhatsAppStatus] = useState(null);
+  // Channel config status keyed by channel type — one map instead of a
+  // per-channel state var, so adding a client touches no state wiring.
+  const [configByType, setConfigByType] = useState({});
   const [connectError, setConnectError] = useState({});
   const [connectBusy, setConnectBusy] = useState({});
   const [disconnectBusy, setDisconnectBusy] = useState({});
@@ -771,15 +760,18 @@ export default function DispatchView() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const [s, c, w, mg, sc, tc, dc, wc] = await Promise.all([
+      const [s, c, w, mg, configEntries] = await Promise.all([
         fetchDispatchStatus(),
         fetchDispatchChannels(),
         fetchWirings(),
         fetchMessagingGroups(),
-        fetchSlackConfig(),
-        fetchTelegramConfig(),
-        fetchDiscordConfig(),
-        fetchWhatsAppConfig(),
+        // Load every channel's config generically from the registry — a new
+        // client is picked up here without touching this effect.
+        Promise.all(
+          Object.entries(CHANNEL_REGISTRY).map(
+            async ([type, { fetchConfig }]) => [type, await fetchConfig()],
+          ),
+        ),
       ]);
       if (cancelled) return;
       setStatus(s);
@@ -795,13 +787,15 @@ export default function DispatchView() {
       setChannels(visible);
       setWirings(w);
       setMessagingGroups(mg);
-      setSlackStatus(sc);
-      setTelegramStatus(tc);
-      setDiscordStatus(dc);
-      setWhatsAppStatus(wc);
+      setConfigByType(Object.fromEntries(configEntries));
     })();
     return () => { cancelled = true; };
   }, [refreshKey]);
+
+  // Update one channel's cached config after its panel saves.
+  const setChannelConfig = useCallback((type, next) => {
+    setConfigByType((prev) => ({ ...prev, [type]: next }));
+  }, []);
 
   const handleConnect = async (channelType) => {
     if (channelType !== 'slack' && channelType !== 'discord') return;
@@ -932,14 +926,8 @@ export default function DispatchView() {
                 busy={connectBusy[entry.type]}
                 disconnectBusy={disconnectBusy[entry.type]}
                 error={connectError[entry.type]}
-                slackStatus={entry.type === 'slack' ? slackStatus : null}
-                onSlackStatus={setSlackStatus}
-                telegramStatus={entry.type === 'telegram' ? telegramStatus : null}
-                onTelegramStatus={setTelegramStatus}
-                discordStatus={entry.type === 'discord' ? discordStatus : null}
-                onDiscordStatus={setDiscordStatus}
-                whatsappStatus={entry.type === 'whatsapp' ? whatsappStatus : null}
-                onWhatsAppStatus={setWhatsAppStatus}
+                channelStatus={configByType[entry.type] ?? null}
+                onStatusChange={(next) => setChannelConfig(entry.type, next)}
               />
             ))}
           </div>
