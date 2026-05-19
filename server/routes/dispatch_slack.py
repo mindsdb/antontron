@@ -17,7 +17,9 @@ Environment expected:
 """
 from __future__ import annotations
 
+import asyncio
 import html as html_lib
+import httpx
 import json
 import logging
 import os
@@ -25,7 +27,6 @@ import secrets as secrets_mod
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
-from urllib.request import Request as URLRequest, urlopen
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
@@ -118,7 +119,6 @@ class SlackBridge(ChatBridgeBase):
         self._setup = setup
         app_token = (self.secrets.get("app_token") or "").strip()
         if app_token:
-            import asyncio
             self._socket_task = asyncio.create_task(
                 self._run_socket_mode(app_token),
                 name=f"slack-socket-{self.account}",
@@ -144,10 +144,11 @@ class SlackBridge(ChatBridgeBase):
             self._socket_task.cancel()
             try:
                 await self._socket_task
-            except (BaseException,):
+            except (asyncio.CancelledError, Exception):
                 pass
         self._socket_task = None
         self._setup = None
+        await self.drain_inbound_tasks()
 
     async def deliver(self, message: OutboundMessage) -> None:
         await self.chunked_send(address=message.address, text=message.text)
@@ -388,7 +389,6 @@ class SlackBridge(ChatBridgeBase):
             await self._socket_client.connect()
             # Block forever — connection lifetime is tied to the asyncio
             # task, which gets cancelled in shutdown().
-            import asyncio
             await asyncio.Future()
         except asyncio.CancelledError:
             try:
@@ -429,36 +429,37 @@ class SlackBridge(ChatBridgeBase):
 
     @staticmethod
     async def _call_web_api(method: str, payload: dict[str, Any], *, bot_token: str) -> dict[str, Any]:
-        """Synchronous urllib call wrapped in to_thread. v2 can swap to httpx.
+        """Await one Slack Web API call; returns the parsed JSON body.
 
-        Maps 429/5xx ``HTTPError`` to :class:`ConnectionError` via
-        :func:`channels.bridge.raise_if_retryable` so the bridge's
-        ``send_with_retry`` wrapper kicks in on transient platform errors.
+        Awaited directly via httpx (not a blocking urlopen in a worker
+        thread) so the call is cancellable — a send in flight at shutdown
+        no longer pins the process. Network-transport failures and
+        unparseable 429/5xx responses are raised as :class:`ConnectionError`
+        so the bridge's ``send_with_retry`` wrapper kicks in. Slack also
+        encodes transient errors as a 200 ``{"ok": false, ...}`` body —
+        :meth:`send_text` maps those.
         """
-        import asyncio
-        from urllib.error import HTTPError as _HTTPError
+        from channels.bridge import RETRYABLE_HTTP_STATUS
 
-        from channels.bridge import raise_if_retryable
-
-        body = json.dumps(payload).encode("utf-8")
-        req = URLRequest(
-            f"{SLACK_API_BASE}/{method}",
-            data=body,
-            headers={
-                "Authorization": f"Bearer {bot_token}",
-                "Content-Type": "application/json; charset=utf-8",
-            },
-        )
-
-        def _do() -> dict[str, Any]:
-            try:
-                with urlopen(req, timeout=15) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
-            except _HTTPError as exc:
-                raise_if_retryable(exc)
-                raise
-
-        return await asyncio.to_thread(_do)
+        try:
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(
+                    f"{SLACK_API_BASE}/{method}",
+                    json=payload,
+                    headers={"Authorization": f"Bearer {bot_token}"},
+                )
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise ConnectionError(f"slack {method} transport error: {exc!r}") from exc
+        try:
+            return resp.json()
+        except ValueError as exc:
+            if resp.status_code in RETRYABLE_HTTP_STATUS:
+                raise ConnectionError(
+                    f"slack {method} HTTP {resp.status_code} (no JSON body)"
+                ) from exc
+            raise RuntimeError(
+                f"slack {method} HTTP {resp.status_code}: {resp.text[:200]}"
+            ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -680,17 +681,17 @@ async def slack_oauth_callback(
         )
 
     redirect_uri = saved.get("redirect_uri") or ""
-    body = urlencode(
-        {"code": code, "client_id": cid, "client_secret": csec, "redirect_uri": redirect_uri}
-    ).encode("utf-8")
-    req = URLRequest(SLACK_TOKEN_URL, data=body)
-
-    import asyncio
-    def _do() -> dict[str, Any]:
-        with urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
-
-    result = await asyncio.to_thread(_do)
+    async with httpx.AsyncClient(timeout=15.0) as client:
+        resp = await client.post(
+            SLACK_TOKEN_URL,
+            data={
+                "code": code,
+                "client_id": cid,
+                "client_secret": csec,
+                "redirect_uri": redirect_uri,
+            },
+        )
+    result = resp.json()
     if not result.get("ok"):
         return Response(
             content=html_lib.escape(f"Slack OAuth failed: {result.get('error', 'unknown')}"),

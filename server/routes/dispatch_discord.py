@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import asyncio
 import html as html_lib
+import httpx
 import json
 import logging
 import os
@@ -44,7 +45,6 @@ import secrets as secrets_mod
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlencode
-from urllib.request import Request as URLRequest, urlopen
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
@@ -101,8 +101,8 @@ class DiscordBridge(ChatBridgeBase):
 
     Uses the Gateway for ingress (outbound WebSocket via :mod:`discord`) so
     no public URL is needed. Outbound replies hit the REST API directly via
-    :func:`urllib.request.urlopen` for consistency with the other adapters
-    and to avoid pulling in another HTTP client.
+    an async :mod:`httpx` client — awaited, so a send in flight at shutdown
+    is cancellable rather than pinning the process in a worker thread.
     """
 
     max_text_length = DISCORD_MAX_TEXT
@@ -158,6 +158,7 @@ class DiscordBridge(ChatBridgeBase):
                 pass
         self._gateway_task = None
         self._setup = None
+        await self.drain_inbound_tasks()
 
     async def deliver(self, message: OutboundMessage) -> None:
         await self.chunked_send(address=message.address, text=message.text)
@@ -399,12 +400,7 @@ class DiscordBridge(ChatBridgeBase):
         bot_token = self.require_secret("bot_token")
 
         payload: dict[str, Any] = {"content": text}
-        result = await asyncio.to_thread(
-            self._post_message,
-            bot_token,
-            address.platform_id,
-            payload,
-        )
+        result = await self._post_message(bot_token, address.platform_id, payload)
         # A rate-limited Discord response carries ``retry_after`` and either
         # ``code: 0`` with ``global: bool`` or one of the bucket codes.
         if "retry_after" in result:
@@ -423,38 +419,38 @@ class DiscordBridge(ChatBridgeBase):
         return str(msg_id)
 
     @staticmethod
-    def _post_message(bot_token: str, channel_id: str, payload: dict) -> dict:
-        """Synchronous ``POST /channels/{id}/messages`` (run via ``asyncio.to_thread``).
+    async def _post_message(bot_token: str, channel_id: str, payload: dict) -> dict:
+        """Await one ``POST /channels/{id}/messages``; returns the JSON body.
 
-        Returns Discord's JSON body for both 2xx and 4xx — Discord encodes
-        errors as ``{"code": ..., "message": ...}``. Re-raises 429/5xx
-        ``HTTPError`` as :class:`ConnectionError` so the bridge's
-        send-with-retry wrapper kicks in on transient platform errors.
+        Awaited directly via httpx so the call is cancellable — a send in
+        flight at shutdown no longer pins the process. Discord encodes
+        errors as ``{"code": ..., "message": ...}`` with a 4xx status, so
+        the body is returned for both 2xx and 4xx. Network-transport
+        failures and unparseable 429/5xx responses are raised as
+        :class:`ConnectionError` so the bridge's send-with-retry kicks in.
         """
-        from urllib.error import HTTPError as _HTTPError
-
-        from channels.bridge import raise_if_retryable
+        from channels.bridge import RETRYABLE_HTTP_STATUS
 
         url = f"{DISCORD_API_BASE}/channels/{channel_id}/messages"
-        body = json.dumps(payload).encode("utf-8")
-        req = URLRequest(
-            url,
-            data=body,
-            headers={
-                "Authorization": f"Bot {bot_token}",
-                "Content-Type": "application/json; charset=utf-8",
-                "User-Agent": "AntonCoWork (https://github.com/mindsdb/cowork, 1.0)",
-            },
-        )
+        headers = {
+            "Authorization": f"Bot {bot_token}",
+            "User-Agent": "AntonCoWork (https://github.com/mindsdb/cowork, 1.0)",
+        }
         try:
-            with urlopen(req, timeout=15) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except _HTTPError as exc:
-            raise_if_retryable(exc)
-            try:
-                return json.loads(exc.read().decode("utf-8"))
-            except Exception:
-                raise exc from None
+            async with httpx.AsyncClient(timeout=15.0) as client:
+                resp = await client.post(url, json=payload, headers=headers)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise ConnectionError(f"discord send transport error: {exc!r}") from exc
+        try:
+            return resp.json()
+        except ValueError as exc:
+            if resp.status_code in RETRYABLE_HTTP_STATUS:
+                raise ConnectionError(
+                    f"discord send HTTP {resp.status_code} (no JSON body)"
+                ) from exc
+            raise RuntimeError(
+                f"discord send HTTP {resp.status_code}: {resp.text[:200]}"
+            ) from exc
 
 
 # ---------------------------------------------------------------------------

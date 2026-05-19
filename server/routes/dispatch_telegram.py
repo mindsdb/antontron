@@ -36,13 +36,13 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import httpx
 import json
 import logging
 import os
 import secrets as secrets_mod
 from datetime import datetime, timezone
 from typing import Any
-from urllib.request import Request as URLRequest, urlopen
 
 
 def hmac_compare(a: str, b: str) -> bool:
@@ -149,6 +149,8 @@ class TelegramBridge(ChatBridgeBase):
             )
 
     async def shutdown(self) -> None:
+        # Stop ingress first so no new inbound tasks get scheduled, then
+        # drain the ones already in flight.
         if self._poll_task is not None and not self._poll_task.done():
             self._poll_task.cancel()
             try:
@@ -157,6 +159,7 @@ class TelegramBridge(ChatBridgeBase):
                 pass
         self._poll_task = None
         self._setup = None
+        await self.drain_inbound_tasks()
 
     async def open_dm(self, user_handle: str) -> PlatformAddress:
         """Telegram: the numeric chat_id IS the DM address.
@@ -248,49 +251,88 @@ class TelegramBridge(ChatBridgeBase):
         bot_token = self.secrets.get("bot_token") or ""
         logger.info("Telegram long-poll loop starting (account=%s)", self.account)
 
-        while True:
-            try:
-                updates = await asyncio.to_thread(
-                    self._fetch_updates, bot_token, self._offset
-                )
-                events = self._updates_to_events(updates)
-                for event in events:
-                    if self.is_duplicate_inbound(event.message.id):
-                        continue
-                    if self._setup is not None:
-                        try:
-                            await self._setup.on_inbound(event)
-                        except Exception:
-                            logger.exception(
-                                "router.on_inbound raised for telegram update"
-                            )
-                # Advance offset past the last consumed update.
-                if updates:
-                    self._offset = max(u["update_id"] for u in updates) + 1
+        # One async client for the loop's lifetime. getUpdates is awaited
+        # directly (not via asyncio.to_thread) so cancelling the poll task
+        # on shutdown closes the socket immediately — a blocking urlopen in
+        # a worker thread cannot be interrupted and would pin the process
+        # at interpreter exit until Telegram's ~30s long-poll returned.
+        # Read timeout must outlast the long-poll hold; connect stays short.
+        timeout = httpx.Timeout(LONG_POLL_TIMEOUT + 10, connect=10.0)
+        async with httpx.AsyncClient(
+            timeout=timeout,
+            headers={"User-Agent": "AntonCoWork/1.0"},
+        ) as client:
+            while True:
+                try:
+                    updates = await self._fetch_updates(client, bot_token, self._offset)
+                    events = self._updates_to_events(updates)
+                    for event in events:
+                        if self.is_duplicate_inbound(event.message.id):
+                            continue
+                        if self._setup is not None:
+                            try:
+                                await self._setup.on_inbound(event)
+                            except Exception:
+                                logger.exception(
+                                    "router.on_inbound raised for telegram update"
+                                )
+                    # Advance offset past the last consumed update.
+                    if updates:
+                        self._offset = max(u["update_id"] for u in updates) + 1
 
-            except asyncio.CancelledError:
-                logger.info(
-                    "Telegram long-poll loop cancelled (account=%s)", self.account
-                )
-                raise
-            except Exception:
-                logger.exception(
-                    "Telegram long-poll error (account=%s), retrying in %.0fs",
-                    self.account,
-                    POLL_ERROR_BACKOFF,
-                )
-                await asyncio.sleep(POLL_ERROR_BACKOFF)
+                except asyncio.CancelledError:
+                    logger.info(
+                        "Telegram long-poll loop cancelled (account=%s)", self.account
+                    )
+                    raise
+                except httpx.HTTPStatusError as exc:
+                    status = exc.response.status_code
+                    # 401/403/404 mean a bad/revoked bot token — retrying
+                    # forever just spams logs every few seconds. Stop the
+                    # loop and let the operator re-configure.
+                    if status in (401, 403, 404):
+                        logger.error(
+                            "Telegram long-poll permanent failure (account=%s, "
+                            "HTTP %d) — stopping loop; check the bot token",
+                            self.account,
+                            status,
+                        )
+                        return
+                    logger.warning(
+                        "Telegram long-poll HTTP %d (account=%s), retrying in %.0fs",
+                        status,
+                        self.account,
+                        POLL_ERROR_BACKOFF,
+                    )
+                    await asyncio.sleep(POLL_ERROR_BACKOFF)
+                except Exception:
+                    logger.exception(
+                        "Telegram long-poll error (account=%s), retrying in %.0fs",
+                        self.account,
+                        POLL_ERROR_BACKOFF,
+                    )
+                    await asyncio.sleep(POLL_ERROR_BACKOFF)
 
-    def _fetch_updates(self, bot_token: str, offset: int) -> list[dict]:
-        """Synchronous getUpdates call (run via ``asyncio.to_thread``)."""
-        url = (
-            f"{TELEGRAM_API_BASE}{bot_token}/getUpdates"
-            f"?offset={offset}&timeout={LONG_POLL_TIMEOUT}"
-            f'&allowed_updates=%5B%22message%22%5D'  # URL-encoded ["message"]
+    async def _fetch_updates(
+        self, client: httpx.AsyncClient, bot_token: str, offset: int
+    ) -> list[dict]:
+        """Await one getUpdates long-poll call.
+
+        Raises :class:`httpx.HTTPStatusError` on a non-2xx status (the
+        caller distinguishes permanent auth failures from transient ones)
+        and :class:`RuntimeError` on a 200 ``ok: false`` body.
+        """
+        url = f"{TELEGRAM_API_BASE}{bot_token}/getUpdates"
+        resp = await client.get(
+            url,
+            params={
+                "offset": offset,
+                "timeout": LONG_POLL_TIMEOUT,
+                "allowed_updates": '["message"]',
+            },
         )
-        req = URLRequest(url, headers={"User-Agent": "AntonCoWork/1.0"})
-        with urlopen(req, timeout=LONG_POLL_TIMEOUT + 10) as resp:
-            data = json.loads(resp.read().decode("utf-8"))
+        resp.raise_for_status()
+        data = resp.json()
         if not data.get("ok"):
             raise RuntimeError(f"getUpdates failed: {data.get('description', data)}")
         return data.get("result", [])
@@ -389,15 +431,13 @@ class TelegramBridge(ChatBridgeBase):
             "parse_mode": "Markdown",
         }
 
-        result = await asyncio.to_thread(self._call_send_message, bot_token, payload)
+        result = await self._call_send_message(bot_token, payload)
         if not result.get("ok"):
             # Markdown parse errors are common (e.g. unbalanced backticks).
             # Retry once without parse_mode before giving up.
             if result.get("error_code") == 400:
                 payload.pop("parse_mode", None)
-                result = await asyncio.to_thread(
-                    self._call_send_message, bot_token, payload
-                )
+                result = await self._call_send_message(bot_token, payload)
         if not result.get("ok"):
             code = result.get("error_code")
             if code in (420, 429) or (isinstance(code, int) and 500 <= code < 600):
@@ -411,38 +451,39 @@ class TelegramBridge(ChatBridgeBase):
         return str((result.get("result") or {}).get("message_id", ""))
 
     @staticmethod
-    def _call_send_message(bot_token: str, payload: dict) -> dict:
-        """Synchronous ``sendMessage`` call (run via ``asyncio.to_thread``).
+    async def _call_send_message(bot_token: str, payload: dict) -> dict:
+        """Await one ``sendMessage`` call; returns Telegram's JSON body.
 
-        Returns Telegram's JSON body for both 2xx and 4xx — Telegram encodes
-        errors as ``{"ok": false, "error_code": ..., "description": ...}``.
-        Re-raises 429/5xx ``HTTPError`` as :class:`ConnectionError` so the
-        bridge's send-with-retry wrapper kicks in on transient platform
-        errors.
+        Telegram encodes errors as ``{"ok": false, "error_code": ...,
+        "description": ...}`` with either a 2xx or 4xx status, so the body
+        is returned for both and the caller maps it. Network-transport
+        failures and unparseable 429/5xx responses are raised as
+        :class:`ConnectionError` so the bridge's send-with-retry wrapper
+        kicks in on transient platform errors.
         """
-        from urllib.error import HTTPError as _HTTPError
-
-        from channels.bridge import raise_if_retryable
+        from channels.bridge import RETRYABLE_HTTP_STATUS
 
         url = f"{TELEGRAM_API_BASE}{bot_token}/sendMessage"
-        body = json.dumps(payload).encode("utf-8")
-        req = URLRequest(
-            url,
-            data=body,
-            headers={
-                "Content-Type": "application/json; charset=utf-8",
-                "User-Agent": "AntonCoWork/1.0",
-            },
-        )
         try:
-            with urlopen(req, timeout=15) as resp:
-                return json.loads(resp.read().decode("utf-8"))
-        except _HTTPError as exc:
-            raise_if_retryable(exc)
-            try:
-                return json.loads(exc.read().decode("utf-8"))
-            except Exception:
-                raise exc from None
+            async with httpx.AsyncClient(
+                timeout=15.0,
+                headers={"User-Agent": "AntonCoWork/1.0"},
+            ) as client:
+                resp = await client.post(url, json=payload)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            raise ConnectionError(
+                f"telegram sendMessage transport error: {exc!r}"
+            ) from exc
+        try:
+            return resp.json()
+        except ValueError as exc:
+            if resp.status_code in RETRYABLE_HTTP_STATUS:
+                raise ConnectionError(
+                    f"telegram sendMessage HTTP {resp.status_code} (no JSON body)"
+                ) from exc
+            raise RuntimeError(
+                f"telegram sendMessage HTTP {resp.status_code}: {resp.text[:200]}"
+            ) from exc
 
     # ------------------------------------------------------------------
     # Webhook registration helpers
@@ -491,9 +532,7 @@ class TelegramBridge(ChatBridgeBase):
             "drop_pending_updates": False,
             "secret_token": self._ensure_secret_token(),
         }
-        result = await asyncio.to_thread(
-            self._call_api, bot_token, "setWebhook", payload
-        )
+        result = await self._call_api(bot_token, "setWebhook", payload)
         if not result.get("ok"):
             logger.error(
                 "Failed to register Telegram webhook at %s: %s",
@@ -507,26 +546,22 @@ class TelegramBridge(ChatBridgeBase):
         """Remove any previously registered webhook so long-polling works."""
         bot_token = self.secrets.get("bot_token") or ""
         try:
-            await asyncio.to_thread(
-                self._call_api, bot_token, "deleteWebhook", {"drop_pending_updates": False}
+            await self._call_api(
+                bot_token, "deleteWebhook", {"drop_pending_updates": False}
             )
         except Exception:
             logger.debug("deleteWebhook failed (non-fatal)", exc_info=True)
 
     @staticmethod
-    def _call_api(bot_token: str, method: str, payload: dict) -> dict:
+    async def _call_api(bot_token: str, method: str, payload: dict) -> dict:
+        """Await one Telegram Bot API call (setWebhook / deleteWebhook)."""
         url = f"{TELEGRAM_API_BASE}{bot_token}/{method}"
-        body = json.dumps(payload).encode("utf-8")
-        req = URLRequest(
-            url,
-            data=body,
-            headers={
-                "Content-Type": "application/json; charset=utf-8",
-                "User-Agent": "AntonCoWork/1.0",
-            },
-        )
-        with urlopen(req, timeout=15) as resp:
-            return json.loads(resp.read().decode("utf-8"))
+        async with httpx.AsyncClient(
+            timeout=15.0,
+            headers={"User-Agent": "AntonCoWork/1.0"},
+        ) as client:
+            resp = await client.post(url, json=payload)
+        return resp.json()
 
 
 # ---------------------------------------------------------------------------
@@ -734,7 +769,7 @@ async def telegram_put_config(patch: TelegramConfigPatch):
     )
     if needs_username_lookup:
         try:
-            me = await asyncio.to_thread(_telegram_get_me, effective_token)
+            me = await _telegram_get_me(effective_token)
             resolved = (me.get("username") or "").strip()
             if resolved:
                 writes[TELEGRAM_BOT_USERNAME_KEY] = resolved
@@ -750,16 +785,19 @@ async def telegram_put_config(patch: TelegramConfigPatch):
     return await telegram_get_config()
 
 
-def _telegram_get_me(bot_token: str) -> dict:
-    """Synchronous getMe call — returns the ``result`` dict on success.
+async def _telegram_get_me(bot_token: str) -> dict:
+    """Await a getMe call — returns the ``result`` dict on success.
 
     Raises if Telegram returns ``ok: false`` so the caller can decide whether
     to surface the failure or swallow it (auto-username lookup swallows it).
     """
     url = f"{TELEGRAM_API_BASE}{bot_token}/getMe"
-    req = URLRequest(url, headers={"User-Agent": "AntonCoWork/1.0"})
-    with urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    async with httpx.AsyncClient(
+        timeout=10.0,
+        headers={"User-Agent": "AntonCoWork/1.0"},
+    ) as client:
+        resp = await client.get(url)
+    data = resp.json()
     if not data.get("ok"):
         raise RuntimeError(f"getMe failed: {data.get('description', data)}")
     return data.get("result") or {}

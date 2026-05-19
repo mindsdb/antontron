@@ -130,6 +130,7 @@ class WhatsAppBridge(ChatBridgeBase):
 
     async def shutdown(self) -> None:
         self._setup = None
+        await self.drain_inbound_tasks()
 
     async def open_dm(self, user_handle: str) -> PlatformAddress:
         """WhatsApp: the user's E.164 phone number IS the chat address.

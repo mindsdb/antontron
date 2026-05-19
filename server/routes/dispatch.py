@@ -19,6 +19,7 @@ Out of scope here (added in later steps):
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -197,7 +198,6 @@ async def start_dispatch() -> None:
     except Exception:
         logger.exception("channel adapter init failed; dispatch will run without channels")
 
-    import asyncio
     _delivery_task = asyncio.create_task(
         router.run_delivery_loop(),
         name="dispatch-delivery-loop",
@@ -242,11 +242,6 @@ async def _noop_metadata(addr: Any, meta: dict) -> None:
 
 async def _noop_action(response: Any) -> None:
     """Default ChannelSetup.on_action_response — action cards are step-6 work."""
-
-
-# Asyncio import here so stop_dispatch can use CancelledError without a top-level
-# circular reliance during partial-import test scenarios.
-import asyncio
 
 
 # ---------------------------------------------------------------------------

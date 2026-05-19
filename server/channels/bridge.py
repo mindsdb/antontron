@@ -313,6 +313,35 @@ class ChatBridgeBase(ABC):
                 self.channel_type,
             )
 
+    async def drain_inbound_tasks(self, *, timeout: float = 3.0) -> None:
+        """Cancel and await any in-flight inbound routing tasks.
+
+        Call from a bridge's ``shutdown()`` *after* the ingress (socket /
+        poll / webhook) is closed so no new tasks are scheduled. Without
+        this, an ``on_inbound`` task spawned by an event that arrived
+        moments before shutdown is silently abandoned mid-run — and may
+        touch the dispatch repo after it has been closed. Best-effort:
+        tasks that ignore cancellation past ``timeout`` are logged and
+        left behind rather than blocking shutdown indefinitely.
+        """
+        tasks = list(self._inbound_tasks)
+        if not tasks:
+            return
+        for task in tasks:
+            task.cancel()
+        try:
+            await asyncio.wait_for(
+                asyncio.gather(*tasks, return_exceptions=True),
+                timeout=timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "%s: %d inbound task(s) did not stop within %.1fs of shutdown",
+                self.channel_type,
+                len(tasks),
+                timeout,
+            )
+
     # -----------------------------------------------------------------
     # Secret access — never default missing required fields to ""
     # -----------------------------------------------------------------
