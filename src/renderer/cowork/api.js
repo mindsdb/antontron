@@ -1139,8 +1139,44 @@ export async function fetchAttachments(projectName, sessionId, { ids } = {}) {
   return { attachments: raw };
 }
 
-export async function deleteAttachment(id) {
+export async function deleteAttachment(id, { projectName, sessionId } = {}) {
+  // Prefer the path-scoped route — the legacy `DELETE /attachments/{id}`
+  // looked up a JSON state file the upload code never populates and
+  // always 404'd. When the caller passes project + session, hit the
+  // new endpoint that walks the on-disk directory directly.
+  if (projectName && sessionId && id) {
+    const enc = encodeURIComponent;
+    return req(`/attachments/${enc(projectName)}/${enc(sessionId)}/${enc(id)}`, { method: 'DELETE' });
+  }
+  // Back-compat — kept so any older call site that hasn't migrated
+  // still hits the original route (and gets the same 404 it always
+  // did, surfacing the problem rather than failing silently).
   return req(`/attachments/${encodeURIComponent(id)}`, { method: 'DELETE' });
+}
+
+/** Absolute URL to the attachment's underlying file, served inline so
+ * the browser's default handler (image / pdf / text preview) takes
+ * over when the row is clicked. Works in both Electron and the web
+ * SPA — `host.openExternal(url)` does the right thing for each. */
+export function attachmentRawUrl(projectName, sessionId, attachmentId) {
+  if (!projectName || !sessionId || !attachmentId) return null;
+  const enc = encodeURIComponent;
+  return `${BASE}/attachments/${enc(projectName)}/${enc(sessionId)}/${enc(attachmentId)}/raw`;
+}
+
+/** Promote a task upload to a project-level file. Returns
+ * `{ ok, project_path, absolute_path }` on success. The client must
+ * refresh BOTH the task uploads list and the project files list — the
+ * file moves out of one and into the other on disk. */
+export async function moveAttachmentToProject(projectName, sessionId, attachmentId) {
+  if (!projectName || !sessionId || !attachmentId) {
+    throw new Error('projectName, sessionId, and attachmentId are required.');
+  }
+  const enc = encodeURIComponent;
+  return req(
+    `/attachments/${enc(projectName)}/${enc(sessionId)}/${enc(attachmentId)}/move-to-project`,
+    { method: 'POST' },
+  );
 }
 
 // ─── Search, Pins, Schedules ───────────────────────────────────────────────

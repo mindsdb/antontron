@@ -262,16 +262,52 @@ function removeThinkingPlaceholder(messages) {
   return messages.filter((m) => !(m.role === 'activity' && m.placeholder));
 }
 
-function withThinkingPlaceholder(messages) {
+function withThinkingPlaceholder(messages, opts = {}) {
+  // Caller-supplied label so the new-task path can read "Creating
+  // task…" while a reply uses the generic "Thinking…". Both the
+  // activity placeholder (fallback render in ChatView) and the
+  // `_streaming` stub (primary render via the existing streaming
+  // branch) carry the same string, so whichever lands in the
+  // viewport reads consistently.
+  const label = opts.label || 'Thinking…';
+  // Two rows:
+  //   1. The activity placeholder — kept so any code path that
+  //      consumes it (rail Progress card today, future surfaces) sees
+  //      the "user just sent" signal.
+  //   2. A `_streaming` stub — picked up by ChatView's existing
+  //      streaming render block (`!streamingMsg.steps?.length &&
+  //      !streamingMsg.content` branch), which renders an animated
+  //      cursor + label inline below the user's message. Without
+  //      this, the chat scroll is silent between send and the first
+  //      SSE event — fine on a warm session (~sub-second) but
+  //      painful on a brand-new task where anton's bootstrap can
+  //      take 20-30s. The stub gets stripped + replaced by the real
+  //      streaming row on the first `flushStreamingMessage` call,
+  //      at which point `_placeholderLabel` is gone and the label
+  //      naturally falls back to the default "Thinking…".
   return [
     ...removeThinkingPlaceholder(stripStreaming(messages)),
     {
       role: 'activity',
-      content: THINKING_PLACEHOLDER,
+      content: label,
       kind: 'placeholder',
       phase: 'reasoning',
       state: 'running',
       placeholder: true,
+      _label: label,
+    },
+    {
+      role: '_streaming',
+      content: '',
+      steps: [],
+      startedAt: Date.now(),
+      // 'thinking' (not 'starting') so PhaseProgress treats the turn
+      // as `isInFlight` and renders the Thinking phase row in the
+      // rail — otherwise the card falls into its "Steps appear here
+      // while Anton works" placeholder branch, which contradicts
+      // the inline cursor in the chat scroll.
+      streamStatus: 'thinking',
+      _placeholderLabel: label,
     },
   ];
 }
@@ -2075,9 +2111,17 @@ function AppCore() {
         t.id === taskId
           ? {
               ...t,
-              messages: withThinkingPlaceholder([
-                { role: 'user', content: text, attachments: sendingAttachments },
-              ]),
+              messages: withThinkingPlaceholder(
+                [{ role: 'user', content: text, attachments: sendingAttachments }],
+                // New-task path: the placeholder phase is genuinely
+                // "spinning up the conversation" — anton-core has to
+                // boot the LLM session, attach memories, etc. — so
+                // calling it "Creating task…" is more truthful than
+                // "Thinking…". The reply path (handleSendInTask)
+                // uses the default label since the session is
+                // already warm by then.
+                { label: 'Creating task…' },
+              ),
             }
           : t,
       ));
@@ -2606,7 +2650,12 @@ function AppCore() {
     setPins((prev) => prev.filter((p) => p.id !== taskId));
     if (activeTaskId === taskId) {
       setActiveTaskId(null);
-      setRoute('home');
+      // Only fall back to home when we're *viewing* the task that
+      // just got deleted — leaving the chat view on a phantom id
+      // would be incoherent. From any other surface (project view,
+      // scheduled, settings, etc.) the user expects to stay where
+      // they were and just see the row disappear from the list.
+      if (route === 'task') setRoute('home');
     }
     // Skip the server call for tasks that never got persisted (still
     // wearing a tmp- id from before the first stream chunk arrived).
