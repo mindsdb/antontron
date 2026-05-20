@@ -306,6 +306,15 @@ class TelegramBridge(ChatBridgeBase):
                         POLL_ERROR_BACKOFF,
                     )
                     await asyncio.sleep(POLL_ERROR_BACKOFF)
+                except (httpx.TimeoutException, httpx.TransportError) as exc:
+                    # Stale TCP after sleep/NAT idle or Telegram flushing
+                    # slightly past our read budget. The timeout was the wait
+                    # — reconnect immediately without traceback noise.
+                    logger.info(
+                        "Telegram long-poll transient %s (account=%s); reconnecting",
+                        type(exc).__name__,
+                        self.account,
+                    )
                 except Exception:
                     logger.exception(
                         "Telegram long-poll error (account=%s), retrying in %.0fs",
