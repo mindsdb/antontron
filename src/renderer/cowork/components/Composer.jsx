@@ -74,10 +74,24 @@ export default function Composer({
   // and-resend on prior user messages; bump-based so repeated edits
   // of the same text still re-fill the input.
   prefill = null,
+  // Optional — when supplied, the project menu shows a "+ New project"
+  // row that swaps into an inline input on click. Receives `{ name }`
+  // and is expected to resolve to the created project record; we then
+  // call `onProjectChange` with it so the new project is pre-selected
+  // for the task being composed. When omitted, the row is hidden.
+  onCreateProject = null,
 }) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   const [openMenu, setOpenMenu] = useState(null);
+  /** When the user clicks "+ New project" in the project menu, the row
+      flips into an inline text input. Track edit state + busy + error
+      separately from the rest of the composer so the input keeps its
+      own lifecycle (focus on flip, clear on close). */
+  const [creatingProject, setCreatingProject] = useState(false);
+  const [newProjectBusy, setNewProjectBusy] = useState(false);
+  const [newProjectError, setNewProjectError] = useState('');
+  const newProjectInputRef = useRef(null);
   /** Attach menu opens above the composer by default; flip down when clipped (e.g. project view composer at scroll top). */
   const [attachMenuBelow, setAttachMenuBelow] = useState(false);
   const [connectorsOpen, setConnectorsOpen] = useState(false);
@@ -264,6 +278,49 @@ export default function Composer({
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  // When the project menu closes (or flips to another menu), drop any
+  // half-typed new-project state so reopening lands back on the "+ New
+  // project" affordance rather than an empty input. When the input is
+  // first revealed, focus it on the next frame so the keyboard target
+  // matches what the user just clicked.
+  useEffect(() => {
+    if (openMenu !== 'project') {
+      setCreatingProject(false);
+      setNewProjectBusy(false);
+      setNewProjectError('');
+      return;
+    }
+    if (!creatingProject) return;
+    const id = requestAnimationFrame(() => {
+      newProjectInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(id);
+  }, [openMenu, creatingProject]);
+
+  const submitNewProject = async () => {
+    if (!onCreateProject || newProjectBusy) return;
+    const next = (newProjectInputRef.current?.value || '').trim();
+    if (!next) {
+      setCreatingProject(false);
+      return;
+    }
+    setNewProjectBusy(true);
+    setNewProjectError('');
+    try {
+      const created = await onCreateProject({ name: next });
+      // Pre-select the new project for the task being composed; the
+      // parent passes back the created record (or a `{ name }` stub),
+      // either of which onProjectChange accepts.
+      if (created) onProjectChange?.(created);
+      setCreatingProject(false);
+      setOpenMenu(null);
+    } catch (e) {
+      setNewProjectError(e?.message || 'Could not create project.');
+    } finally {
+      setNewProjectBusy(false);
+    }
+  };
 
   const updateAttachPlacement = () => {
     const anchor = attachAnchorRef.current;
@@ -737,11 +794,80 @@ export default function Composer({
               {project?.name === p.name && <span style={{ color: 'var(--primary-700)' }}>{Ico.check(14)}</span>}
             </button>
           ))}
-          <div style={{ height: 1, background: 'var(--border-0)', margin: '4px 0' }} />
-          <button className="menu-item" onClick={() => { onProjectChange(null); setOpenMenu(null); }}>
-            <span style={{ display: 'inline-flex', color: 'var(--frost-700)' }}>{Ico.plus(14)}</span>
-            <span>No project</span>
-          </button>
+          {onCreateProject && (
+            <>
+              <div style={{ height: 1, background: 'var(--border-0)', margin: '4px 0' }} />
+              {creatingProject ? (
+                // Inline create row — replaces the "+ New project"
+                // menu item while editing. Enter creates+selects+
+                // closes the menu; Escape cancels back to the row.
+                // Blur commits if there's a value, otherwise cancels —
+                // same convention as the inline rename on project
+                // cards (ProjectsView NewProjectCard) so muscle memory
+                // carries across surfaces.
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '4px 8px' }}
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span style={{ display: 'inline-flex', color: 'var(--frost-700)' }}>{Ico.folder(14)}</span>
+                    <input
+                      ref={newProjectInputRef}
+                      type="text"
+                      placeholder="Project name"
+                      disabled={newProjectBusy}
+                      spellCheck={false}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      onKeyDown={(e) => {
+                        e.stopPropagation();
+                        if (e.key === 'Enter') {
+                          e.preventDefault();
+                          submitNewProject();
+                        } else if (e.key === 'Escape') {
+                          e.preventDefault();
+                          setCreatingProject(false);
+                        }
+                      }}
+                      onBlur={() => {
+                        // Skip the blur-commit while the create call
+                        // is in flight — the request itself will close
+                        // the menu, and a blur-fired second submit
+                        // would race with it.
+                        if (newProjectBusy) return;
+                        const val = (newProjectInputRef.current?.value || '').trim();
+                        if (val) submitNewProject();
+                        else setCreatingProject(false);
+                      }}
+                      style={{
+                        flex: 1, minWidth: 0,
+                        fontSize: 13, color: 'var(--ink)',
+                        background: 'var(--surface-2)',
+                        border: '1px solid var(--line)',
+                        borderRadius: 6,
+                        padding: '4px 8px',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
+                  <div style={{ fontSize: 10.5, color: newProjectError ? 'var(--danger)' : 'var(--frost-600)', paddingLeft: 22 }}>
+                    {newProjectError || (newProjectBusy ? 'Creating…' : '↵ create · esc cancel')}
+                  </div>
+                </div>
+              ) : (
+                <button
+                  className="menu-item"
+                  onClick={() => {
+                    setNewProjectError('');
+                    setCreatingProject(true);
+                  }}
+                >
+                  <span style={{ display: 'inline-flex', color: 'var(--frost-700)' }}>{Ico.plus(14)}</span>
+                  <span>New project</span>
+                </button>
+              )}
+            </>
+          )}
         </div>
       )}
 

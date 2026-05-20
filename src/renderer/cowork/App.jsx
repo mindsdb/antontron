@@ -2444,7 +2444,7 @@ function AppCore() {
     setSettings((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleCreateProject = async ({ name, _alreadyCreated }) => {
+  const handleCreateProject = async ({ name, _alreadyCreated, _inline }) => {
     // The new-project modal does the create + anton.md write +
     // file uploads in one atomic flow; when it calls back here it
     // sets `_alreadyCreated` so we skip the duplicate POST and just
@@ -2453,13 +2453,19 @@ function AppCore() {
       ? { name }
       : await createProject(name);
     const latest = await fetchProjects();
+    let selected = project;
     if (Array.isArray(latest)) {
       setProjects(latest);
-      const selected = latest.find((p) => p.name === project.name) || project;
+      selected = latest.find((p) => p.name === project.name) || project;
       setSelectedProject(selected);
     }
-    setRoute('projects');
-    return project;
+    // `_inline` is set by the home composer's "+ New project" row —
+    // the user is mid-task and shouldn't be teleported to the
+    // projects grid just because they named a project for the
+    // pending prompt. All other call sites (the modal, the projects
+    // grid card) already live on or want to land on /projects.
+    if (!_inline) setRoute('projects');
+    return selected;
   };
 
   const handlePinTask = async (task) => {
@@ -2898,6 +2904,7 @@ function AppCore() {
             onRemoveAttachment={handleRemoveAttachment}
             disabledConnections={composerDisabledConnections}
             onUpdateConnectorMute={handleComposerConnectorMute}
+            onCreateProject={(args) => handleCreateProject({ ...args, _inline: true })}
             configReady={health.config_ready ?? settings.configReady}
             configError={health.config_error ?? settings.configError}
             onOpenSettings={() => setRoute('settings')}
