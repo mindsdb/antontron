@@ -23,6 +23,7 @@ import {
   unpublishArtifact,
 } from '../../api';
 import { ArtifactViewer } from '../artifact';
+import { ConfirmModal } from '../ConfirmModal';
 import { host } from '../../../platform/host';
 
 // Map a file extension to a glyph from `Icons.jsx`. Buckets group
@@ -162,6 +163,10 @@ export function WorkingFolderLive({ project, isStreaming }) {
   const [menuPos, setMenuPos] = useState(null);
   const [busyPath, setBusyPath] = useState(null);
   const [rowError, setRowError] = useState('');
+  // Pending artifact-delete payload — drives the ConfirmModal, same
+  // lifted-state pattern as the project-files / task-uploads deletes
+  // in ContextCard and the task / project deletes in App.jsx.
+  const [pendingDeleteArtifact, setPendingDeleteArtifact] = useState(null);
   const menuRef = useRef(null);
   // Map of artifact.path → kebab button DOM node. Stored in a ref
   // so renders don't replace the map; cleaned up implicitly when
@@ -262,9 +267,9 @@ export function WorkingFolderLive({ project, isStreaming }) {
     setBusyPath(a.path);
     setRowError('');
     // Optimistic remove — mirrors the Project Files / Task Uploads
-    // deletes so the row vanishes the same frame the user clicks.
-    // trashItem is reversible (file lands in OS Trash), so no
-    // confirmation modal — same call shape ArtifactViewer.onTrash uses.
+    // deletes so the row vanishes the same frame the user confirms.
+    // Reached only after the ConfirmModal is accepted (see the
+    // menu's Delete item, which sets `pendingDeleteArtifact`).
     const previous = a;
     setRows((prev) => prev.filter((r) => r.path !== a.path));
     try {
@@ -385,7 +390,14 @@ export function WorkingFolderLive({ project, isStreaming }) {
                       else openMenuFor(a.path);
                     }}
                     className={clsx(
-                      'absolute inset-0 inline-flex items-center justify-center',
+                      // `justify-end` (not center) pins the kebab to
+                      // the right edge of the trailing slot so it sits
+                      // flush against the row's right margin — matching
+                      // where the project-files trash icon lands. The
+                      // artifact timestamp ("3h ago") is wider than the
+                      // project-file one ("3h"), so a centered kebab
+                      // floated noticeably left of the edge.
+                      'absolute inset-0 inline-flex items-center justify-end',
                       menuOpen ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100',
                       'transition-opacity rounded',
                       'text-ink-4 hover:text-ink',
@@ -466,7 +478,10 @@ export function WorkingFolderLive({ project, isStreaming }) {
                 onClick={(e) => {
                   e.stopPropagation();
                   setOpenMenuPath(null);
-                  onDeleteArtifact(a);
+                  // Open the confirm modal rather than deleting
+                  // immediately — matches the project files / task
+                  // uploads / task / project delete flows.
+                  setPendingDeleteArtifact(a);
                 }}
                 style={{ color: 'var(--danger)' }}
               >
@@ -478,6 +493,21 @@ export function WorkingFolderLive({ project, isStreaming }) {
         })(),
         document.body,
       )}
+
+      <ConfirmModal
+        open={!!pendingDeleteArtifact}
+        title={`Delete "${pendingDeleteArtifact?.title || pendingDeleteArtifact?.path?.split('/').pop() || 'artifact'}"?`}
+        message="The artifact will be moved to your Trash, so it's recoverable from there. It will disappear from this project's artifacts."
+        confirmLabel="Delete"
+        cancelLabel="Keep"
+        destructive
+        onClose={() => setPendingDeleteArtifact(null)}
+        onConfirm={() => {
+          const target = pendingDeleteArtifact;
+          setPendingDeleteArtifact(null);
+          if (target) onDeleteArtifact(target);
+        }}
+      />
 
       <ArtifactViewer
         open={!!previewArt}
